@@ -1,0 +1,92 @@
+# config/escalation.yaml — Escalation policy definitions
+#
+# IMPORTANT: This file lives in Git. Page by on-call ROLE (primary / secondary /
+# manager) rather than naming people, so changes to who is on-call never require
+# editing this file. Roles resolve to the current person via the generated
+# schedule (Schedule screen) at page time; PII stays in DynamoDB. A step may also
+# list explicit `contact_ids` as an escape hatch (e.g. a fixed vendor responder).
+#
+# Escalation policies define what happens after an alarm fires if no
+# acknowledgment arrives. Relay drives these as a state machine in DynamoDB with
+# durable deadline timers swept by the always-on container — no polling, no cron.
+#
+# Each policy is selected by routing.yaml via its `policy_id`. Steps are a 0-based
+# contiguous ladder (step_index 0, 1, 2, …). When a step's `timeout_minutes`
+# elapse with no ack, the engine advances to the next step; after the last step
+# the incident is marked ESCALATED.
+#
+# Step fields:
+#   step_index      0-based position in the ladder (must start at 0, contiguous)
+#   roles           on-call roles to page (resolved via the schedule at page time)
+#   contact_ids     explicit contacts to page regardless of schedule (optional)
+#   timeout_minutes minutes to wait for an ack before advancing to the next step
+#   notify_streams  which streams fire at this step: TEAM, CENTRAL, or both
+#
+# A step must page someone: at least one of `roles` or `contact_ids`.
+#
+# To copy: cp config/escalation.example.yaml config/escalation.yaml
+
+policies:
+
+  # -----------------------------------------------------------------------
+  # SEV1 — Critical / customer-impacting outage.
+  # Fastest path: short ack windows, escalates primary -> secondary ->
+  # manager, and pages CENTRAL (the war-room) from the second step on.
+  # -----------------------------------------------------------------------
+  - policy_id: pol-sev1
+    name: SEV1 Critical
+    team: platform
+    steps:
+      # Page primary on-call.
+      - step_index: 0
+        roles: [primary]
+        timeout_minutes: 5
+        notify_streams: [TEAM]
+      # Escalate to secondary (10 min elapsed); start notifying CENTRAL.
+      - step_index: 1
+        roles: [secondary]
+        timeout_minutes: 5
+        notify_streams: [TEAM, CENTRAL]
+      # Escalate to the engineering manager (20 min elapsed).
+      - step_index: 2
+        roles: [manager]
+        timeout_minutes: 10
+        notify_streams: [TEAM, CENTRAL]
+
+  # -----------------------------------------------------------------------
+  # SEV2 — Degraded / high impact. Longer ack windows; escalates to
+  # secondary then manager, CENTRAL from the manager step.
+  # -----------------------------------------------------------------------
+  - policy_id: pol-sev2
+    name: SEV2 High
+    team: platform
+    steps:
+      - step_index: 0
+        roles: [primary]
+        timeout_minutes: 15
+        notify_streams: [TEAM]
+      - step_index: 1
+        roles: [secondary]
+        timeout_minutes: 20
+        notify_streams: [TEAM]
+      - step_index: 2
+        roles: [manager]
+        timeout_minutes: 30
+        notify_streams: [TEAM, CENTRAL]
+
+  # -----------------------------------------------------------------------
+  # SEV3 — Warning / low impact. Team-stream only, long ack windows, no
+  # manager escalation. Pair with a routing rule that keeps it team-local.
+  # -----------------------------------------------------------------------
+  - policy_id: pol-sev3
+    name: SEV3 Warning
+    team: platform
+    steps:
+      - step_index: 0
+        roles: [primary]
+        timeout_minutes: 60
+        notify_streams: [TEAM]
+      - step_index: 1
+        roles: [secondary]
+        timeout_minutes: 120
+        notify_streams: [TEAM]

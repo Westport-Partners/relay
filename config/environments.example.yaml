@@ -1,0 +1,74 @@
+# config/environments.yaml — Environment namespace configuration
+#
+# Environments are HARD namespaces. A Dev alarm must never page the Prod on-call.
+# One Relay stack is deployed per environment/isolation-zone.
+#
+# Derivation priority at ingest:
+#   1. Explicit alarm tag: relay:environment
+#   2. name_convention_regex matched against alarm name
+#   3. account_environment_map (account_id -> env name)
+#   4. default_environment (flagged environment_inferred=true)
+#
+# Unknown environment names -> "unrouted" quarantine path (never silently dropped).
+#
+# To copy: cp config/environments.example.yaml config/environments.yaml
+
+environments:
+  - name: prod
+    ou_path: "o-xxxx/r-xxxx/ou-xxxx-prodid"
+    name_convention_regex: "(?i).*-prod-.*"
+
+  - name: preprod
+    ou_path: "o-xxxx/r-xxxx/ou-xxxx-preprodid"
+    name_convention_regex: "(?i).*-preprod-.*"
+
+  - name: dev
+    ou_path: "o-xxxx/r-xxxx/ou-xxxx-devid"
+    name_convention_regex: "(?i).*-dev-.*"
+
+  - name: test
+    ou_path: "o-xxxx/r-xxxx/ou-xxxx-testid"
+    name_convention_regex: "(?i).*-test-.*"
+
+account_environment_map:
+  "111111111111": prod
+  "222222222222": dev
+  "333333333333": test
+
+default_environment: dev
+
+# ---------------------------------------------------------------------------
+# Deployment infrastructure knobs (IaC-only — the running container ignores this).
+# relay-context.sh reads these and passes them as -c relay:* CDK context flags.
+#
+# PHZ-driven HTTPS:
+#   Set private_hosted_zone_id + private_hosted_zone_name to have the CDK stack
+#   issue an ACM cert and publish relay.<zone_name> into the private hosted zone.
+#   The ALB will serve the dashboard at https://relay.corp.example.internal.
+#
+# BYO cert:
+#   Set certificate_arn to an existing ACM certificate ARN (skips PHZ lookup).
+#
+# internet-facing ALB:
+#   Set internal_alb: false when the account has no VPN/peering and the dashboard
+#   must be reachable from the public internet (accepts a static IP allowlist at
+#   the security-group level instead of VPN).
+# ---------------------------------------------------------------------------
+deployment:
+  private_hosted_zone_id: "Z0123456789ABCDEFGHIJ"  # your Route53 PHZ ID
+  private_hosted_zone_name: "corp.example.internal"
+  alb_subdomain: relay              # → https://relay.corp.example.internal
+  certificate_arn: null             # set to override PHZ-derived cert
+  internal_alb: true                # true = private subnet; false = internet-facing
+
+# ---------------------------------------------------------------------------
+# UI authentication. After running scripts/relay-setup-oidc.sh, set mode: alb
+# and optionally restrict writes to a named list of OIDC identities.
+# ---------------------------------------------------------------------------
+auth:
+  mode: null                        # null | none | alb | dev
+  access_control:
+    enabled: true
+    allowed_users:
+      - "octocat"                   # GitHub username, email, or OIDC sub claim
+      - "monalisa"

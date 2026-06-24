@@ -1,0 +1,49 @@
+# config/catalog.yaml — Live westport demo catalog (flat list of OrgNodes)
+#
+# This catalog defines the Relay Platform hierarchy for the westport demo
+# deployment. The leaf node id "relay-node-demo" matches the COMPONENT_ID
+# resource tag on the deployed Node Lambda — that tag is the deployment join
+# key used by cloudwatch_source._derive_deployment_id (step 2 exact-id lookup).
+#
+# Metadata values can be:
+#   literal  — a plain string used as-is
+#   template — a ``${tag:TAG_NAME}`` expression resolved at incident time
+#              from the failing resource's AWS tags
+# When a template tag is absent the key is silently omitted (never raises).
+#
+# component_id, git_sha, and pipeline_url are sourced globally via hierarchy.yaml
+# deployment_defaults.tag_map and are NOT repeated here on the leaf node.
+
+nodes:
+  - id: pl-relay
+    name: Relay Platform
+    level: product_line
+    parent: null
+    description: "Relay incident management platform"
+    owner_ref: team-relay
+
+  - id: prod-relay-core
+    name: Relay Core
+    level: product
+    parent: pl-relay
+    description: "Core Relay signal ingestion and routing"
+    owner_ref: team-relay
+
+  - id: comp-relay-node
+    name: Relay Node
+    level: component
+    parent: prod-relay-core
+    description: "Per-team Relay Node (Lambda + DynamoDB stack)"
+
+  # Deployment leaf — id matches the COMPONENT_ID resource tag on the Node Lambda.
+  # component_id, git_sha, and pipeline_url come from hierarchy.yaml tag_map.
+  - id: relay-node-demo
+    name: relay-node-demo
+    level: deployment
+    parent: comp-relay-node
+    owner_ref: team-relay
+    metadata:
+      # Dynamic: resolved at incident time from the GITLAB_PROJECT_ID resource tag.
+      gitlab_project: "${tag:GITLAB_PROJECT_ID}"
+      region: us-east-1
+      runbook: "https://gitlab.com/westport/relay/-/blob/main/docs/RUNBOOK.md"

@@ -1,0 +1,15 @@
+.venv
+.git
+cdk.out
+tests
+docs
+__pycache__
+*.pyc
+*.pyo
+.env_info
+node_modules
+.pytest_cache
+*.egg-info
+.mypy_cache
+.ruff_cache
+cdk.outputs.json

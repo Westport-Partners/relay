@@ -1,0 +1,50 @@
+# config/catalog.yaml — Application service catalog (flat list of OrgNodes)
+
+nodes:
+  - id: pl-identity
+    name: Identity Platform
+    level: product_line
+    parent: null
+    description: "All authentication and authorization services"
+    owner_ref: team-identity-leadership
+
+  - id: prod-auth
+    name: Auth Service
+    level: product
+    parent: pl-identity
+    description: "Handles user authentication"
+    owner_ref: team-auth
+
+  - id: comp-auth-api
+    name: Auth API
+    level: component
+    parent: prod-auth
+
+  # Integration routing keys (e.g. gitlab_project) live under `metadata` keyed
+  # by convention, so adding a new integration never changes the catalog schema.
+  #
+  # Metadata values can be:
+  #   literal  — a plain string used as-is (e.g. gitlab_project on dev below)
+  #   template — a ``${tag:TAG_NAME}`` expression resolved at incident time
+  #              from the failing resource's AWS tags (e.g. prod below).
+  # When a template tag is absent the key is silently omitted (never raises).
+  - id: dep-auth-api-prod
+    name: auth-api-prod
+    level: deployment
+    parent: comp-auth-api
+    owner_ref: team-auth
+    metadata:
+      # Dynamic: resolved at incident time from the GITLAB_PROJECT_ID resource tag.
+      gitlab_project: "${tag:GITLAB_PROJECT_ID}"
+      component_id: auth-api          # literal COMPONENT_ID join-key (Stage 1 tagging)
+      aws_account: "111111111111"
+      region: us-east-1
+
+  - id: dep-auth-api-dev
+    name: auth-api-dev
+    level: deployment
+    parent: comp-auth-api
+    metadata:
+      gitlab_project: identity/auth-api   # literal — dev always maps to the same project
+      aws_account: "222222222222"
+      region: us-east-1

@@ -1,0 +1,43 @@
+{
+  "version": "0",
+  "id": "fixture-lambda-error-0001",
+  "detail-type": "CloudWatch Alarm State Change",
+  "source": "aws.cloudwatch",
+  "account": "222222222222",
+  "region": "us-east-1",
+  "resources": [
+    "arn:aws:cloudwatch:us-east-1:222222222222:alarm:relay-node-demo-high-error-rate"
+  ],
+  "detail": {
+    "alarmName": "relay-node-demo-high-error-rate",
+    "alarmArn": "arn:aws:cloudwatch:us-east-1:222222222222:alarm:relay-node-demo-high-error-rate",
+    "state": {
+      "value": "ALARM",
+      "reason": "Threshold Crossed: 1 datapoint [5.0] was greater than the threshold (1.0).",
+      "timestamp": "2026-06-23T00:00:00.000+0000"
+    },
+    "previousState": {
+      "value": "OK",
+      "reason": "Threshold not crossed."
+    },
+    "configuration": {
+      "metrics": [
+        {
+          "id": "errors",
+          "metricStat": {
+            "metric": {
+              "namespace": "AWS/Lambda",
+              "name": "Errors",
+              "dimensions": {
+                "FunctionName": "relay-node-demo"
+              }
+            },
+            "period": 60,
+            "stat": "Sum"
+          },
+          "returnData": true
+        }
+      ]
+    }
+  }
+}

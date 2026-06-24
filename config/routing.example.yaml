@@ -1,0 +1,145 @@
+# config/routing.yaml — Alarm routing + noise control
+#
+# Three things live here:
+#   1. rules         — map an incoming CloudWatch alarm to a severity,
+#                      an escalation policy (from escalation.yaml), and the
+#                      notification streams it fans out to.
+#   2. federation    — which incidents this team's Hub forwards UP to a central
+#                      (federated) Hub. Controls central-NOC noise.
+#   3. suppression   — Node-side dedup / rate-limit / flapping, applied before an
+#                      incident is persisted or paged. Controls repeat-firing noise.
+#
+# Rules are evaluated in ascending `priority` (lower number first); the FIRST
+# matching rule wins. All match fields are optional and ANDed; omitted fields are
+# wildcards. The final rule below has no filters, so it is the catch-all default.
+#
+# Match fields:
+#   alarm_name_prefix   alarm name must start with this string
+#   alarm_name_regex    alarm name must fully match this regex
+#   namespace_prefix    CloudWatch namespace must start with this (e.g. AWS/RDS)
+#   tag_filters         all key/value pairs must be present in the alarm's tags
+# Route fields:
+#   severity_override   SEV1..SEV4 assigned to the incident (else derived)
+#   escalation_policy_id  a policy_id defined in escalation.yaml
+#   streams             which streams fire: [TEAM], [CENTRAL], or both
+#
+# To copy: cp config/routing.example.yaml config/routing.yaml
+
+rules:
+
+  # -----------------------------------------------------------------------
+  # SYNTHETIC CANARY — production endpoint failures are SEV1.
+  # CloudWatch Synthetics canaries appear under this namespace.
+  # -----------------------------------------------------------------------
+  - rule_id: synthetic-canary-prod
+    priority: 10
+    namespace_prefix: CloudWatchSynthetics
+    alarm_name_regex: ".*-prod-.*"
+    severity_override: SEV1
+    escalation_policy_id: pol-sev1
+    streams: [TEAM, CENTRAL]
+
+  # Non-prod canary failures: SEV3, team-only.
+  - rule_id: synthetic-canary-nonprod
+    priority: 20
+    namespace_prefix: CloudWatchSynthetics
+    severity_override: SEV3
+    escalation_policy_id: pol-sev3
+    streams: [TEAM]
+
+  # -----------------------------------------------------------------------
+  # PRODUCTION CRITICAL INFRASTRUCTURE — database alarms are SEV1.
+  # -----------------------------------------------------------------------
+  - rule_id: database-critical
+    priority: 30
+    namespace_prefix: AWS/RDS
+    tag_filters:
+      Environment: production
+    severity_override: SEV1
+    escalation_policy_id: pol-sev1
+    streams: [TEAM, CENTRAL]
+
+  # Production Lambda error-rate spikes — SEV1.
+  - rule_id: lambda-error-rate-prod
+    priority: 40
+    namespace_prefix: AWS/Lambda
+    alarm_name_prefix: prod-
+    severity_override: SEV1
+    escalation_policy_id: pol-sev1
+    streams: [TEAM, CENTRAL]
+
+  # -----------------------------------------------------------------------
+  # PRODUCTION HIGH IMPACT (SEV2) — API latency / queue depth.
+  # -----------------------------------------------------------------------
+  - rule_id: api-latency-prod
+    priority: 50
+    namespace_prefix: AWS/ApiGateway
+    alarm_name_prefix: prod-
+    severity_override: SEV2
+    escalation_policy_id: pol-sev2
+    streams: [TEAM, CENTRAL]
+
+  - rule_id: sqs-depth-prod
+    priority: 60
+    namespace_prefix: AWS/SQS
+    alarm_name_prefix: prod-
+    severity_override: SEV2
+    escalation_policy_id: pol-sev2
+    streams: [TEAM, CENTRAL]
+
+  # -----------------------------------------------------------------------
+  # NON-PRODUCTION — anything tagged development is SEV3, team-only.
+  # -----------------------------------------------------------------------
+  - rule_id: nonprod-generic
+    priority: 70
+    tag_filters:
+      Environment: development
+    severity_override: SEV3
+    escalation_policy_id: pol-sev3
+    streams: [TEAM]
+
+  # -----------------------------------------------------------------------
+  # CATCH-ALL — unmatched alarms are SEV2, TEAM-ONLY. An alarm we couldn't
+  # classify is not something to page the central NOC about; the owning team
+  # triages it and adds a specific rule above if it warrants central visibility.
+  # -----------------------------------------------------------------------
+  - rule_id: default
+    priority: 1000
+    escalation_policy_id: pol-sev2
+    streams: [TEAM]
+
+default_escalation_policy_id: pol-sev2
+default_streams: [TEAM]
+
+# ---------------------------------------------------------------------------
+# FEDERATION — local Hub -> central (federated) Hub forwarding gate.
+# Only consulted when this Hub runs with RELAY_HUB_SCOPE=local-federated.
+# Standard default: prod-loud, nonprod-quiet. Prod incidents SEV2-or-worse reach
+# the central NOC; non-prod never federates (stays team-local), no matter how bad.
+# ---------------------------------------------------------------------------
+federation:
+  min_severity: SEV2          # global gate: SEV2/SEV1 federate; SEV3/SEV4 do not
+  overrides:
+    # Non-prod never reaches the central Hub. Environments are named
+    # individually, so list every non-prod name (there is no single "nonprod").
+    - name: nonprod-never-federates
+      environment: [dev, test, preprod]
+      forward: never
+
+# ---------------------------------------------------------------------------
+# SUPPRESSION — Node-side dedup / rate-limit / flapping, before persist + page.
+# Standard default: dedup ON (one page per logical alarm per 5-min window); SEV1
+# always pages even while flapping; non-prod is throttled harder (15-min window).
+# A suppressed re-fire creates no incident, no page, no ticket, no federated event.
+# ---------------------------------------------------------------------------
+suppression:
+  enabled: true
+  window_seconds: 300         # 5-minute dedup window
+  max_per_window: 1           # dedup: only the first firing in the window pages
+  exempt_severities: [SEV1]   # critical alarms always page, never suppressed
+  rules:
+    # Non-prod noise gets a longer window — one page per 15 min per alarm.
+    - name: nonprod-quiet
+      environment: [dev, test, preprod]
+      window_seconds: 900
+      max_per_window: 1

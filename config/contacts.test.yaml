@@ -1,0 +1,29 @@
+# Test contacts — FAKE people for demo/testing only.
+#
+# NOTE: contacts are PII and normally live in DynamoDB (this account), NOT in
+# Git. This file exists only to seed a demo Hub with believable data. Load it
+# with: ./scripts/relay-seed-contacts.sh config/contacts.test.yaml
+# (it writes each contact into the Hub's DynamoDB table). Do NOT commit real PII.
+#
+# All emails are @example.com; phone numbers are fictional (555).
+contacts:
+  - contact_id: cnt-arlowe
+    name: Avery Lowe
+    email: avery.lowe@example.com
+    phone: "+15550100101"
+  - contact_id: cnt-bchen
+    name: Bao Chen
+    email: bao.chen@example.com
+    phone: "+15550100102"
+  - contact_id: cnt-cdiaz
+    name: Carmen Diaz
+    email: carmen.diaz@example.com
+    phone: "+15550100103"
+  - contact_id: cnt-dokafor
+    name: Daniel Okafor
+    email: daniel.okafor@example.com
+    phone: "+15550100104"
+  - contact_id: cnt-emorgan
+    name: Erin Morgan
+    email: erin.morgan@example.com
+    phone: "+15550100105"

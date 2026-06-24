@@ -1,0 +1,43 @@
+{
+  "version": "0",
+  "id": "fixture-canary-failure-0001",
+  "detail-type": "CloudWatch Alarm State Change",
+  "source": "aws.cloudwatch",
+  "account": "222222222222",
+  "region": "us-east-1",
+  "resources": [
+    "arn:aws:cloudwatch:us-east-1:222222222222:alarm:relay-node-demo-canary-healthcheck"
+  ],
+  "detail": {
+    "alarmName": "relay-node-demo-canary-healthcheck",
+    "alarmArn": "arn:aws:cloudwatch:us-east-1:222222222222:alarm:relay-node-demo-canary-healthcheck",
+    "state": {
+      "value": "ALARM",
+      "reason": "Canary run failed: synthetic check did not return 200.",
+      "timestamp": "2026-06-23T00:00:00.000+0000"
+    },
+    "previousState": {
+      "value": "OK",
+      "reason": "Canary succeeded."
+    },
+    "configuration": {
+      "metrics": [
+        {
+          "id": "successpercent",
+          "metricStat": {
+            "metric": {
+              "namespace": "CloudWatchSynthetics",
+              "name": "SuccessPercent",
+              "dimensions": {
+                "CanaryName": "relay-node-demo-healthcheck"
+              }
+            },
+            "period": 300,
+            "stat": "Average"
+          },
+          "returnData": true
+        }
+      ]
+    }
+  }
+}

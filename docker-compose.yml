@@ -1,0 +1,61 @@
+# Relay local-mock harness (collapsed-single-container plan §6).
+#
+# Boots the always-on Relay container fully OFFLINE against DynamoDB-Local — no
+# AWS account, no credentials. One command brings up a working dashboard you can
+# fire alarms at:
+#
+#   docker compose up --build         # start DynamoDB-Local + bootstrap + Relay
+#   ./scripts/relay-fire.sh           # fire fixtures/alarms/lambda-error.json
+#   open http://localhost:8080/       # watch the tile go red
+#
+# SNS paging is a no-op here (no topic ARN); the team-page leg logs a harmless
+# isolated failure. DynamoDB (incidents, fleet tiles, escalation deadlines,
+# contacts, schedule) is fully exercised against DynamoDB-Local.
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports:
+      - "8000:8000"
+
+  bootstrap:
+    build: .
+    image: relay-hub:local
+    depends_on:
+      - dynamodb
+    environment:
+      RELAY_AWS_ENDPOINT_URL: http://dynamodb:8000
+      RELAY_TABLE_NAME: relay-local
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: dummy
+      AWS_SECRET_ACCESS_KEY: dummy
+    # Create the table + GSI and seed demo contacts, then exit.
+    entrypoint: ["python", "/app/scripts/relay-local-bootstrap.py"]
+    # The scripts/ dir isn't copied into the image (only src/ + config/ + skills/),
+    # so mount the repo's scripts for the bootstrap one-shot.
+    volumes:
+      - ./scripts:/app/scripts:ro
+
+  relay:
+    build: .
+    image: relay-hub:local
+    depends_on:
+      - bootstrap
+    ports:
+      - "8080:8080"
+    environment:
+      RELAY_RUNTIME: local-mock
+      RELAY_ALLOW_INGEST: "true"
+      RELAY_AWS_ENDPOINT_URL: http://dynamodb:8000
+      RELAY_TABLE_NAME: relay-local
+      RELAY_FLEET_TABLE_NAME: relay-local
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: dummy
+      AWS_SECRET_ACCESS_KEY: dummy
+      RELAY_CONFIG_SOURCE: local
+      RELAY_CONFIG_DIR: /app/config
+      RELAY_UI_AUTH_MODE: dev
+      RELAY_UI_DEV_USER: operator
+      LOG_LEVEL: INFO

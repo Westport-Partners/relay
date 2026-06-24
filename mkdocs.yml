@@ -1,0 +1,76 @@
+site_name: "Relay"
+site_description: "Open-source AWS Incident Manager replacement — self-hosted incident orchestration for AWS by Westport Partners."
+site_url: "https://westport-partners.github.io/relay/"
+repo_url: "https://github.com/Westport-Partners/relay"
+repo_name: "Westport-Partners/relay"
+
+docs_dir: docs
+
+# Reference-only mirror of the AWS Incident Manager docs (historical record for
+# validating Relay's coverage) — kept in-repo but excluded from the built site.
+exclude_docs: |
+  aws_incident-manager/
+
+theme:
+  name: material
+  logo: assets/westport-mark.png
+  favicon: assets/westport-mark.png
+  palette:
+    - scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - navigation.tabs
+    - search.suggest
+
+extra_css:
+  - stylesheets/brand.css
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Get started:
+      - Install: install.md
+      - Deploy: deploy.md
+      - Locked-down accounts (BYOR): byor.md
+      - Local development: local-dev.md
+  - Use Relay:
+      - Configure: configure.md
+      - Operate: operate.md
+      - Scheduling & escalation: scheduling.md
+      - Integrations & AI: integrations.md
+  - Reference:
+      - Feature Status: status.md
+      - AWS IM Coverage: coverage.md
+  - Project:
+      - Vision: vision.md
+      - Contributing: contributing.md
+      - Security: security.md

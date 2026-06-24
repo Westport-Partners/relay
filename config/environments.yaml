@@ -1,0 +1,58 @@
+# config/environments.yaml — Environment namespace configuration
+#
+# Environments are HARD namespaces. A Dev alarm must never page the Prod on-call.
+# One Relay stack is deployed per environment/isolation-zone.
+#
+# Derivation priority at ingest:
+#   1. Explicit alarm tag: relay:environment
+#   2. name_convention_regex matched against alarm name
+#   3. account_environment_map (account_id -> env name)
+#   4. default_environment (flagged environment_inferred=true)
+#
+# Unknown environment names -> "unrouted" quarantine path (never silently dropped).
+
+environments:
+  - name: prod
+    ou_path: null
+    name_convention_regex: "(?i).*-prod-.*"
+
+  - name: dev
+    ou_path: null
+    name_convention_regex: "(?i).*-dev-.*"
+
+  - name: test
+    ou_path: null
+    name_convention_regex: "(?i).*-test-.*"
+
+# Example account mapped to prod — so the demo Node Lambda alarm resolves to
+# the "prod" environment and the fleet tile key aligns with
+# RELAY_NODE_ENVIRONMENT=prod.
+account_environment_map:
+  "111111111111": prod
+
+default_environment: dev
+
+# ---------------------------------------------------------------------------
+# Deployment infrastructure knobs (IaC-only — the running container ignores this).
+# relay-context.sh reads these and passes them as -c relay:* CDK context flags.
+# Set relay:phz_id + relay:phz_name to get HTTPS with an ACM cert at
+# relay.<zone_name>. Or set relay:certificate_arn to bring your own cert.
+# ---------------------------------------------------------------------------
+deployment:
+  private_hosted_zone_id: null      # Route53 private hosted zone ID (e.g. Z0123456789ABCDEFGHIJ)
+  private_hosted_zone_name: null    # e.g. corp.example.internal
+  alb_subdomain: relay              # relay.<zone_name> when PHZ is configured
+  certificate_arn: null             # explicit ACM cert ARN (overrides PHZ-derived)
+  internal_alb: true                # internal ALB (false = internet-facing)
+
+# ---------------------------------------------------------------------------
+# UI authentication (auth mode + fine-grained write access control).
+# mode: null leaves the stack's environment-aware default in force
+#       (prod → none, non-prod → dev). Set to "alb" after running
+#       scripts/relay-setup-oidc.sh. Set to "none" to disable auth entirely.
+# ---------------------------------------------------------------------------
+auth:
+  mode: null                        # null | none | alb | dev
+  access_control:
+    enabled: false
+    allowed_users: []               # OIDC usernames (GitHub logins, emails, etc.)

@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "relay"
+version = "0.1.0"
+description = "Relay — a self-hosted AWS Incident Manager replacement"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic[email]>=2.0",
+    "boto3>=1.34",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+relay-node       = "relay.node.handler:main"
+relay-hub        = "relay.hub.app:main"
+relay-preflight  = "relay.config.preflight:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pytest-asyncio>=0.23",
+    "moto[all]>=5.0",
+    "fastapi>=0.110",
+    "httpx>=0.27",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/relay"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+# E501 (line length) is a formatter concern, not a correctness signal — don't
+# block CI on it. Keep F (pyflakes), I (imports), UP (pyupgrade) as real gates.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files legitimately import after sys.path / env setup.
+"tests/*" = ["E402"]

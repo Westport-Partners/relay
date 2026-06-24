@@ -1,0 +1,19 @@
+# config/hierarchy.yaml — Application org hierarchy level declarations
+
+levels:
+  - product_line
+  - product
+  - component
+  - deployment
+
+leaf_level: deployment
+
+# Org-wide deployment metadata conventions. ``tag_map`` maps a metadata key to
+# the AWS resource-tag name it is sourced from, applied to every deployment so
+# each team declares COMPONENT_ID / GIT_SHA / ... once here rather than on
+# every catalog leaf.  A per-deployment ``metadata`` entry overrides these.
+deployment_defaults:
+  tag_map:
+    component_id: COMPONENT_ID       # COMPONENT_ID resource tag -> component_id metadata key
+    git_sha: GIT_SHA                 # GIT_SHA resource tag -> git_sha metadata key
+    pipeline_url: GITLAB_PIPELINE_URL  # GITLAB_PIPELINE_URL resource tag -> pipeline_url metadata key

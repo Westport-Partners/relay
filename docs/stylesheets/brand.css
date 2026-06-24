@@ -1,0 +1,60 @@
+/* Westport Partners — Relay brand palette override for MkDocs Material */
+
+:root {
+  --md-primary-fg-color:        #005b6d;
+  --md-primary-fg-color--light: #007489;
+  --md-primary-fg-color--dark:  #004858;
+  --md-accent-fg-color:         #218993;
+  --md-accent-fg-color--transparent: #21899320;
+}
+
+/* Navigation header */
+.md-header {
+  background-color: #005b6d;
+}
+
+/* Active nav tab underline */
+.md-tabs__link--active,
+.md-tabs__link:hover {
+  color: #fff;
+  opacity: 1;
+}
+
+/* Sidebar active section marker */
+.md-nav__item--active > .md-nav__link {
+  color: #005b6d;
+  font-weight: 600;
+}
+
+/* Links */
+.md-content a {
+  color: #007489;
+}
+
+.md-content a:hover {
+  color: #218993;
+}
+
+/* Code block highlight bar */
+.highlight .hll {
+  background-color: #21899320;
+}
+
+/* Admonition accent */
+.md-typeset .admonition,
+.md-typeset details {
+  border-left-color: #218993;
+}
+
+/* Footer */
+.md-footer {
+  background-color: #004858;
+}
+
+/* Dark mode palette adjustments */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #007489;
+  --md-primary-fg-color--light: #218993;
+  --md-primary-fg-color--dark:  #005b6d;
+  --md-accent-fg-color:         #7a9fa7;
+}
