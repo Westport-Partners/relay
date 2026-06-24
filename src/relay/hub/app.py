@@ -2178,6 +2178,7 @@ class HubApp:
                     or _present("RELAY_GITLAB_PROJECT_ID")
                     or gitlab_token_configured,
                     "forwarding": scope == "local-federated",
+                    "integrations_locked": os.environ.get("RELAY_INTEGRATIONS_LOCKED", "").lower() == "true",
                 },
             }
 
@@ -2219,6 +2220,11 @@ class HubApp:
                 raise HTTPException(status_code=503, detail="settings store unavailable")
             token = (payload.get("token") or "").strip()
             if token:
+                if os.environ.get("RELAY_INTEGRATIONS_LOCKED", "").lower() == "true":
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Integration configuration is temporarily locked (pending validation). Contact the Relay maintainer.",
+                    )
                 settings_store.set(SettingsKey.GITLAB_TOKEN, token)
             else:
                 settings_store.delete(SettingsKey.GITLAB_TOKEN)
@@ -2272,6 +2278,11 @@ class HubApp:
             # fields blank clears the whole ServiceNow config (parallels the
             # GitLab empty-token clear).
             if instance_url and password:
+                if os.environ.get("RELAY_INTEGRATIONS_LOCKED", "").lower() == "true":
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Integration configuration is temporarily locked (pending validation). Contact the Relay maintainer.",
+                    )
                 settings_store.set(SettingsKey.SERVICENOW_INSTANCE_URL, instance_url)
                 settings_store.set(SettingsKey.SERVICENOW_USERNAME, username)
                 settings_store.set(SettingsKey.SERVICENOW_PASSWORD, password)

@@ -2822,6 +2822,11 @@ function renderSettings(cfg, sys) {
     ? `<button class="btn-sm btn-settings-test"${readOnlyAttr}>Send test message</button>`
     : '';
 
+  const integrationsLocked = !!(sys && sys.features && sys.features.integrations_locked);
+  const lockedNoticeHtml = integrationsLocked
+    ? `<div class="info-banner" style="color:var(--text-dim);">&#9203; Configuration locked &mdash; this integration is pending validation by the maintainer and cannot be saved yet.</div>`
+    : '';
+
   // GitLab token card state (mirrors the Teams pattern).
   const glConfigured = cfg.gitlab_token_configured === true;
   const glMasked = cfg.gitlab_token_masked || '';
@@ -2834,6 +2839,7 @@ function renderSettings(cfg, sys) {
   const glTestBtnHtml = glConfigured
     ? `<button class="btn-sm btn-gitlab-test"${readOnlyAttr}>Test token</button>`
     : '';
+  const glSaveDisabledAttr = integrationsLocked ? ' disabled title="Configuration locked — pending validation"' : readOnlyAttr;
 
   // ServiceNow card state (mirrors the GitLab pattern; three fields).
   const snConfigured = cfg.servicenow_configured === true;
@@ -2849,6 +2855,7 @@ function renderSettings(cfg, sys) {
   const snTestBtnHtml = snConfigured
     ? `<button class="btn-sm btn-servicenow-test"${readOnlyAttr}>Test connection</button>`
     : '';
+  const snSaveDisabledAttr = integrationsLocked ? ' disabled title="Configuration locked — pending validation"' : readOnlyAttr;
 
   view.innerHTML = `
     <div class="view-toolbar"><h2>Settings</h2></div>
@@ -2887,12 +2894,13 @@ function renderSettings(cfg, sys) {
         and close incident-type issues. A read-only <code>read_api</code> token will
         not work. The token is stored only in this account&rsquo;s DynamoDB &mdash; never in Git.
       </div>
+      ${lockedNoticeHtml}
       ${glStatusHtml}
       <div class="settings-row">
         <input type="text" id="settings-gitlab-token"
           placeholder="glpat-… or project/group access token"
           value=""${readOnlyAttr}>
-        <button class="btn-primary btn-gitlab-save"${readOnlyAttr}>Save</button>
+        <button class="btn-primary btn-gitlab-save"${glSaveDisabledAttr}>Save</button>
         ${glClearBtnHtml}
       </div>
       <div id="gitlab-save-msg" class="settings-inline-msg"></div>
@@ -2915,6 +2923,7 @@ function renderSettings(cfg, sys) {
         records in the <code>incident</code> table. Credentials are stored only
         in this account&rsquo;s DynamoDB &mdash; never in Git.
       </div>
+      ${lockedNoticeHtml}
       ${snStatusHtml}
       <div class="settings-row" style="flex-wrap:wrap;gap:8px;">
         <input type="text" id="settings-servicenow-instance"
@@ -2926,7 +2935,7 @@ function renderSettings(cfg, sys) {
         <input type="password" id="settings-servicenow-password"
           placeholder="api password"
           value="" style="flex:1;min-width:160px;"${readOnlyAttr}>
-        <button class="btn-primary btn-servicenow-save"${readOnlyAttr}>Save</button>
+        <button class="btn-primary btn-servicenow-save"${snSaveDisabledAttr}>Save</button>
         ${snClearBtnHtml}
       </div>
       <div id="servicenow-save-msg" class="settings-inline-msg"></div>
@@ -3072,6 +3081,11 @@ function renderSettings(cfg, sys) {
       const tokenInput = document.getElementById('settings-gitlab-token');
       const msgEl = document.getElementById('gitlab-save-msg');
       const token = (tokenInput ? tokenInput.value : '').trim();
+      if (integrationsLocked) {
+        msgEl.textContent = '⏳ Configuration locked — this integration is pending validation by the maintainer and cannot be saved yet.';
+        msgEl.className = 'settings-inline-msg err';
+        return;
+      }
       msgEl.textContent = '';
       msgEl.className = 'settings-inline-msg';
       glSaveBtn.disabled = true;
@@ -3211,6 +3225,11 @@ function renderSettings(cfg, sys) {
       const instance_url = (instEl ? instEl.value : '').trim();
       const username = (userEl ? userEl.value : '').trim();
       const password = (pwEl ? pwEl.value : '').trim();
+      if (integrationsLocked) {
+        msgEl.textContent = '⏳ Configuration locked — this integration is pending validation by the maintainer and cannot be saved yet.';
+        msgEl.className = 'settings-inline-msg err';
+        return;
+      }
       msgEl.textContent = '';
       msgEl.className = 'settings-inline-msg';
       snSaveBtn.disabled = true;

@@ -654,6 +654,64 @@ def test_servicenow_test_404_when_unconfigured(monkeypatch):
     assert c.post("/settings/servicenow-credentials/test").status_code == 404
 
 
+# ---------------------------------------------------------------------------
+# RELAY_INTEGRATIONS_LOCKED flag
+# ---------------------------------------------------------------------------
+
+
+def test_integrations_locked_gitlab_save_returns_403(monkeypatch):
+    """PUT /settings/gitlab-token with a non-empty token is blocked when locked."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    monkeypatch.setenv("RELAY_INTEGRATIONS_LOCKED", "true")
+    c = _client_settings(monkeypatch)
+    r = c.put("/settings/gitlab-token", json={"token": "glpat-secrettoken1234"})
+    assert r.status_code == 403
+    assert "locked" in r.json()["detail"].lower()
+
+
+def test_integrations_locked_servicenow_save_returns_403(monkeypatch):
+    """PUT /settings/servicenow-credentials with non-empty creds is blocked when locked."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    monkeypatch.setenv("RELAY_INTEGRATIONS_LOCKED", "true")
+    c = _client_settings(monkeypatch)
+    creds = {
+        "instance_url": "https://dev123.service-now.com",
+        "username": "relay_api",
+        "password": "s3cretpw7890",
+    }
+    r = c.put("/settings/servicenow-credentials", json=creds)
+    assert r.status_code == 403
+    assert "locked" in r.json()["detail"].lower()
+
+
+def test_integrations_locked_gitlab_clear_still_succeeds(monkeypatch):
+    """PUT /settings/gitlab-token with empty token (clear) is allowed even when locked."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    monkeypatch.setenv("RELAY_INTEGRATIONS_LOCKED", "true")
+    s = _FakeSettings()
+    s.set("gitlab_token", "glpat-secrettoken1234")
+    c = _client_settings(monkeypatch, settings=s)
+    r = c.put("/settings/gitlab-token", json={"token": ""})
+    assert r.status_code == 200
+    assert r.json()["configured"] is False
+
+
+def test_integrations_locked_config_flag_reported_in_config(monkeypatch):
+    """GET /config includes features.integrations_locked == true when the flag is set."""
+    monkeypatch.setenv("RELAY_INTEGRATIONS_LOCKED", "true")
+    c = _client_settings(monkeypatch)
+    body = c.get("/config").json()
+    assert body["features"]["integrations_locked"] is True
+
+
+def test_integrations_locked_false_by_default(monkeypatch):
+    """GET /config features.integrations_locked is false when the flag is unset."""
+    monkeypatch.delenv("RELAY_INTEGRATIONS_LOCKED", raising=False)
+    c = _client_settings(monkeypatch)
+    body = c.get("/config").json()
+    assert body["features"]["integrations_locked"] is False
+
+
 def test_teams_webhook_notifier_builds_dual_payload():
     from relay.adapters.integrations.teams import TeamsWebhookNotifier
     from relay.core.model import IncidentState, Severity, SignalSource

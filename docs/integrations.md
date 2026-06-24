@@ -12,7 +12,9 @@ Every integration lives in its own folder and is auto-discovered at startup. Add
 
 ---
 
-## GitLab — Issue Tracking & DORA ✅ live
+## GitLab — Issue Tracking & DORA ⏳ pending validation
+
+> **Status: pending validation.** This integration is implemented but has not yet been validated by the maintainer. Saving credentials via the Settings UI is currently disabled (`RELAY_INTEGRATIONS_LOCKED`). It will be enabled in a future release.
 
 ### What it does
 
@@ -46,7 +48,9 @@ Use the **Test token** button after saving. The test verifies authentication via
 
 ---
 
-## ServiceNow — ITSM Ticketing ✅ live
+## ServiceNow — ITSM Ticketing ⏳ pending validation
+
+> **Status: pending validation.** This integration is implemented but has not yet been validated by the maintainer. Saving credentials via the Settings UI is currently disabled (`RELAY_INTEGRATIONS_LOCKED`). It will be enabled in a future release.
 
 ### What it does
 
