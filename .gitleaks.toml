@@ -1,0 +1,18 @@
+# Gitleaks configuration for Relay.
+#
+# We extend the upstream default ruleset and add a small allowlist for known
+# false positives: AWS's own published CloudTrail example log entries (which
+# contain fake accessKeyId / clientToken values) and dummy credentials used in
+# the test suite. None of these are real secrets.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented examples and test fixtures — not real secrets"
+paths = [
+  # AWS-published CloudTrail example log entries (fake IDs/tokens)
+  '''docs/aws_incident-manager/.*\.md''',
+  # Test files use obviously-fake placeholder credentials
+  '''tests/.*\.py''',
+]
