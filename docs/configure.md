@@ -86,13 +86,14 @@ Escalation state is driven by DynamoDB timers — no polling, no cron jobs.
 
 ### routing.yaml
 
-Rules are evaluated top-to-bottom; **first match wins**. An empty `match: {}` is a wildcard (use it as the final catch-all). Match fields are all optional; unspecified fields are wildcards.
+Rules are evaluated in ascending `priority` order (lower number first); **first match wins**. Every rule requires an integer `priority`, and the rule list must be sorted ascending — the config validator rejects an out-of-order list. An empty `match: {}` is a wildcard (give it the highest `priority` number so it acts as the final catch-all). Match fields are all optional; unspecified fields are wildcards.
 
 ```yaml
 routing_rules:
 
   - name: database-critical
     description: "RDS / Aurora production alarms"
+    priority: 10
     match:
       namespace: "AWS/RDS"
       alarm_tags:
@@ -104,6 +105,7 @@ routing_rules:
 
   - name: api-latency-high
     description: "API Gateway latency threshold breached"
+    priority: 20
     match:
       namespace: "AWS/ApiGateway"
       alarm_name_prefix: "prod-"
@@ -114,6 +116,7 @@ routing_rules:
 
   - name: default
     description: "Unmatched alarm — treat as SEV2"
+    priority: 1000
     match: {}
     route:
       severity: SEV2
@@ -121,7 +124,15 @@ routing_rules:
       streams: [team, central]
 ```
 
-**Match fields:**
+**Rule fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Unique rule identifier |
+| `priority` | int ≥ 0 | Evaluation order — **lower number is evaluated first**. The rule list must be sorted ascending. Required; no default |
+| `description` | string | Human-readable note (optional) |
+
+**Match fields** (all optional; unspecified fields are wildcards; multiple fields are ANDed):
 
 | Field | Type | Description |
 |---|---|---|
