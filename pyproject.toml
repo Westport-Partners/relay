@@ -21,7 +21,7 @@ relay-preflight  = "relay.config.preflight:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
+    "pytest>=9.1.1",
     "ruff>=0.4",
     "mypy>=1.10",
     "pytest-asyncio>=0.23",
