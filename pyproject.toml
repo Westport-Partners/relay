@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "relay"
+name = "relay-westport"
 version = "0.1.0"
 description = "Relay — a self-hosted AWS Incident Manager replacement"
 readme = "README.md"
@@ -26,7 +26,7 @@ serve = [
     "tzdata",
 ]
 dev = [
-    "relay[serve]",
+    "relay-westport[serve]",
     "pytest>=8.0",
     "ruff>=0.4",
     "mypy>=1.10",
