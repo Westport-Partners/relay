@@ -9,8 +9,8 @@ description = "Relay — a self-hosted AWS Incident Manager replacement"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "pydantic[email]>=2.0",
-    "boto3>=1.34",
+    "pydantic[email]>=2.13.4",
+    "boto3>=1.43.36",
     "pyyaml>=6.0",
 ]
 
@@ -21,7 +21,7 @@ relay-preflight  = "relay.config.preflight:main"
 
 [project.optional-dependencies]
 serve = [
-    "fastapi>=0.110",
+    "fastapi>=0.138.0",
     "uvicorn>=0.30",
     "tzdata",
 ]
