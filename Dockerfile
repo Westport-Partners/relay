@@ -19,14 +19,14 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 
-# Install the relay package plus the optional web deps (fastapi + uvicorn).
+# Install the relay package with the `serve` extra (fastapi, uvicorn, tzdata).
+# The serve extra is declared in pyproject.toml [project.optional-dependencies];
+# pip install .[serve] keeps web deps in one place (no hand-listed packages here).
 # pip install . picks up src/relay/hub/dashboard.html via hatchling's package
 # data discovery (the wheel includes all files under src/relay/).
-# fastapi and uvicorn are NOT in pyproject.toml dependencies — add them here.
-# tzdata: python:slim has no system zoneinfo DB, so ZoneInfo(...) would fail
-# and RELAY_TZ would silently fall back to UTC. The PyPI tzdata package gives
-# zoneinfo a bundled database to read from.
-RUN pip install --no-cache-dir . fastapi uvicorn tzdata
+# tzdata: python:slim has no system zoneinfo DB; the PyPI tzdata package in the
+# serve extra gives zoneinfo a bundled database so RELAY_TZ works correctly.
+RUN pip install --no-cache-dir ".[serve]"
 
 # Bundle the config/ dir so the Hub can load rotations/escalation/routing from
 # local YAML (RELAY_CONFIG_SOURCE=local, RELAY_CONFIG_DIR=/app/config). Only the
@@ -36,6 +36,10 @@ COPY config/ ./config/
 # Bundle the AI investigation skill pack so the ClaudeCodeAssistant can mount it
 # (RELAY_AI_PROVIDER=claude-code reads RELAY_SKILLS_DIR). Read-only probes only.
 COPY skills/ ./skills/
+
+# Bundle the one-shot local-mock bootstrap so `docker compose up` against a
+# PUBLISHED image works without mounting the repo's scripts/ dir.
+COPY scripts/relay-local-bootstrap.py ./scripts/relay-local-bootstrap.py
 
 # Confirm dashboard.html was included in the installed package
 # (fails the build early if the file is missing from the wheel).

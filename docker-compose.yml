@@ -4,9 +4,13 @@
 # AWS account, no credentials. One command brings up a working dashboard you can
 # fire alarms at:
 #
-#   docker compose up --build         # start DynamoDB-Local + bootstrap + Relay
-#   ./scripts/relay-fire.sh           # fire fixtures/alarms/lambda-error.json
-#   open http://localhost:8080/       # watch the tile go red
+#   docker compose up             # pulls ghcr.io/westport-partners/relay:latest (no --build needed)
+#   ./scripts/relay-fire.sh       # fire fixtures/alarms/lambda-error.json
+#   open http://localhost:8080/   # watch the tile go red
+#
+# Contributors building from source:
+#   docker compose build          # builds locally into ghcr.io/westport-partners/relay:latest
+#   docker compose up --build     # build + start in one step
 #
 # SNS paging is a no-op here (no topic ARN); the team-page leg logs a harmless
 # isolated failure. DynamoDB (incidents, fleet tiles, escalation deadlines,
@@ -20,8 +24,8 @@ services:
       - "8000:8000"
 
   bootstrap:
+    image: ghcr.io/westport-partners/relay:latest
     build: .
-    image: relay-hub:local
     depends_on:
       - dynamodb
     environment:
@@ -32,14 +36,10 @@ services:
       AWS_SECRET_ACCESS_KEY: dummy
     # Create the table + GSI and seed demo contacts, then exit.
     entrypoint: ["python", "/app/scripts/relay-local-bootstrap.py"]
-    # The scripts/ dir isn't copied into the image (only src/ + config/ + skills/),
-    # so mount the repo's scripts for the bootstrap one-shot.
-    volumes:
-      - ./scripts:/app/scripts:ro
 
   relay:
+    image: ghcr.io/westport-partners/relay:latest
     build: .
-    image: relay-hub:local
     depends_on:
       - bootstrap
     ports:

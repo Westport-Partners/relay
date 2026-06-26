@@ -21,6 +21,58 @@ curl -fsSL https://raw.githubusercontent.com/Westport-Partners/relay/main/instal
 The installer prints a summary and runs the preflight checker. When it finishes,
 skip to [Next steps](#next-steps).
 
+The one-liner above clones the repo and installs the **deploy toolchain** (CDK +
+scripts) on this machine — that is what you need to push the AWS stacks. If you only
+want to *run* Relay (try it, or run the Hub process) without a checkout, use a
+published artifact instead — see the next section.
+
+---
+
+## Run from a published artifact (no checkout)
+
+Two prebuilt bundles let you run Relay without cloning the repo or installing the CDK
+toolchain. Use these to evaluate Relay or run the Hub process; use the
+[quick install](#quick-install) above when you're ready to deploy the AWS stacks.
+
+### Container image (GHCR)
+
+The Hub image is published to `ghcr.io/westport-partners/relay` (multi-arch:
+`linux/amd64` + `linux/arm64`). The shipped `docker-compose.yml` runs it fully offline
+against DynamoDB-Local — no AWS account, no credentials:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/Westport-Partners/relay/main/docker-compose.yml
+docker compose up            # pulls the image, seeds the table, serves the dashboard
+open http://localhost:8080/
+```
+
+`docker compose up --build` still builds from source for contributors. To pull a
+specific release, pin the tag (e.g. `ghcr.io/westport-partners/relay:v0.1.0`) in the
+Compose file.
+
+### Python wheel (PyPI)
+
+The `relay-hub`, `relay-node`, and `relay-preflight` console scripts install from PyPI.
+The distribution name is **`relay-westport`** (the import package and commands stay
+`relay` / `relay-hub`). The `serve` extra pulls in FastAPI/Uvicorn so the Hub can serve
+the dashboard:
+
+```bash
+pipx install 'relay-westport[serve]'   # isolated, recommended
+# or into an existing venv:
+pip install 'relay-westport[serve]'
+
+relay-hub --help        # run the Hub
+relay-preflight         # run the readiness checker standalone
+```
+
+Without `[serve]`, the core package installs (boto3/pydantic) but the Hub cannot serve
+HTTP — install the extra for anything beyond library use.
+
+> **Note:** both artifacts are published by CI on a `v*` release tag. The container
+> image must also be made public once in the repo's **Packages** settings; the PyPI
+> project is created on the first publish via Trusted Publishing.
+
 ---
 
 ## What the installer does

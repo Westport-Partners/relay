@@ -149,15 +149,38 @@ RELAY_DEPLOY_TYPE=team RELAY_TEAM_NAME=my-team ./scripts/relay-synth.sh \
 
 See **[docs/byor.md](docs/byor.md)** for the full role-constrained install flow.
 
-### Try it offline (no AWS)
+### Try it offline (no AWS, no checkout)
+
+The container image is published to GHCR, so a single Compose file is enough — no
+`git clone`, no `--build`:
 
 ```bash
-docker compose up --build      # DynamoDB-Local + table bootstrap + the container
-./scripts/relay-fire.sh        # fire a test CloudWatch alarm
-open http://localhost:8080/    # watch the tile go red
+curl -fsSLO https://raw.githubusercontent.com/Westport-Partners/relay/main/docker-compose.yml
+docker compose up            # pulls ghcr.io/westport-partners/relay + DynamoDB-Local, seeds the table
+open http://localhost:8080/  # the dashboard is live
+```
+
+From a checkout you can also fire a test alarm and rebuild from source:
+
+```bash
+docker compose up --build    # build the image locally instead of pulling
+./scripts/relay-fire.sh      # fire a test CloudWatch alarm — watch the tile go red
 ```
 
 See **[docs/local-dev.md](docs/local-dev.md)**.
+
+### Install the toolchain from PyPI
+
+The `relay-hub`, `relay-node`, and `relay-preflight` commands ship as a wheel. The
+`serve` extra adds the web stack (FastAPI/Uvicorn) so `relay-hub` can serve the dashboard:
+
+```bash
+pipx install 'relay-westport[serve]'   # or: pip install 'relay-westport[serve]'
+relay-hub --help
+```
+
+This installs the published distribution **`relay-westport`**; the import package and
+commands are still named `relay` / `relay-hub`. See [docs/install.md](docs/install.md).
 
 ---
 
