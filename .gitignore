@@ -97,8 +97,11 @@ cdk.outputs.json
 # mkdocs build output (generated; published by CI, not committed)
 site/
 
-# Local agent/session state
-.claude/
+# Local agent/session state — but DO share project commands (e.g. /dod) with the team.
+.claude/*
+!.claude/commands/
+.claude/commands/*
+!.claude/commands/*.md
 
 # Operator-local deploy wrappers (env-specific, never published)
 scripts/*.local.sh

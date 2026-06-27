@@ -8,6 +8,8 @@ package; the Hub only calls ``build``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from relay.adapters.integrations.gitlab.listener import GitLabListener
 from relay.adapters.integrations.gitlab.sink import GitLabSink
 from relay.adapters.registry import AdapterContext, AdapterManifest
@@ -38,10 +40,12 @@ def build(ctx: AdapterContext) -> GitLabListener | None:
         return None
 
     # Adapt the generic (deployment_id, key) resolver to the project lookup.
-    project_resolver = None
+    project_resolver: Callable[[str], str | None] | None = None
     if ctx.deployment_resolver is not None:
+        _dep_resolver = ctx.deployment_resolver
+
         def project_resolver(deployment_id: str) -> str | None:
-            return ctx.deployment_resolver(deployment_id, "gitlab_project")
+            return _dep_resolver(deployment_id, "gitlab_project")
 
     return GitLabListener(
         sink, ctx.incident_store, project_resolver=project_resolver

@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
 from relay.core.model import OrgTree, Severity
 
@@ -149,22 +150,22 @@ class FleetTile:
     # Org ancestry (root→leaf node dicts) as carried on the heartbeat. Persisted
     # already by FleetStore; surfaced here so the tile-detail drawer can show the
     # hierarchy without a second fetch.
-    org_path: list[dict] = field(default_factory=list)
+    org_path: list[dict[str, Any]] = field(default_factory=list)
     # Free-form deployment meta (owner, gitlab_project, runbook, region, and —
     # when Node-side tag enrichment is enabled — aws_tags). Consumed by the
     # tile-detail drawer and by the AI investigation skills.
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     # On-call snapshot for this deployment. On a team Hub the detail endpoint
     # fills this live from the schedule; on a federated Hub it is the snapshot
     # the owning team pushed up its heartbeat (the Hub has no remote schedule).
-    on_call: dict | None = None
+    on_call: dict[str, Any] | None = None
     last_updated: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def key(self) -> str:
         return f"{self.environment}/{self.deployment_id}"
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "account_id": self.account_id,
             "app_name": self.app_name,
@@ -184,7 +185,7 @@ class FleetTile:
         }
 
 
-def status_sort_key(tile: FleetTile) -> tuple[int, datetime]:
+def status_sort_key(tile: FleetTile) -> tuple[int, float]:
     """Sort key: worst status first, then most-recently-changed first."""
     order = _STATUS_ORDER.get(tile.status, 99)
     # Negate last_updated timestamp so more recent = smaller value (sort asc).
@@ -195,7 +196,7 @@ def status_sort_key(tile: FleetTile) -> tuple[int, datetime]:
 def compute_rollup(
     tiles: list[FleetTile],
     org_tree: OrgTree,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Compute rollup status for each non-leaf node in the OrgTree.
 
     For each non-leaf node, status = worst_of across all descendant
@@ -214,7 +215,7 @@ def compute_rollup(
             return "grey"
         return min(statuses, key=lambda s: _STATUS_ORDER_LOCAL.get(s, 99))
 
-    def _node_rollup(node_id: str) -> dict:
+    def _node_rollup(node_id: str) -> dict[str, Any]:
         node = org_tree.get(node_id)
         if node is None:
             return {}

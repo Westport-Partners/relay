@@ -39,7 +39,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import boto3
 
@@ -71,7 +71,7 @@ _CATALOG_FILE = "catalog.yaml"
 class _SecretsManagerClient(Protocol):
     """Structural type for the boto3 secretsmanager client interface used here."""
 
-    def get_secret_value(self, *, SecretId: str) -> dict:  # noqa: N803
+    def get_secret_value(self, *, SecretId: str) -> dict[str, Any]:  # noqa: N803
         ...
 
 
@@ -236,7 +236,8 @@ class GitLabConfigLoader:
         )
         try:
             with urllib.request.urlopen(req, timeout=10) as response:
-                return response.read().decode("utf-8")
+                content: str = response.read().decode("utf-8")
+                return content
         except urllib.error.HTTPError as exc:
             raise RuntimeError(
                 f"GitLab returned HTTP {exc.code} fetching '{url}': {exc.reason}"

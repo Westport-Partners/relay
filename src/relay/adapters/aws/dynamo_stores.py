@@ -432,6 +432,9 @@ class DynamoIncidentStore:
                 logger.debug("purge_incidents: unparseable created_at %r on pk=%s", raw_ca, item.get("pk"))
                 continue
 
+            if created is None:
+                continue
+
             # Temporal filter.
             if before is not None:
                 _before = before if before.tzinfo else before.replace(tzinfo=UTC)

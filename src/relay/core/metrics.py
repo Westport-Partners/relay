@@ -15,7 +15,7 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from relay.core.model import IncidentState, Severity
 
@@ -115,7 +115,7 @@ class IncidentMetrics:
     time_to_ack: DurationStat = field(default_factory=DurationStat)
     time_to_resolve: DurationStat = field(default_factory=DurationStat)
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "total": self.total,
             "synthetic_total": self.synthetic_total,

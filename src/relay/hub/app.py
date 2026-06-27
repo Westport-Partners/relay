@@ -45,7 +45,7 @@ import signal
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -524,16 +524,16 @@ class SSEPublisher:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._subscribers: set[queue.SimpleQueue] = set()
+        self._subscribers: set[queue.SimpleQueue[str]] = set()
 
-    def subscribe(self) -> queue.SimpleQueue:
+    def subscribe(self) -> queue.SimpleQueue[str]:
         """Register a new subscriber and return its queue."""
-        q: queue.SimpleQueue = queue.SimpleQueue()
+        q: queue.SimpleQueue[str] = queue.SimpleQueue[str]()
         with self._lock:
             self._subscribers.add(q)
         return q
 
-    def unsubscribe(self, q: queue.SimpleQueue) -> None:
+    def unsubscribe(self, q: queue.SimpleQueue[str]) -> None:
         """Remove a subscriber (called when client disconnects)."""
         with self._lock:
             self._subscribers.discard(q)
@@ -1200,7 +1200,8 @@ def _fetch_secret(secret_name: str) -> str:
     """Retrieve a plaintext secret from AWS Secrets Manager."""
     client = boto3.client("secretsmanager")
     response = client.get_secret_value(SecretId=secret_name)
-    return response["SecretString"]
+    secret: str = response["SecretString"]
+    return secret
 
 
 # ---------------------------------------------------------------------------
@@ -1211,7 +1212,7 @@ def _fetch_secret(secret_name: str) -> str:
 def _seed_ignore_rules(
     store: DynamoIgnoreRuleStore,
     config: Any | None,
-) -> tuple[list, bool]:
+) -> tuple[list[Any], bool]:
     """Seed ignore rules from config into DynamoDB on first boot.
 
     Returns ``(baseline_rules, seeded)`` where *seeded* is True when the store
@@ -1223,7 +1224,7 @@ def _seed_ignore_rules(
     from relay.config.schema import IgnoreConfig  # local to avoid circulars
 
     # Collect config's ignore rules for the baseline (empty is fine).
-    baseline: list = []
+    baseline: list[Any] = []
     if (
         config is not None
         and getattr(config, "routing", None) is not None
@@ -1246,7 +1247,7 @@ def _seed_ignore_rules(
 def _seed_routing_rules(
     store: DynamoRoutingRuleStore,
     config: Any | None,
-) -> tuple[list, bool]:
+) -> tuple[list[Any], bool]:
     """Seed routing rules from config into DynamoDB on first boot.
 
     Returns ``(baseline_rules, seeded)`` where *seeded* is True when the store
@@ -1256,7 +1257,7 @@ def _seed_routing_rules(
     happened; it is used for deviation detection at runtime.
     """
     # Collect config's routing rules for the baseline (empty is fine).
-    baseline: list = []
+    baseline: list[Any] = []
     if (
         config is not None
         and getattr(config, "routing", None) is not None
@@ -1364,6 +1365,7 @@ class HubApp:
             EventBridgeForwarder,
             NoOpForwarder,
         )
+        forwarder: EventBridgeForwarder | NoOpForwarder
         if scope == HubScope.LOCAL_FEDERATED and central_bus_arn:
             # Get this account's ID for the forwarded_from marker.
             try:
@@ -1400,7 +1402,7 @@ class HubApp:
         self._schedule_store = DynamoScheduleStore(incidents_table)
         # Ignore rules — DB is runtime truth; config seeds on first boot only.
         self._ignore_rule_store: DynamoIgnoreRuleStore | None = None
-        self._ignore_baseline: list = []
+        self._ignore_baseline: list[Any] = []
         try:
             self._ignore_rule_store = DynamoIgnoreRuleStore(incidents_table)
             self._ignore_baseline, _seeded = _seed_ignore_rules(
@@ -1426,7 +1428,7 @@ class HubApp:
 
         # Routing rules — DB is runtime truth; config seeds on first boot only.
         self._routing_rule_store: DynamoRoutingRuleStore | None = None
-        self._routing_baseline: list = []
+        self._routing_baseline: list[Any] = []
         try:
             self._routing_rule_store = DynamoRoutingRuleStore(incidents_table)
             self._routing_baseline, _rt_seeded = _seed_routing_rules(
@@ -1651,7 +1653,7 @@ class HubApp:
             snapshot_data = json.dumps([t.to_dict() for t in tiles])
             snapshot_msg = f"event: snapshot\ndata: {snapshot_data}\n\n"
 
-            def event_generator():
+            def event_generator() -> Iterator[str]:
                 try:
                     yield snapshot_msg
                     while True:
@@ -1830,7 +1832,8 @@ class HubApp:
                     status_code=404,
                     detail=f"No incident found for correlation_id={correlation_id!r}",
                 )
-            return incident.model_dump(mode="json")
+            dumped: dict[str, Any] = incident.model_dump(mode="json")
+            return dumped
 
         # ----------------------------------------------------------------
         # GET /incidents/{id}/brief and /aar — AI-augmented drafts (read-only).
@@ -1847,14 +1850,15 @@ class HubApp:
                 logger.warning("AI assistant init failed; using fallback", exc_info=True)
                 return None
 
-        def _incident_or_404(correlation_id: str):
+        def _incident_or_404(correlation_id: str) -> Incident:
             from fastapi import HTTPException
             if incident_store is None:
                 raise HTTPException(status_code=404, detail="incident store unavailable")
-            incident = incident_store.get_incident(correlation_id)
-            if incident is None:
+            raw_incident = incident_store.get_incident(correlation_id)
+            if raw_incident is None:
                 raise HTTPException(status_code=404, detail="incident not found")
-            return incident
+            fetched: Incident = raw_incident
+            return fetched
 
         @app.get("/incidents/{correlation_id}/brief")
         def incident_brief(correlation_id: str) -> dict[str, Any]:
@@ -2329,7 +2333,8 @@ class HubApp:
             if schedule_store is None:
                 return []
             try:
-                return schedule_store.list_availability()
+                avail: list[dict[str, Any]] = schedule_store.list_availability()
+                return avail
             except Exception:
                 logger.warning("list_availability failed", exc_info=True)
                 return []
@@ -2631,7 +2636,7 @@ class HubApp:
             }
 
         @app.get("/rules/download")
-        def download_rules():
+        def download_rules() -> Any:
             """Download current DB rules as a routing.yaml ignore block."""
             from fastapi.responses import Response as _Response
 
@@ -2943,7 +2948,7 @@ class HubApp:
             }
 
         @app.get("/routing-rules/download")
-        def download_routing_rules():
+        def download_routing_rules() -> Any:
             """Download current DB routing rules as a routing.yaml rules block."""
             from fastapi.responses import Response as _Response
 
@@ -3001,7 +3006,7 @@ class HubApp:
             enabled = bool(payload.get("enabled", True))
             try:
                 rule = _RoutingRule(
-                    **{k: v for k, v in payload.items() if k != "enabled"},
+                    **{k: v for k, v in payload.items() if k not in ("enabled", "rule_id")},
                     rule_id=rule_id,
                 )
             except ValidationError as exc:
@@ -3165,9 +3170,53 @@ class HubApp:
                     detail="detection pipeline unavailable",
                 )
             try:
-                return pipeline.handle_alarm(payload)
+                alarm_result: dict[str, Any] = pipeline.handle_alarm(payload)
+                return alarm_result
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
+
+        # ----------------------------------------------------------------
+        # POST /ingest/heartbeat — in-process heartbeat injection (local runtimes)
+        #
+        # Accepts a relay.heartbeat detail dict (the same shape a Node emits over
+        # EventBridge) and feeds it straight to HubProcessor._handle_heartbeat,
+        # which records it in the fleet store + in-memory cache and merges the
+        # org_path into the registration-derived tree. Gated exactly like
+        # /ingest/alarm (local-aws / local-mock, or RELAY_ALLOW_INGEST=true) so it
+        # is never reachable in production Fargate.
+        #
+        # This is what lets a collapsed single-container runtime (no SQS, no
+        # separate Node) keep its big-board tiles LIVE between incidents, and what
+        # the test-environment bootstrap loops to populate a realistic fleet.
+        # ----------------------------------------------------------------
+        @app.post("/ingest/heartbeat")
+        def ingest_heartbeat(payload: dict[str, Any]) -> dict[str, Any]:
+            allow_ingest = os.environ.get("RELAY_ALLOW_INGEST", "").lower() == "true"
+            if runtime not in {"local-aws", "local-mock"} and not allow_ingest:
+                raise HTTPException(
+                    status_code=403,
+                    detail="ingest disabled in this runtime",
+                )
+            processor = getattr(self, "_processor", None)
+            if processor is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="hub processor unavailable",
+                )
+            # Accept either a bare heartbeat detail or an EventBridge-style
+            # envelope ({"detail": {...}}), mirroring handle_event's tolerance.
+            detail = payload.get("detail", payload)
+            if not detail.get("account_id") or not detail.get("app_name"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="heartbeat requires account_id and app_name",
+                )
+            processor._handle_heartbeat(detail)
+            return {
+                "ok": True,
+                "account_id": detail.get("account_id"),
+                "app_name": detail.get("app_name"),
+            }
 
         # ----------------------------------------------------------------
         # POST /synthetic/incident — fire a synthetic smoke-test incident
@@ -3264,7 +3313,8 @@ class HubApp:
             }
 
             try:
-                return pipeline.handle_alarm(event)
+                event_result: dict[str, Any] = pipeline.handle_alarm(event)
+                return event_result
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
 
@@ -3327,12 +3377,13 @@ class HubApp:
                     ),
                 )
 
-            return incident_store.purge_incidents(
+            purge_result: dict[str, Any] = incident_store.purge_incidents(
                 before=before,
                 after=after,
                 synthetic_only=synthetic_only,
                 dry_run=dry_run,
             )
+            return purge_result
 
         return app
 

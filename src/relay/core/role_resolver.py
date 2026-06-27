@@ -15,7 +15,8 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
+from zoneinfo import ZoneInfo
 
 from relay.core.scheduling import Role, monday_of, schedule_from_stored, shift_for_hour
 
@@ -25,14 +26,14 @@ logger = logging.getLogger(__name__)
 class ScheduleStorePort(Protocol):
     """The slice of a schedule store this resolver needs."""
 
-    def get_schedule(self, week_start: str) -> dict | None:
+    def get_schedule(self, week_start: str) -> dict[str, Any] | None:
         """Return the stored schedule dict for an ISO week_start, or None."""
         ...
 
 
-def _team_timezone():
+def _team_timezone() -> ZoneInfo:
     """Team wall-clock zone (RELAY_TZ); schedules are authored in local time."""
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from zoneinfo import ZoneInfoNotFoundError
 
     name = os.environ.get("RELAY_TZ", "UTC").strip() or "UTC"
     try:

@@ -33,7 +33,7 @@ Relay deploys as **three independently deployable stacks**. You choose a topolog
 - Python dependencies in a venv: `pip install aws-cdk-lib constructs` (the deploy scripts
   activate `.venv/` automatically if it exists)
 - AWS credentials for the target account with the permissions described in
-  [infra/RUNNER_IAM.md](../infra/RUNNER_IAM.md)
+  [infra/RUNNER_IAM.md](https://github.com/Westport-Partners/relay/blob/main/infra/RUNNER_IAM.md)
 
 ---
 
@@ -178,7 +178,7 @@ its own events, but no team account can forward up).
 
 | Where | Who attaches it | Permission |
 |---|---|---|
-| **Hub account** (deploy identity) | Account admin, once | The **Federated-hub deploy** policy in [infra/RUNNER_IAM.md](../infra/RUNNER_IAM.md) — the team policy plus the EventBridge-bus statement. |
+| **Hub account** (deploy identity) | Account admin, once | The **Federated-hub deploy** policy in [infra/RUNNER_IAM.md](https://github.com/Westport-Partners/relay/blob/main/infra/RUNNER_IAM.md) — the team policy plus the EventBridge-bus statement. |
 | **Hub account** (running container) | Created by the deploy | One ECS task role + one execution role. No `PassRole`, no Lambda role. See [byor.md](byor.md) for the exact two-role surface in locked-down accounts. |
 | **Each team account** (running container) | Created by that team's deploy | `events:PutEvents` scoped to the single hub bus ARN — nothing else cross-account. The team grants *itself* the right to forward up; the hub never reaches into a team account. |
 
@@ -357,7 +357,7 @@ After every deploy, outputs land in `cdk.outputs.json`.
 `.gitlab-ci.yml` calls the same `scripts/relay-*.sh` scripts from an in-account GitLab
 runner. AWS credentials come from the runner's IAM instance role — no access keys stored
 in CI variables. The runner role needs the permissions documented in
-[infra/RUNNER_IAM.md](../infra/RUNNER_IAM.md) (one inline policy, attached once by an
+[infra/RUNNER_IAM.md](https://github.com/Westport-Partners/relay/blob/main/infra/RUNNER_IAM.md) (one inline policy, attached once by an
 account admin before the first deploy).
 
 The `deploy_type` pipeline input maps directly to `RELAY_DEPLOY_TYPE`. All deploy logic

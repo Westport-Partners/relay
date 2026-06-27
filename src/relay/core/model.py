@@ -62,7 +62,7 @@ class Severity(StrEnum):
     SEV4 = "SEV4"
 
     # Human-readable labels for display / CLI output
-    _labels: dict[str, str]  # type: ignore[assignment]  # populated below
+    _labels: dict[str, str]  # populated below
 
     @classmethod
     def from_label(cls, label: str) -> Severity:

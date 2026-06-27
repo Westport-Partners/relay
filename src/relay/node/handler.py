@@ -45,7 +45,7 @@ from relay.adapters.aws.dynamo_stores import (
 from relay.adapters.aws.eventbridge_transport import EventBridgeTransport
 from relay.adapters.aws.sns_notifier import SNSNotifier
 from relay.config.loader import GitLabConfigLoader
-from relay.config.schema import RelayConfig
+from relay.config.schema import RelayConfig, RoutingConfig
 from relay.core.classifier import classify_alarm
 from relay.core.dispatcher import DualStreamDispatcher
 from relay.core.escalation import (
@@ -434,7 +434,7 @@ class NodeHandler:
                 exc_info=True,
             )
 
-    def _effective_routing_config(self):
+    def _effective_routing_config(self) -> RoutingConfig:
         """Return the RoutingConfig the classifier should use.
 
         If the DB cache is non-empty (at least one enabled rule), builds a new
@@ -602,7 +602,7 @@ class NodeHandler:
         org_tree = getattr(self.config, "org_tree", None)
         if org_tree is not None:
             try:
-                path = org_tree.org_path(self._node_deployment_id)
+                path: list[dict[str, Any]] = org_tree.org_path(self._node_deployment_id)
             except Exception:
                 logger.warning("org_path derivation failed", exc_info=True)
                 path = []
@@ -798,7 +798,7 @@ class NodeHandler:
 
         if step_contacts:
             # Fetch the incident record so the dispatcher has the full context.
-            incident = self.incident_store.get_incident(incident_id)  # type: ignore[attr-defined]
+            incident = self.incident_store.get_incident(incident_id)
             if incident is not None:
                 # A timeout that advances/exhausts escalation transitions the
                 # incident into ESCALATED so the Hub (and its lifecycle listeners)
@@ -907,7 +907,8 @@ class NodeHandler:
             window_seconds, _ = suppression.limits_for(incident)
             dedup_key = f"{incident.account_id}#{incident.app_name}#{incident.alarm_name}"
             count = self.suppression_store.increment_and_count(dedup_key, window_seconds)
-            return suppression.is_suppressed(incident, count)
+            result: bool = suppression.is_suppressed(incident, count)
+            return result
         except Exception:
             logger.warning(
                 "Suppression check failed for incident %s — failing open (not suppressed)",

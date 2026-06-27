@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from relay.adapters.registry import AdapterManifest
     from relay.config.schema import RelayConfig
+    from relay.core.model import OrgNode, OrgTree
 
 logger = logging.getLogger(__name__)
 
@@ -197,9 +198,9 @@ def evaluate_metadata(
 
 
 def _check_node(
-    node: object,
+    node: OrgNode,
     manifest: AdapterManifest,
-    org_tree: object,
+    org_tree: OrgTree,
     tag_map: dict[str, str],
     report: PreflightReport,
 ) -> None:
@@ -208,7 +209,7 @@ def _check_node(
     # It does NOT resolve the templates — it only dict-merges the raw values, so
     # we can still detect the "${tag:" marker for the "template" status.
     try:
-        resolved_raw: dict[str, object] = org_tree.resolve_metadata(node.id)  # type: ignore[union-attr]
+        resolved_raw: dict[str, object] = org_tree.resolve_metadata(node.id)
     except Exception:
         resolved_raw = {}
 
@@ -235,7 +236,7 @@ def _check_node(
 
         report.checks.append(
             MetadataCheck(
-                deployment_id=node.id,  # type: ignore[union-attr]
+                deployment_id=node.id,
                 adapter=manifest.name,
                 key=key,
                 status=status,

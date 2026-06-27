@@ -12,6 +12,15 @@
 #   docker compose build          # builds locally into ghcr.io/westport-partners/relay:latest
 #   docker compose up --build     # build + start in one step
 #
+# FULL DEMO (self-populating): one command brings up a Hub that fills its own
+# big-board with a fake agency (40 deployments, 25 people, on-call schedule,
+# routing rules) and trickles fake incidents — nothing else to run:
+#
+#   RELAY_DEMO=true docker compose up
+#
+# The `relay` service reads RELAY_DEMO from your shell (default false), so the
+# same compose file serves both the bare and the self-demoing modes.
+#
 # SNS paging is a no-op here (no topic ARN); the team-page leg logs a harmless
 # isolated failure. DynamoDB (incidents, fleet tiles, escalation deadlines,
 # contacts, schedule) is fully exercised against DynamoDB-Local.
@@ -41,7 +50,11 @@ services:
     image: ghcr.io/westport-partners/relay:latest
     build: .
     depends_on:
-      - bootstrap
+      # Wait for the bootstrap container to FINISH (table + GSI created), not just
+      # start — otherwise relay races it and the config-rule seed scan hits a
+      # non-existent table (routing/ignore stores fall back to 503).
+      bootstrap:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
     environment:
@@ -56,6 +69,15 @@ services:
       AWS_SECRET_ACCESS_KEY: dummy
       RELAY_CONFIG_SOURCE: local
       RELAY_CONFIG_DIR: /app/config
-      RELAY_UI_AUTH_MODE: dev
-      RELAY_UI_DEV_USER: operator
+      # auth.py reads RELAY_AUTH_MODE / RELAY_DEV_USER (NOT the RELAY_UI_* names);
+      # dev mode gives a fixed writer identity so the dashboard + write endpoints
+      # (contacts, schedule, synthetic incidents) are usable locally without an IdP.
+      RELAY_AUTH_MODE: dev
+      RELAY_DEV_USER: operator
       LOG_LEVEL: INFO
+      # Self-populating demo: when RELAY_DEMO=true (read from your shell, default
+      # false), the entrypoint runs the test-env harness against this Hub after
+      # it comes up — fake org, people, schedule, rules, and a drip of incidents.
+      RELAY_DEMO: "${RELAY_DEMO:-false}"
+      RELAY_DEMO_MODE: "${RELAY_DEMO_MODE:-drip}"
+      RELAY_DEMO_INTERVAL: "${RELAY_DEMO_INTERVAL:-20}"

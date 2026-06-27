@@ -42,7 +42,8 @@ class TeamsWebhookNotifier:
         )
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
-                return resp.status
+                status: int = resp.status
+                return status
         except urllib.error.HTTPError as exc:
             logger.warning("Teams webhook returned HTTP %s", exc.code)
             return exc.code

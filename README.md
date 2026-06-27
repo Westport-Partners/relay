@@ -167,6 +167,16 @@ docker compose up --build    # build the image locally instead of pulling
 ./scripts/relay-fire.sh      # fire a test CloudWatch alarm — watch the tile go red
 ```
 
+**Want a fully populated demo?** Start the same stack with `RELAY_DEMO=true` and
+the Hub fills its own big-board with a fake agency — ~39 app tiles across four
+product lines, 25 on-call contacts with a schedule, routing rules, and a live
+stream of incidents — with nothing else to run:
+
+```bash
+RELAY_DEMO=true docker compose up
+open http://localhost:8080/  # watch the board populate and evolve
+```
+
 See **[docs/local-dev.md](docs/local-dev.md)**.
 
 ### Install the toolchain from PyPI
@@ -219,6 +229,7 @@ relay/
 │   └── stacks/                # data_stack.py / compute_stack.py / federation_stack.py
 ├── scripts/                   # Portable deploy + ops scripts (CI + local)
 ├── skills/                    # AI investigation skill packs
+├── tools/                     # Dev tooling (test-env demo harness under tools/testenv/)
 ├── fixtures/                  # Sample CloudWatch alarm events for testing
 └── src/
     └── relay/                 # Application source (core / hub / node / adapters)

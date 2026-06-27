@@ -29,10 +29,54 @@ preserve that separation — no `boto3` imports in `core/`.
 1. Open an issue first for anything non-trivial, so we can align on approach.
 2. Branch from `main`, make focused commits.
 3. **Add/Update tests.** The suite must stay green (`pytest -q`).
-4. Run the linters: `ruff check .` and `mypy` (config in `pyproject.toml`).
+4. Run the gates — `scripts/relay-verify.sh` bundles `ruff check`, `mypy`
+   (advisory), `pytest`, and the conditional docs/infra checks. See
+   [Definition of Done](#definition-of-done) below for the full list.
 5. For infrastructure changes (`infra/`), confirm `cdk synth` succeeds for the affected
    stacks.
 6. Open a PR with a clear description of the change and why. Link the issue.
+
+## Definition of Done
+
+A change is "done" only when the items below hold. Most of the automatable ones
+are bundled into one script so you don't have to remember them:
+
+```bash
+scripts/relay-verify.sh          # runs ruff, mypy, pytest, and — when docs/ or
+                                 # infra/ changed — mkdocs --strict and cdk synth.
+                                 # Exits non-zero on any blocking failure.
+```
+
+Claude Code users can run the **`/dod`** slash command, which runs that script
+and then walks the judgment items below against the actual diff.
+
+**Blocking — must pass:**
+
+- [ ] **Lint:** `ruff check .` clean (CI runs this).
+- [ ] **Types:** `mypy src` clean (CI runs this; the strict backlog is at zero —
+      keep it there).
+- [ ] **Tests:** `pytest -q` green, and new/changed behavior has tests (a green
+      suite with an untested new code path is *not* done).
+- [ ] **Docs site (if `docs/` or `mkdocs.yml` changed):** `mkdocs build --strict`
+      succeeds — no broken nav or links.
+- [ ] **Infra (if `infra/` or deploy scripts changed):** `cdk synth` succeeds
+      (`scripts/relay-synth.sh`, no AWS writes).
+- [ ] **Docs ownership applied:** for every file you touched, the owning doc in
+      the table under [Maintaining the docs](#maintaining-the-docs) is updated
+      in the **same PR/commit**.
+- [ ] **`docs/status.md` reconciled — same commit:** if the change altered any
+      feature's build-state, its row is updated with the correct mark, real
+      `file:line` evidence, a bumped "Last verified", and the top rollup lists
+      kept in sync. *(This is the most commonly missed item.)*
+- [ ] **Core stays AWS-free:** no `boto3` import under `src/relay/core/`.
+- [ ] **No secrets / account IDs / agency names** in the diff (say "government
+      agencies", never a specific agency). Backstopped by the `secret-scan` CI job.
+- [ ] **Feature branch**, focused commits — not committed directly to `main`.
+
+**Advisory — report, don't block:**
+
+- [ ] **Adjacent bugs:** anything broken near your change that you didn't fix is
+      filed or flagged, not silently absorbed.
 
 ## What makes a good PR
 

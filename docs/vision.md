@@ -61,14 +61,14 @@ top-priority capability.
 Relay uses the Westport Partners brand (mountain-range mark, teal palette
 `#005b6d`/`#007489`/`#218993`/`#7a9fa7`) tastefully — a visible but unobtrusive attribution in
 the README and the dashboard footer. Status colors in the dashboard stay colorblind-safe and
-distinct from the brand teal so health always reads clearly. See [TRADEMARK.md](../TRADEMARK.md)
+distinct from the brand teal so health always reads clearly. See [TRADEMARK.md](https://github.com/Westport-Partners/relay/blob/main/TRADEMARK.md)
 for mark usage.
 
 ## License
 
 Apache-2.0 — permissive, contributor- and adopter-friendly, with an explicit patent grant and
 no copyleft obligations that would deter adoption. The code license does not grant rights to the
-Westport Partners marks; see [TRADEMARK.md](../TRADEMARK.md).
+Westport Partners marks; see [TRADEMARK.md](https://github.com/Westport-Partners/relay/blob/main/TRADEMARK.md).
 
 ## Roadmap
 
@@ -84,5 +84,5 @@ Westport Partners marks; see [TRADEMARK.md](../TRADEMARK.md).
 
 ## Contributing
 
-Relay is open to contributions — see [CONTRIBUTING.md](../CONTRIBUTING.md). Feedback from real
+Relay is open to contributions — see [CONTRIBUTING.md](https://github.com/Westport-Partners/relay/blob/main/CONTRIBUTING.md). Feedback from real
 deployments is especially valuable for hardening the locked-down install paths.

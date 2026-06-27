@@ -12,7 +12,7 @@ timeline. Either way the caller labels the output AI-generated vs. auto-generate
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from relay.core.metrics import humanize_seconds
 
@@ -151,7 +151,7 @@ def _fallback_brief(incident: Incident) -> str:
     )
 
 
-def generate_aar(incident: Incident, assistant: AIAssistant | None = None) -> dict:
+def generate_aar(incident: Incident, assistant: AIAssistant | None = None) -> dict[str, Any]:
     """Draft an after-action report.
 
     Returns ``{"markdown": str, "ai_generated": bool}``. Uses ``assistant`` when
@@ -170,7 +170,7 @@ def generate_aar(incident: Incident, assistant: AIAssistant | None = None) -> di
     return {"markdown": _fallback_aar(incident), "ai_generated": False}
 
 
-def generate_brief(incident: Incident, assistant: AIAssistant | None = None) -> dict:
+def generate_brief(incident: Incident, assistant: AIAssistant | None = None) -> dict[str, Any]:
     """Draft a t=0 responder briefing pack.
 
     Returns ``{"markdown": str, "ai_generated": bool}``.
