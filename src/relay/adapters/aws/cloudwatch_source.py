@@ -233,6 +233,30 @@ class CloudWatchAlarmSource:
         environment, environment_inferred = self._derive_environment(alarm_name, tags, self.account_id)
         deployment_id, service_path = self._derive_deployment_id(alarm_name, tags, self._org_tree)
 
+        # Explicit relay_* hints injected by trusted tooling (the Hub's
+        # synthetic-trigger endpoint, manual test payloads) take priority over
+        # name-convention derivation. Without this, a synthetic incident fired at
+        # a known deployment ("primary-search-svc-dev") would be re-derived to a
+        # short app_name ("primary-search") + deployment_id "unknown", creating an
+        # ORPHAN fleet tile that never receives a heartbeat — it shows degraded
+        # while open, then goes grey/"dead" on resolve (never matching the real
+        # heartbeat-registered tile). Honoring the hints keeps the incident bound
+        # to the existing tile.
+        hint_app = detail.get("relay_app") or raw_event.get("relay_app")
+        hint_env = detail.get("relay_environment") or raw_event.get("relay_environment")
+        hint_dep = detail.get("relay_deployment_id") or raw_event.get("relay_deployment_id")
+        if hint_app:
+            app_name = str(hint_app)
+        if hint_env:
+            environment = str(hint_env)
+            environment_inferred = False
+        if hint_dep:
+            deployment_id = str(hint_dep)
+            # Resolve the service_path from the org tree when the hinted
+            # deployment is a known node; otherwise keep whatever was derived.
+            if self._org_tree is not None and self._org_tree.get(deployment_id) is not None:
+                service_path = self._org_tree.resolve_service_path(deployment_id)
+
         # Detect a relay_synthetic marker injected by test tooling (e.g. the Hub's
         # synthetic-trigger endpoint or a manual test payload).  This flag is
         # orthogonal to signal_source=SignalSource.SYNTHETIC, which means the alarm

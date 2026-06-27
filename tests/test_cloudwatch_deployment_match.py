@@ -252,3 +252,85 @@ def test_parse_event_synthetic_independent_of_signal_source():
     from relay.core.model import SignalSource
     assert incident.signal_source == SignalSource.SYNTHETIC
     assert incident.synthetic is False
+
+
+# ---------------------------------------------------------------------------
+# Explicit relay_* hint tests (orphan-tile / dead-tile fix)
+# ---------------------------------------------------------------------------
+
+
+def _alarm_event_with_relay_hints(
+    *, alarm_name="primary-search-cpu-high", app=None, env=None, dep=None
+) -> dict:
+    ev = _minimal_alarm_event(alarm_name)
+    if app is not None:
+        ev["detail"]["relay_app"] = app
+    if env is not None:
+        ev["detail"]["relay_environment"] = env
+    if dep is not None:
+        ev["detail"]["relay_deployment_id"] = dep
+    return ev
+
+
+def test_relay_deployment_hint_binds_to_known_tile():
+    """The relay_deployment_id hint must override name-convention derivation so a
+    synthetic incident maps to the existing tile (no orphan tile + dead grey
+    tile after resolve)."""
+    tree = OrgTree(
+        [
+            OrgNode(id="pl", name="Primary", level="product_line"),
+            OrgNode(
+                id="primary-search-svc-dev",
+                name="primary-search-svc-dev",
+                level="deployment",
+                parent="pl",
+            ),
+        ]
+    )
+    src = CloudWatchAlarmSource(
+        account_id="123456789012", region="us-east-1", org_tree=tree
+    )
+
+    incident = src.parse_event(
+        _alarm_event_with_relay_hints(
+            app="primary-search-svc-dev",
+            env="dev",
+            dep="primary-search-svc-dev",
+        )
+    )
+    assert incident.app_name == "primary-search-svc-dev"
+    assert incident.deployment_id == "primary-search-svc-dev"
+    assert incident.environment == "dev"
+    # Service path resolved from the known node (not left empty).
+    assert incident.service_path == ["Primary", "primary-search-svc-dev"]
+
+
+def test_relay_hints_override_short_app_name_derivation():
+    """Without the hint, 'primary-search-cpu-high' would derive app_name
+    'primary-search' + deployment_id 'unknown'. The hints must win."""
+    src = CloudWatchAlarmSource(account_id="123456789012", region="us-east-1")
+    incident = src.parse_event(
+        _alarm_event_with_relay_hints(
+            app="primary-search-svc-dev", dep="primary-search-svc-dev"
+        )
+    )
+    assert incident.app_name == "primary-search-svc-dev"
+    assert incident.deployment_id == "primary-search-svc-dev"
+
+
+def test_no_relay_hints_keeps_legacy_derivation():
+    """Absent hints, behavior is unchanged: short app_name, deployment 'unknown'."""
+    src = CloudWatchAlarmSource(account_id="123456789012", region="us-east-1")
+    incident = src.parse_event(_minimal_alarm_event("primary-search-cpu-high"))
+    assert incident.app_name == "primary-search"
+    assert incident.deployment_id == "unknown"
+
+
+def test_relay_environment_hint_marks_not_inferred():
+    """An explicit env hint is authoritative, so environment_inferred is False."""
+    src = CloudWatchAlarmSource(account_id="123456789012", region="us-east-1")
+    incident = src.parse_event(
+        _alarm_event_with_relay_hints(app="a", env="prod", dep="a-prod")
+    )
+    assert incident.environment == "prod"
+    assert incident.environment_inferred is False
