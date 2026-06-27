@@ -7,16 +7,13 @@
 #
 # Blocking gates (a failure exits non-zero):
 #   - ruff check        lint (matches CI: `ruff check .`)
+#   - mypy src          strict type check (the backlog was cleared to zero, so
+#                       this is now a hard gate — keep it at zero)
 #   - pytest -q         full offline test suite (matches CI)
 #   - mkdocs --strict   docs site builds with no broken links/nav (only when
 #                       docs/ or mkdocs.yml changed, or --docs/--all is passed)
 #   - relay-synth.sh    CDK synth, no AWS writes (only when infra/ or the deploy
 #                       scripts changed, or --infra/--all is passed)
-#
-# Advisory gates (reported, NEVER fail the run):
-#   - mypy src          strict type check. There is a known backlog of
-#                       pre-existing errors (tracked separately); this surfaces
-#                       NEW problems without blocking until the backlog is zero.
 #
 # Usage:
 #   scripts/relay-verify.sh            # auto-detect what to run from the git diff
@@ -64,13 +61,9 @@ echo "== Relay verify (base=${BASE}) =="
 echo "-- ruff check"
 if run_tool ruff check src tests tools; then note_pass "ruff"; else note_block "ruff check"; fi
 
-# --- Types (advisory) ---
-echo "-- mypy src (advisory)"
-if run_tool mypy src; then
-  note_pass "mypy (clean)"
-else
-  echo "  ! mypy reported errors (ADVISORY — not blocking; see the cleanup backlog)" >&2
-fi
+# --- Types (blocking) ---
+echo "-- mypy src"
+if run_tool mypy src; then note_pass "mypy"; else note_block "mypy src"; fi
 
 # --- Tests (blocking) ---
 echo "-- pytest -q"

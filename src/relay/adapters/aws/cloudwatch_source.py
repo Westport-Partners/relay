@@ -59,7 +59,7 @@ class CloudWatchAlarmSource:
             self._environments_config = environments_config
 
     def _derive_environment(
-        self, alarm_name: str, tags: dict, account_id: str
+        self, alarm_name: str, tags: dict[str, str], account_id: str
     ) -> tuple[str, bool]:
         """Return (env_name, environment_inferred)."""
         import re as _re
@@ -97,7 +97,7 @@ class CloudWatchAlarmSource:
         return ("unrouted", True)
 
     def _derive_deployment_id(
-        self, alarm_name: str, tags: dict, org_tree: OrgTree | None
+        self, alarm_name: str, tags: dict[str, str], org_tree: OrgTree | None
     ) -> tuple[str, list[str]]:
         """Return (deployment_id, service_path)."""
         if org_tree is None:
@@ -249,7 +249,6 @@ class CloudWatchAlarmSource:
             app_name=app_name,
             account_id=self.account_id,
             region=self.region,
-            namespace=namespace,
             signal_source=signal_source,
             severity=Severity.SEV3,  # default; overridden by config enrichment step
             state=IncidentState.TRIGGERED,

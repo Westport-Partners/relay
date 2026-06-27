@@ -42,9 +42,9 @@ A change is "done" only when the items below hold. Most of the automatable ones
 are bundled into one script so you don't have to remember them:
 
 ```bash
-scripts/relay-verify.sh          # runs ruff, mypy (advisory), pytest, and —
-                                 # when docs/ or infra/ changed — mkdocs --strict
-                                 # and cdk synth. Exits non-zero on any blocking failure.
+scripts/relay-verify.sh          # runs ruff, mypy, pytest, and — when docs/ or
+                                 # infra/ changed — mkdocs --strict and cdk synth.
+                                 # Exits non-zero on any blocking failure.
 ```
 
 Claude Code users can run the **`/dod`** slash command, which runs that script
@@ -53,6 +53,8 @@ and then walks the judgment items below against the actual diff.
 **Blocking — must pass:**
 
 - [ ] **Lint:** `ruff check .` clean (CI runs this).
+- [ ] **Types:** `mypy src` clean (CI runs this; the strict backlog is at zero —
+      keep it there).
 - [ ] **Tests:** `pytest -q` green, and new/changed behavior has tests (a green
       suite with an untested new code path is *not* done).
 - [ ] **Docs site (if `docs/` or `mkdocs.yml` changed):** `mkdocs build --strict`
@@ -71,11 +73,8 @@ and then walks the judgment items below against the actual diff.
       agencies", never a specific agency). Backstopped by the `secret-scan` CI job.
 - [ ] **Feature branch**, focused commits — not committed directly to `main`.
 
-**Advisory — report, don't block (yet):**
+**Advisory — report, don't block:**
 
-- [ ] **Types:** `mypy src` (config in `pyproject.toml`). There is a known
-      backlog of pre-existing strict errors; the goal is to add no *new* ones and
-      drive the backlog to zero, after which this becomes blocking in CI.
 - [ ] **Adjacent bugs:** anything broken near your change that you didn't fix is
       filed or flagged, not silently absorbed.
 

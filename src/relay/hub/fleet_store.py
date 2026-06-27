@@ -162,8 +162,8 @@ class FleetStore:
         environment: str = item.get("environment", "unrouted")
         deployment_id: str = item.get("deployment_id", app_name)
         service_path: list[str] = item.get("service_path", [])
-        org_path: list[dict] = item.get("org_path", []) or []
-        metadata: dict = item.get("metadata", {}) or {}
+        org_path: list[dict[str, Any]] = item.get("org_path", []) or []
+        metadata: dict[str, Any] = item.get("metadata", {}) or {}
         on_call = item.get("on_call") or None
         last_heartbeat_at = _deserialize_dt(item.get("last_heartbeat_at"))
         registered_at = _deserialize_dt(item.get("registered_at")) or self._clock()

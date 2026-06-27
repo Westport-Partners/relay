@@ -25,6 +25,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import StrEnum
+from typing import Any
 
 
 class Shift(StrEnum):
@@ -247,7 +248,7 @@ def monday_of(d: date) -> date:
     return d - timedelta(days=d.weekday())
 
 
-def apply_overrides(stored: dict, overrides: list[dict]) -> dict:
+def apply_overrides(stored: dict[str, Any], overrides: list[dict[str, Any]]) -> dict[str, Any]:
     """Overlay ad-hoc overrides onto a stored schedule dict (non-mutating).
 
     Each override is ``{date, shift, role, contact_id, ...}`` and replaces the
@@ -272,7 +273,7 @@ def apply_overrides(stored: dict, overrides: list[dict]) -> dict:
     return {**stored, "slots": new_slots}
 
 
-def schedule_from_stored(data: dict) -> Schedule:
+def schedule_from_stored(data: dict[str, Any]) -> Schedule:
     """Rebuild a ``Schedule`` from a persisted dict (DynamoScheduleStore form).
 
     Tolerant of missing/extra keys; bad slots are skipped rather than raising.

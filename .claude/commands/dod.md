@@ -22,10 +22,8 @@ scripts/relay-verify.sh --base main
 (If the change touched `docs/` or `infra/` the script auto-detects and runs
 `mkdocs build --strict` / `relay-synth.sh`. Pass `--all` to force everything.)
 
-Report each gate's result. **Blocking gates** (ruff, pytest, and — when
-relevant — mkdocs --strict, cdk synth) must pass. **mypy is advisory**: report
-whether it introduced *new* errors beyond the known backlog, but it does not
-block "done" until the backlog reaches zero.
+Report each gate's result. **Blocking gates** — ruff, `mypy src`, pytest, and
+(when relevant) mkdocs --strict and cdk synth — must all pass.
 
 ## Step 2 — Determine what changed
 
@@ -90,7 +88,6 @@ one-line reason grounded in the actual diff:
 
 Print a compact report:
 - **Blocking gates:** ✓/✗ per gate (from Step 1).
-- **Advisory:** mypy new-vs-backlog.
 - **Judgment checklist:** the Step 3–4 items with PASS / NEEDS-ACTION.
 - **Verdict:** "DONE — shippable" only if every blocking gate passed and no
   judgment item is NEEDS-ACTION. Otherwise "NOT DONE" with a numbered, ordered

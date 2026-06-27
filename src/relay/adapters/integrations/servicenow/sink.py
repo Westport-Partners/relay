@@ -48,7 +48,7 @@ def _urllib_request(
     url: str,
     headers: dict[str, str],
     body: bytes | None,
-) -> tuple[int, dict]:
+) -> tuple[int, dict[str, Any]]:
     """Execute an HTTP request using stdlib urllib.
 
     Args:
@@ -64,7 +64,9 @@ def _urllib_request(
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            return resp.status, json.loads(resp.read().decode())
+            status: int = resp.status
+            body_dict: dict[str, Any] = json.loads(resp.read().decode())
+            return status, body_dict
     except urllib.error.HTTPError as exc:
         return exc.code, {}
 
@@ -117,7 +119,7 @@ class ServiceNowSink:
             except Exception:
                 override = None
             if override:
-                return override
+                return str(override)
         return fallback
 
     def _instance_url(self) -> str:
@@ -424,8 +426,8 @@ class ServiceNowSink:
         self,
         method: str,
         path: str,
-        payload: dict | None = None,
-    ) -> dict:
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Build and execute an authenticated HTTP request to the ServiceNow Table API.
 
         Args:
@@ -456,10 +458,11 @@ class ServiceNowSink:
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
 
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            return json.loads(resp.read().decode())
+            result: dict[str, Any] = json.loads(resp.read().decode())
+            return result
 
 
-def _format_context_block(header: str, data: dict) -> str:
+def _format_context_block(header: str, data: dict[str, Any]) -> str:
     """Format a dict as a labelled key:value block for the ServiceNow description.
 
     Keys are sorted for deterministic output.  Never raises.

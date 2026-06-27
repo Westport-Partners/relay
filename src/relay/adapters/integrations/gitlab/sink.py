@@ -29,7 +29,7 @@ _ACCESS_LEVEL_NAMES = {
 }
 
 
-def _max_project_access_level(project_body: dict | None) -> int:
+def _max_project_access_level(project_body: dict[str, Any] | None) -> int:
     """Return the effective access level the token has on a project.
 
     A GitLab ``GET /projects/:id`` response carries a ``permissions`` object with
@@ -119,7 +119,7 @@ def _urllib_request(
     url: str,
     headers: dict[str, str],
     body: bytes | None,
-) -> tuple[int, dict]:
+) -> tuple[int, dict[str, Any]]:
     """Execute an HTTP request using stdlib urllib.
 
     Args:
@@ -135,7 +135,9 @@ def _urllib_request(
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            return resp.status, json.loads(resp.read().decode())
+            status: int = resp.status
+            body_dict: dict[str, Any] = json.loads(resp.read().decode())
+            return status, body_dict
     except urllib.error.HTTPError as exc:
         return exc.code, {}
 
@@ -241,7 +243,7 @@ class GitLabSink:
             except Exception:
                 override = None
             if override:
-                return override
+                return str(override)
         return self._config.token
 
     @staticmethod
@@ -568,8 +570,8 @@ class GitLabSink:
         self,
         method: str,
         path: str,
-        payload: dict | None = None,
-    ) -> dict:
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Build and execute an authenticated request to the GitLab API.
 
         Args:
@@ -597,7 +599,8 @@ class GitLabSink:
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
 
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            return json.loads(resp.read().decode())
+            result: dict[str, Any] = json.loads(resp.read().decode())
+            return result
 
 
 def _build_issue_description(incident: Incident) -> str:

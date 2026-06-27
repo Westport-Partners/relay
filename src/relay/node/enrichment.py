@@ -62,7 +62,7 @@ class TagEnricher:
         # Process-lifetime cache: tags rarely change within a warm Lambda, and we
         # do not want to hit the tagging API on every heartbeat. Keyed by the
         # tag-filter tuple used for the lookup.
-        self._cache: dict[tuple, dict[str, str]] = {}
+        self._cache: dict[tuple[str, ...], dict[str, str]] = {}
 
     # ------------------------------------------------------------------
     # Public API

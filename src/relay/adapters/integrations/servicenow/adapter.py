@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from relay.adapters.integrations.servicenow.listener import ServiceNowListener
 from relay.adapters.integrations.servicenow.sink import ServiceNowSink
 from relay.adapters.registry import AdapterContext, AdapterManifest
@@ -16,7 +18,7 @@ def build(ctx: AdapterContext) -> ServiceNowListener | None:
     env/Secrets-Manager fallback, resolved live per request via the providers
     (mirrors the GitLab token precedence — see [[gitlab-token-settings-precedence]]).
     """
-    def _setting_provider(key: SettingsKey):
+    def _setting_provider(key: SettingsKey) -> Callable[[], str | None]:
         def _provider() -> str | None:
             if ctx.settings_store is None:
                 return None

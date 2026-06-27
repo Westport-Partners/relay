@@ -28,12 +28,13 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def _lambda_resource(dims: dict[str, str], region: str, account: str):
+def _lambda_resource(dims: dict[str, str], region: str, account: str) -> Callable[[Any], dict[str, str]] | None:
     """Resolver for AWS/Lambda metrics — tags the Lambda function directly."""
     name = dims.get("FunctionName")
     if not name:
@@ -46,7 +47,7 @@ def _lambda_resource(dims: dict[str, str], region: str, account: str):
     return fetch
 
 
-def _sqs_resource(dims: dict[str, str], region: str, account: str):
+def _sqs_resource(dims: dict[str, str], region: str, account: str) -> Callable[[Any], dict[str, str]] | None:
     """Resolver for AWS/SQS metrics — tags the SQS queue directly."""
     name = dims.get("QueueName")
     if not name:
@@ -59,7 +60,7 @@ def _sqs_resource(dims: dict[str, str], region: str, account: str):
     return fetch
 
 
-def _ecs_resource(dims: dict[str, str], region: str, account: str):
+def _ecs_resource(dims: dict[str, str], region: str, account: str) -> Callable[[Any], dict[str, str]] | None:
     """Resolver for AWS/ECS metrics — tags the ECS service directly."""
     cluster = dims.get("ClusterName")
     service = dims.get("ServiceName")
@@ -78,7 +79,7 @@ def _ecs_resource(dims: dict[str, str], region: str, account: str):
     return fetch
 
 
-def _ec2_resource(dims: dict[str, str], region: str, account: str):
+def _ec2_resource(dims: dict[str, str], region: str, account: str) -> Callable[[Any], dict[str, str]] | None:
     """Resolver for AWS/EC2 metrics — tags the EC2 instance directly."""
     instance_id = dims.get("InstanceId")
     if not instance_id:
@@ -226,7 +227,8 @@ class AlarmTagResolver:
         import boto3  # local import: only when resolution is enabled
 
         session = self._session or boto3.session.Session()
-        return fetch(session)
+        result: dict[str, str] = fetch(session)
+        return result
 
     @staticmethod
     def _extract_dimensions(detail: dict[str, Any]) -> dict[str, str]:

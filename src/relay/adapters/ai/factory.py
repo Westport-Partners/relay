@@ -42,7 +42,8 @@ def _load_key() -> str | None:
 
             client = boto3.client("secretsmanager")
             response = client.get_secret_value(SecretId=secret_name)
-            return response.get("SecretString")
+            secret: str | None = response.get("SecretString")
+            return secret
         except Exception:
             logger.warning(
                 "factory._load_key: failed to fetch secret %r from Secrets Manager;"
