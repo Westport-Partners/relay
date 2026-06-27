@@ -105,3 +105,8 @@ site/
 
 # Operator-local deploy wrappers (env-specific, never published)
 scripts/*.local.sh
+
+# Transient SDD planning artifacts (plan/research/tasks scratchpads) — history lives in GitHub issues
+specs/_active/
+# spec-kit per-feature pointer (transient; set by setup-plan per active feature)
+.specify/feature.json
