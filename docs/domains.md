@@ -42,9 +42,10 @@ always rewritten to describe only the current design.**
 | 13 | Integrations & config | `core/lifecycle.py`, `adapters/integrations/`, `config/` | [spec](https://github.com/Westport-Partners/relay/blob/main/specs/integrations-config/spec.md) | [§12, §15](status.md) |
 | 14 | Node ↔ Hub federation | `hub/fleet_store.py`, `node/handler.py` | [spec](https://github.com/Westport-Partners/relay/blob/main/specs/node-hub-federation/spec.md) | [§13](status.md) |
 | 15 | AI capability | `adapters/ai/` | [spec](https://github.com/Westport-Partners/relay/blob/main/specs/ai/spec.md) | [§14](status.md) |
-| 16 | UI / dashboard | `hub/dashboard.html` | [spec](https://github.com/Westport-Partners/relay/blob/main/specs/ui/spec.md) · [design language](https://github.com/Westport-Partners/relay/blob/main/specs/ui/design-language.md) | cross-cutting |
+| 16 | UI / dashboard | `hub/dashboard_parts/` | [spec](https://github.com/Westport-Partners/relay/blob/main/specs/ui/spec.md) · [design language](https://github.com/Westport-Partners/relay/blob/main/specs/ui/design-language.md) | cross-cutting |
 
-**UI is cross-cutting.** The single `hub/dashboard.html` renders many domains, so
+**UI is cross-cutting.** The dashboard (`hub/dashboard_parts/`, assembled into one
+page at serve time) renders many domains, so
 it has its own domain *and* a binding
 [design language](https://github.com/Westport-Partners/relay/blob/main/specs/ui/design-language.md)
 that all UI work must conform to.

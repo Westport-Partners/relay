@@ -272,8 +272,37 @@ except ImportError:
     FastAPI = None  # type: ignore[assignment,misc]
     HTTPException = None  # type: ignore[assignment,misc]
 
-# Path to the embedded dashboard HTML.
-_DASHBOARD_HTML_PATH = pathlib.Path(__file__).parent / "dashboard.html"
+# The dashboard UI is authored as ordered fragments under dashboard_parts/
+# (one per view/section, split at the in-file banner markers) and assembled into
+# a single HTML document at serve time. Concatenating the manifest's fragments in
+# order is byte-identical to the historical single-file dashboard.html. Editing a
+# section means editing its fragment; the set still shares one <style> pair and
+# one global-scope <script> (the parts are concatenated, NOT loaded as separate
+# modules). A monolithic dashboard.html is still honored as a fallback.
+_DASHBOARD_DIR = pathlib.Path(__file__).parent
+_DASHBOARD_PARTS_DIR = _DASHBOARD_DIR / "dashboard_parts"
+_DASHBOARD_HTML_PATH = _DASHBOARD_DIR / "dashboard.html"
+
+
+def _render_dashboard_html() -> str:
+    """Assemble the dashboard HTML from ordered fragments.
+
+    Reads ``dashboard_parts/manifest.txt`` (ignoring blank/``#`` lines) and
+    concatenates each named fragment in order. Falls back to a monolithic
+    ``dashboard.html`` if the parts directory or manifest is absent.
+    """
+    manifest = _DASHBOARD_PARTS_DIR / "manifest.txt"
+    if manifest.is_file():
+        names = [
+            ln.strip()
+            for ln in manifest.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")
+        ]
+        return "".join(
+            (_DASHBOARD_PARTS_DIR / name).read_text(encoding="utf-8")
+            for name in names
+        )
+    return _DASHBOARD_HTML_PATH.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -1631,7 +1660,7 @@ class HubApp:
         @app.get("/", response_class=HTMLResponse)
         def dashboard() -> HTMLResponse:
             try:
-                html = _DASHBOARD_HTML_PATH.read_text(encoding="utf-8")
+                html = _render_dashboard_html()
             except FileNotFoundError:
                 html = "<html><body><h1>Dashboard HTML missing</h1></body></html>"
             return HTMLResponse(content=html)

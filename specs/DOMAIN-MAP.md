@@ -43,9 +43,9 @@ hold the history.
 | 13 | [Integrations & config](integrations-config/spec.md) | `core/lifecycle.py`, `adapters/integrations/`, `config/` | `integrations-config/` | §12, §15 |
 | 14 | [Node ↔ Hub federation](node-hub-federation/spec.md) | `hub/fleet_store.py`, `node/handler.py` | `node-hub-federation/` | §13 |
 | 15 | [AI capability](ai/spec.md) | `adapters/ai/` | `ai/` | §14 |
-| 16 | [UI / dashboard](ui/spec.md) | `hub/dashboard.html` | `ui/` | (cross-cutting) |
+| 16 | [UI / dashboard](ui/spec.md) | `hub/dashboard_parts/` (assembled by `hub/app.py`) | `ui/` | (cross-cutting) |
 
-**UI is cross-cutting.** The single `hub/dashboard.html` renders many domains, so
+**UI is cross-cutting.** The dashboard (`hub/dashboard_parts/`, assembled at serve time) renders many domains, so
 it has its own domain *and* a binding [design language](ui/design-language.md)
 that all UI work must conform to. When a feature has a UI surface, its domain spec
 describes the data contract; the `ui/` spec describes how it looks and behaves.

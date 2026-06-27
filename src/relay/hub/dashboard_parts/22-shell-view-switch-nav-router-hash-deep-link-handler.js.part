@@ -1,0 +1,57 @@
+// ==== SHELL: view-switch nav router + hash deep-link handler ====
+// -----------------------------------------------------------------------
+// View switching (Fleet / Incidents / Contacts / On-Call)
+// -----------------------------------------------------------------------
+let activeView = 'fleet';
+// Only the top-level nav buttons carry data-view. Other .nav-btn elements
+// (e.g. the Open/History tabs inside the Incidents view) reuse the class for
+// styling and must NOT trigger a view switch — otherwise activeView becomes
+// undefined and every view is hidden (blank screen).
+document.querySelectorAll('.nav-btn[data-view]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-btn[data-view]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeView = btn.dataset.view;
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + activeView).classList.add('active');
+    // Top strip: reflect the active view title (uppercased via CSS).
+    const TITLES = { fleet: 'Fleet Status', incidents: 'Incidents', metrics: 'Metrics',
+                     contacts: 'Contacts', oncall: 'On-Call', settings: 'Settings', schedule: 'Schedule',
+                     maintenance: 'Maintenance', rules: 'Ignore Rules' };
+    const titleEl = document.getElementById('view-title');
+    if (titleEl) titleEl.textContent = TITLES[activeView] || activeView;
+    // Filter-bar only visible on Fleet view.
+    document.getElementById('filter-bar').style.visibility = activeView === 'fleet' ? 'visible' : 'hidden';
+    if (activeView === 'incidents') loadIncidents();
+    if (activeView === 'metrics') loadMetrics();
+    if (activeView === 'contacts') loadContacts();
+    if (activeView === 'oncall') loadOncall();
+    if (activeView === 'settings') loadSettings();
+    if (activeView === 'schedule') loadSchedule();
+    if (activeView === 'maintenance') loadMaintenance();
+    if (activeView === 'rules') loadRules();
+  });
+});
+
+// -----------------------------------------------------------------------
+// Hash router — deep links like #/incident/<correlation_id> (used by the
+// Teams webhook "Open in Relay" link) switch to the Incidents view and open
+// that incident's detail drawer.
+// -----------------------------------------------------------------------
+function navTo(view) {
+  const btn = document.querySelector('.nav-btn[data-view="' + view + '"]');
+  if (btn) btn.click();
+}
+
+function handleHash() {
+  const m = (location.hash || '').match(/^#\/incident\/(.+)$/);
+  if (!m) return;
+  const id = decodeURIComponent(m[1]);
+  navTo('incidents');
+  openIncident(id);
+}
+
+window.addEventListener('hashchange', handleHash);
+// Run once on load (after the rest of the app initializes).
+handleHash();
+

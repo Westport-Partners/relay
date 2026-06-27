@@ -942,3 +942,58 @@ class TestDynamicCatalog:
         tree = hub_state.get_org_tree()
         assert tree is not None
         assert tree.get("dep-auth-prod") is not None
+
+
+# ===========================================================================
+# Dashboard fragment assembly (#28 phase 2)
+# ===========================================================================
+
+
+class TestDashboardAssembly:
+    """The dashboard UI is authored as ordered fragments under dashboard_parts/
+    and assembled at serve time. These lock the contract: a manifest exists, the
+    fragments it names exist, and the assembled document is a single well-formed
+    HTML page with exactly one <script>/<style> pair (shared global scope)."""
+
+    def test_manifest_and_named_fragments_exist(self):
+        from relay.hub.app import _DASHBOARD_PARTS_DIR
+
+        manifest = _DASHBOARD_PARTS_DIR / "manifest.txt"
+        assert manifest.is_file(), "dashboard_parts/manifest.txt must exist"
+        names = [
+            ln.strip()
+            for ln in manifest.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")
+        ]
+        assert names, "manifest lists no fragments"
+        for name in names:
+            assert (_DASHBOARD_PARTS_DIR / name).is_file(), f"missing fragment: {name}"
+
+    def test_assembled_html_is_well_formed_single_document(self):
+        from relay.hub.app import _render_dashboard_html
+
+        html = _render_dashboard_html()
+        # One document, one shared scope: exactly one script + one style pair.
+        assert html.count("<script>") == 1
+        assert html.count("</script>") == 1
+        assert html.count("<style>") == 1
+        assert html.count("</style>") == 1
+        assert html.lstrip().startswith("<!"), "must start with a doctype"
+        assert "</html>" in html
+        # Substantial — guards against a truncated/empty assembly.
+        assert len(html) > 100_000
+
+    def test_assembly_is_concatenation_in_manifest_order(self):
+        from relay.hub.app import _DASHBOARD_PARTS_DIR, _render_dashboard_html
+
+        names = [
+            ln.strip()
+            for ln in (_DASHBOARD_PARTS_DIR / "manifest.txt")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")
+        ]
+        expected = "".join(
+            (_DASHBOARD_PARTS_DIR / name).read_text(encoding="utf-8") for name in names
+        )
+        assert _render_dashboard_html() == expected

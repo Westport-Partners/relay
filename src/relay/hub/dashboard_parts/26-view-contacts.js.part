@@ -1,0 +1,458 @@
+// ==== VIEW: contacts (loadContacts / renderContacts) ====
+// -----------------------------------------------------------------------
+// Contacts view
+// -----------------------------------------------------------------------
+let editingContactId = null;
+
+// Contacts table sort state (persists across re-renders within a session).
+let contactSort = { key: 'name', dir: 1 }; // dir: 1 asc, -1 desc
+
+async function loadContacts() {
+  const view = document.getElementById('view-contacts');
+  view.innerHTML = '<div style="color:var(--text-dim);padding:20px;">Loading…</div>';
+  let contacts = [];
+  let avMap = new Map();
+  let shiftCounts = new Map();
+  try {
+    const [r1, r2, r3] = await Promise.all([
+      fetch('/contacts'),
+      fetch('/availability'),
+      fetch('/schedule?week=' + getThisMonday()),
+    ]);
+    if (!r1.ok) throw new Error('fetch failed');
+    contacts = await r1.json();
+    if (r2.ok) {
+      const avList = await r2.json();
+      avList.forEach(a => avMap.set(a.contact_id, a));
+    }
+    if (r3.ok) {
+      const sched = await r3.json();
+      (sched.slots || []).forEach(s => {
+        if (s.contact_id) shiftCounts.set(s.contact_id, (shiftCounts.get(s.contact_id) || 0) + 1);
+      });
+    }
+  } catch (_) {
+    view.innerHTML = '<div style="color:var(--red);padding:20px;">Failed to load contacts.</div>';
+    return;
+  }
+  renderContacts(contacts, avMap, shiftCounts);
+}
+
+function renderContacts(contacts, avMap = new Map(), shiftCounts = new Map()) {
+  const view = document.getElementById('view-contacts');
+  const addBtn = CAN_WRITE
+    ? `<button class="btn-primary" id="btn-add-contact">+ Add contact</button>`
+    : `<button class="btn-primary" disabled title="Read-only: authentication not configured" style="opacity:.45;cursor:not-allowed;">+ Add contact</button>`;
+
+  const DAYS = ['mon','tue','wed','thu','fri','sat','sun'];
+  const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const SHIFTS = ['night','day','evening'];
+  const SHIFT_LABELS = ['Night','Day','Eve'];
+
+  // Sort a copy by the active column; on-call/shifts derive from avMap/shiftCounts.
+  const sortVal = (c, key) => {
+    const av = avMap.get(c.contact_id) || {};
+    switch (key) {
+      case 'name': return (c.name || '').toLowerCase();
+      case 'email': return (c.email || '').toLowerCase();
+      case 'phone': return (c.phone || '').toLowerCase();
+      case 'oncall': return av.available === true ? 1 : 0;
+      case 'shifts': return shiftCounts.get(c.contact_id) || 0;
+      default: return '';
+    }
+  };
+  const sorted = contacts.slice().sort((a, b) => {
+    const va = sortVal(a, contactSort.key), vb = sortVal(b, contactSort.key);
+    if (va < vb) return -1 * contactSort.dir;
+    if (va > vb) return 1 * contactSort.dir;
+    // Stable tiebreak by name.
+    return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+  });
+
+  const rows = sorted.length ? sorted.map(c => {
+    const av = avMap.get(c.contact_id) || { available: false, slots: {}, ooo: null, roles: [] };
+    const isAvail = av.available === true;
+    const slots = av.slots || {};
+    const ooo = av.ooo || null;
+    // Roles this person is eligible for (default primary+secondary if unset).
+    const avRoles = Array.isArray(av.roles) && av.roles.length ? av.roles : ['primary', 'secondary'];
+    const nShifts = shiftCounts.get(c.contact_id) || 0;
+    const onCallCell = isAvail
+      ? '<span style="color:var(--green);">&#9679; Yes</span>'
+      : '<span style="color:var(--text-dim);">&#9675; No</span>';
+    const shiftsCell = nShifts > 0
+      ? `<span style="color:var(--text);">${nShifts}</span>`
+      : '<span style="color:var(--text-dim);">0</span>';
+
+    // Build grid cells HTML
+    const gridCells = DAYS.map((day, di) => {
+      const dayCells = SHIFTS.map((shift, si) => {
+        const isOn = Array.isArray(slots[day]) && slots[day].includes(shift);
+        return `<button class="avail-btn${isOn ? ' on' : ''}" data-day="${day}" data-shift="${shift}"
+          ${!CAN_WRITE ? 'disabled' : ''}
+          aria-pressed="${isOn}">${isOn ? '✓' : ''}</button>`;
+      }).join('');
+      return `<span class="avail-day-label">${DAY_LABELS[di]}</span>${dayCells}`;
+    }).join('');
+
+    const oooStart = ooo ? ooo.start : '';
+    const oooEnd = ooo ? ooo.end : '';
+
+    const copyableCell = (val) => val
+      ? `${esc(val)}<button class="copy-btn" data-copy="${esc(val)}" title="Copy">⧉</button>`
+      : '—';
+    return `
+    <tr data-cid="${esc(c.contact_id)}">
+      <td>${esc(c.name || '—')}</td>
+      <td>${copyableCell(c.email)}</td>
+      <td>${copyableCell(c.phone)}</td>
+      <td style="text-align:center;">${onCallCell}</td>
+      <td style="text-align:center;">${shiftsCell}</td>
+      <td>
+        <button class="btn-sm btn-test-contact" data-cid="${esc(c.contact_id)}"
+          ${!CAN_WRITE ? 'disabled title="Read-only: authentication not configured"' : ''}>Test page</button>
+        <span class="test-page-result" data-cid="${esc(c.contact_id)}" style="font-size:11px;margin-left:6px;"></span>
+      </td>
+      <td style="white-space:nowrap;">
+        <button class="btn-sm btn-edit-contact" data-cid="${esc(c.contact_id)}"
+          ${!CAN_WRITE ? 'disabled title="Read-only: authentication not configured"' : ''}>Edit</button>
+        &nbsp;
+        <button class="btn-sm danger btn-del-contact" data-cid="${esc(c.contact_id)}"
+          ${!CAN_WRITE ? 'disabled title="Read-only: authentication not configured"' : ''}>Delete</button>
+        &nbsp;
+        <button class="btn-sm btn-avail-toggle" data-cid="${esc(c.contact_id)}">On-call &#9656;</button>
+      </td>
+    </tr>
+    <tr class="avail-expander-row" id="avail-row-${esc(c.contact_id)}">
+      <td colspan="7">
+        <div class="avail-panel">
+          <div class="avail-toggle-row">
+            <input type="checkbox" id="avail-master-${esc(c.contact_id)}" class="avail-master-chk" data-cid="${esc(c.contact_id)}"
+              ${isAvail ? 'checked' : ''} ${!CAN_WRITE ? 'disabled' : ''}>
+            <label for="avail-master-${esc(c.contact_id)}" style="cursor:pointer;">Available for on-call</label>
+          </div>
+          <div class="avail-grid-wrap" style="${isAvail ? '' : 'opacity:0.4;pointer-events:none;'}">
+            <div class="avail-grid">
+              <span></span>
+              ${SHIFT_LABELS.map(l => `<span class="avail-grid-header">${l}</span>`).join('')}
+              ${gridCells}
+            </div>
+          </div>
+          <div class="avail-roles-row" style="${isAvail ? '' : 'opacity:0.4;pointer-events:none;'}">
+            <span style="color:var(--text-dim);">Eligible roles:</span>
+            ${SCHED_ROLES.map(role => `
+              <label class="avail-role-chip">
+                <input type="checkbox" class="avail-role-chk" value="${esc(role)}"
+                  ${avRoles.includes(role) ? 'checked' : ''} ${!CAN_WRITE ? 'disabled' : ''}>
+                ${esc(SCHED_ROLE_LABELS[role] || role)}
+              </label>`).join('')}
+          </div>
+          <div class="avail-ooo-row" style="${isAvail ? '' : 'opacity:0.4;pointer-events:none;'}">
+            <span style="color:var(--text-dim);">Time off:</span>
+            <input type="date" class="avail-ooo-start" value="${esc(oooStart)}" ${!CAN_WRITE ? 'disabled' : ''}>
+            <span style="color:var(--text-dim);">to</span>
+            <input type="date" class="avail-ooo-end" value="${esc(oooEnd)}" ${!CAN_WRITE ? 'disabled' : ''}>
+            <button class="btn-sm avail-ooo-clear" data-cid="${esc(c.contact_id)}" ${!CAN_WRITE ? 'disabled' : ''}>Clear</button>
+          </div>
+          <div class="avail-save-row">
+            <button class="btn-primary avail-save-btn" data-cid="${esc(c.contact_id)}"
+              style="font-size:12px;padding:4px 14px;" ${!CAN_WRITE ? 'disabled title="Read-only: authentication not configured"' : ''}>Save</button>
+            <span class="avail-saved-msg" id="avail-saved-${esc(c.contact_id)}"></span>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="7" style="color:var(--text-dim);padding:20px 10px;">No contacts yet.</td></tr>`;
+
+  // Sortable header: clickable th with an arrow indicator on the active column.
+  const arrow = (key) => contactSort.key === key ? (contactSort.dir === 1 ? ' ▲' : ' ▼') : '';
+  const th = (key, label, extra = '') =>
+    `<th class="sortable" data-sort="${key}" style="cursor:pointer;user-select:none;${extra}">${label}${arrow(key)}</th>`;
+
+  view.innerHTML = `
+    <div class="info-banner">&#128274; Contacts (name, email, phone) are stored only in this account&#39;s DynamoDB — never in Git.</div>
+    <div class="view-toolbar">
+      <h2>Contacts</h2>
+      ${addBtn}
+    </div>
+    <div id="contact-form-area"></div>
+    <div id="contacts-err" class="form-err" style="margin-bottom:8px;"></div>
+    <table class="contacts-table">
+      <thead><tr>
+        ${th('name', 'Name')}
+        ${th('email', 'Email')}
+        ${th('phone', 'Phone')}
+        ${th('oncall', 'On-call', 'text-align:center;')}
+        ${th('shifts', 'Shifts (wk)', 'text-align:center;')}
+        <th>Test</th><th></th>
+      </tr></thead>
+      <tbody id="contacts-tbody">${rows}</tbody>
+    </table>`;
+
+  // Wire sortable headers — toggle direction if same column, else asc.
+  view.querySelectorAll('th.sortable').forEach(h => {
+    h.addEventListener('click', () => {
+      const key = h.dataset.sort;
+      if (contactSort.key === key) contactSort.dir *= -1;
+      else contactSort = { key, dir: 1 };
+      renderContacts(contacts, avMap, shiftCounts);
+    });
+  });
+
+  // Wire copy buttons (email / phone) — clipboard with brief inline confirm.
+  view.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const val = btn.dataset.copy || '';
+      const done = () => { const o = btn.textContent; btn.textContent = '✓'; setTimeout(() => { btn.textContent = o; }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(val).then(done).catch(() => {});
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = val; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (_) {}
+        document.body.removeChild(ta);
+      }
+    });
+  });
+
+  const addBtnEl = document.getElementById('btn-add-contact');
+  if (addBtnEl) addBtnEl.addEventListener('click', () => showContactForm(null, null));
+
+  document.querySelectorAll('.btn-edit-contact').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cid = btn.dataset.cid;
+      const c = contacts.find(x => x.contact_id === cid);
+      if (c) showContactForm(c, contacts);
+    });
+  });
+
+  document.querySelectorAll('.btn-del-contact').forEach(btn => {
+    btn.addEventListener('click', () => confirmDeleteContact(btn.dataset.cid));
+  });
+
+  document.querySelectorAll('.btn-test-contact').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!CAN_WRITE) return;
+      const cid = btn.dataset.cid;
+      const resultEl = document.querySelector(`.test-page-result[data-cid="${CSS.escape(cid)}"]`);
+      btn.disabled = true;
+      btn.textContent = 'Testing…';
+      if (resultEl) resultEl.textContent = '';
+      try {
+        const r = await fetch('/contacts/' + encodeURIComponent(cid) + '/test', { method: 'POST' });
+        const body = await r.json().catch(() => ({}));
+        if (r.status === 403) {
+          if (resultEl) { resultEl.textContent = '✗ not authorised'; resultEl.style.color = 'var(--red)'; }
+        } else if (r.status === 404) {
+          if (resultEl) { resultEl.textContent = '✗ contact not found'; resultEl.style.color = 'var(--red)'; }
+        } else if (body.ok) {
+          const chs = body.channels || {};
+          const sent = Object.entries(chs).filter(([,v]) => v).map(([k]) => k);
+          const msg = sent.length ? '✓ sent (' + sent.join(', ') + ')' : '✓ sent';
+          if (resultEl) { resultEl.textContent = msg; resultEl.style.color = 'var(--green)'; }
+        } else {
+          if (resultEl) { resultEl.textContent = '✗ failed'; resultEl.style.color = 'var(--red)'; }
+        }
+      } catch (_) {
+        if (resultEl) { resultEl.textContent = '✗ network error'; resultEl.style.color = 'var(--red)'; }
+      }
+      btn.disabled = false;
+      btn.textContent = 'Test page';
+      // Auto-clear result after 8s
+      if (resultEl) setTimeout(() => { resultEl.textContent = ''; }, 8000);
+    });
+  });
+
+  // Wire availability expanders
+  document.querySelectorAll('.btn-avail-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cid = btn.dataset.cid;
+      const row = document.getElementById('avail-row-' + cid);
+      if (!row) return;
+      const isOpen = row.classList.toggle('open');
+      btn.textContent = 'On-call ' + (isOpen ? '▾' : '▸');
+    });
+  });
+
+  // Wire master on-call toggle — grey out grid/ooo when off
+  document.querySelectorAll('.avail-master-chk').forEach(chk => {
+    chk.addEventListener('change', () => {
+      const cid = chk.dataset.cid;
+      const row = document.getElementById('avail-row-' + cid);
+      if (!row) return;
+      const on = chk.checked;
+      // Enable/disable all three sub-sections together (grid, roles, OOO).
+      ['.avail-grid-wrap', '.avail-roles-row', '.avail-ooo-row'].forEach(sel => {
+        const el = row.querySelector(sel);
+        if (el) el.style.cssText = on ? '' : 'opacity:0.4;pointer-events:none;';
+      });
+    });
+  });
+
+  // Wire avail grid buttons (toggle on/off)
+  document.querySelectorAll('.avail-btn').forEach(btn => {
+    if (btn.disabled) return;
+    btn.addEventListener('click', () => {
+      const isOn = btn.classList.toggle('on');
+      btn.setAttribute('aria-pressed', isOn);
+      btn.textContent = isOn ? '✓' : '';
+    });
+  });
+
+  // Wire OOO clear
+  document.querySelectorAll('.avail-ooo-clear').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cid = btn.dataset.cid;
+      const row = document.getElementById('avail-row-' + cid);
+      if (!row) return;
+      const startInp = row.querySelector('.avail-ooo-start');
+      const endInp   = row.querySelector('.avail-ooo-end');
+      if (startInp) startInp.value = '';
+      if (endInp)   endInp.value   = '';
+    });
+  });
+
+  // Wire save buttons
+  document.querySelectorAll('.avail-save-btn').forEach(btn => {
+    if (!CAN_WRITE) return;
+    btn.addEventListener('click', async () => {
+      const cid = btn.dataset.cid;
+      const row = document.getElementById('avail-row-' + cid);
+      if (!row) return;
+      const masterChk = row.querySelector('.avail-master-chk');
+      const gridBtns  = row.querySelectorAll('.avail-btn');
+      const startInp  = row.querySelector('.avail-ooo-start');
+      const endInp    = row.querySelector('.avail-ooo-end');
+      const savedMsg  = document.getElementById('avail-saved-' + cid);
+
+      const available = masterChk ? masterChk.checked : false;
+      const slots = {};
+      gridBtns.forEach(gb => {
+        if (gb.classList.contains('on')) {
+          const d = gb.dataset.day, s = gb.dataset.shift;
+          if (!slots[d]) slots[d] = [];
+          slots[d].push(s);
+        }
+      });
+      const oooStart = startInp ? startInp.value : '';
+      const oooEnd   = endInp   ? endInp.value   : '';
+      const ooo = (oooStart && oooEnd) ? { start: oooStart, end: oooEnd } : null;
+
+      const roles = Array.from(row.querySelectorAll('.avail-role-chk'))
+        .filter(chk => chk.checked).map(chk => chk.value);
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      if (savedMsg) { savedMsg.textContent = ''; savedMsg.style.color = 'var(--green)'; }
+      try {
+        const r = await fetch('/availability/' + encodeURIComponent(cid), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ available, slots, ooo, roles }),
+        });
+        if (r.ok) {
+          if (savedMsg) { savedMsg.textContent = '✓ saved'; }
+          setTimeout(() => { if (savedMsg) savedMsg.textContent = ''; }, 4000);
+        } else {
+          const body = await r.json().catch(() => ({}));
+          if (savedMsg) {
+            savedMsg.textContent = r.status === 403 ? '✗ not authorised' : ('✗ ' + (body.detail || 'Error ' + r.status));
+            savedMsg.style.color = 'var(--red)';
+          }
+        }
+      } catch (_) {
+        if (savedMsg) { savedMsg.textContent = '✗ network error'; savedMsg.style.color = 'var(--red)'; }
+      }
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    });
+  });
+}
+
+function showContactForm(contact, allContacts) {
+  const area = document.getElementById('contact-form-area');
+  const isEdit = !!contact;
+  area.innerHTML = `
+    <form class="contact-form" id="contact-form">
+      <div style="font-size:13px;font-weight:600;color:#fff;">${isEdit ? 'Edit contact' : 'Add contact'}</div>
+      <label>Name
+        <input name="name" type="text" required value="${isEdit ? esc(contact.name || '') : ''}" placeholder="Alice Smith">
+      </label>
+      <label>Email
+        <input name="email" type="email" value="${isEdit ? esc(contact.email || '') : ''}" placeholder="alice@example.com">
+      </label>
+      <label>Phone
+        <input name="phone" type="tel" value="${isEdit ? esc(contact.phone || '') : ''}" placeholder="+1-555-0100">
+      </label>
+      <div id="contact-form-err" class="form-err"></div>
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">${isEdit ? 'Save' : 'Create'}</button>
+        <button type="button" class="btn-sm" id="btn-cancel-contact">Cancel</button>
+      </div>
+    </form>`;
+
+  document.getElementById('btn-cancel-contact').addEventListener('click', () => { area.innerHTML = ''; });
+
+  document.getElementById('contact-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = {
+      contact_id: isEdit ? contact.contact_id : ('cnt-' + Math.random().toString(36).slice(2, 9)),
+      name: fd.get('name') || '',
+      email: fd.get('email') || '',
+      phone: fd.get('phone') || '',
+    };
+    const errEl = document.getElementById('contact-form-err');
+    errEl.textContent = '';
+    try {
+      const r = await fetch('/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (r.ok) {
+        area.innerHTML = '';
+        loadContacts();
+      } else {
+        const body = await r.json().catch(() => ({}));
+        errEl.textContent = r.status === 403 ? 'Not authorised.' : (body.detail || ('Error ' + r.status));
+      }
+    } catch (_) { errEl.textContent = 'Network error.'; }
+  });
+}
+
+async function confirmDeleteContact(contactId) {
+  const errEl = document.getElementById('contacts-err');
+  if (errEl) errEl.textContent = '';
+  // Inline confirm: replace the row's delete button text.
+  const btn = document.querySelector(`.btn-del-contact[data-cid="${CSS.escape(contactId)}"]`);
+  if (!btn) return;
+  if (btn.dataset.confirming) {
+    btn.dataset.confirming = '';
+    btn.textContent = 'Delete';
+    btn.classList.remove('danger');
+    return;
+  }
+  btn.dataset.confirming = '1';
+  btn.textContent = 'Confirm?';
+  btn.classList.add('danger');
+  // Auto-reset after 4s.
+  setTimeout(() => {
+    if (btn.dataset.confirming) { btn.dataset.confirming = ''; btn.textContent = 'Delete'; }
+  }, 4000);
+  btn.addEventListener('click', async function handler() {
+    if (!btn.dataset.confirming) return;
+    btn.removeEventListener('click', handler);
+    try {
+      const r = await fetch('/contacts/' + encodeURIComponent(contactId), { method: 'DELETE' });
+      if (r.ok) {
+        loadContacts();
+      } else {
+        const body = await r.json().catch(() => ({}));
+        if (errEl) errEl.textContent = r.status === 403 ? 'Not authorised.' : (body.detail || ('Error ' + r.status));
+      }
+    } catch (_) { if (errEl) errEl.textContent = 'Network error.'; }
+  }, { once: true });
+}
+

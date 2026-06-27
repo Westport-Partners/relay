@@ -1,0 +1,24 @@
+# Ordered fragments assembled into the dashboard HTML at serve time.
+# Concatenating these in order is byte-identical to the original dashboard.html.
+# Edit a fragment to change that section. Keep exactly one <style> pair and one
+# <script> pair across the whole set (shared global JS scope — parts are concatenated,
+# NOT loaded as separate <script>/ES modules).
+00-doc-open.part.html
+01-styles.part.html
+02-body-shell.part.html
+10-preamble-navmap.js.part
+20-shared-helpers.js.part
+21-view-fleet-big-board.js.part
+22-shell-view-switch-nav-router-hash-deep-link-handler.js.part
+23-view-incidents.js.part
+24-drawer-incident-detail.js.part
+25-drawer-fleet-tile-detail.js.part
+26-view-contacts.js.part
+27-view-metrics.js.part
+28-view-oncall.js.part
+29-view-settings.js.part
+30-view-maintenance.js.part
+31-view-schedule.js.part
+32-view-rules.js.part
+33-shared-ignore-routing-rule-forms.js.part
+99-doc-close.part.html

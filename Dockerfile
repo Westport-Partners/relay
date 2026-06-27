@@ -52,11 +52,15 @@ USER root
 RUN chmod +x ./scripts/relay-entrypoint.sh
 USER relay
 
-# Confirm dashboard.html was included in the installed package
-# (fails the build early if the file is missing from the wheel).
-RUN python -c "import relay.hub.app; import pathlib; \
-    p = pathlib.Path(relay.hub.app.__file__).parent / 'dashboard.html'; \
-    assert p.exists(), f'dashboard.html missing from installed package: {p}'"
+# Confirm the dashboard UI fragments were included in the installed package and
+# assemble into a non-empty document (fails the build early if any part is
+# missing from the wheel).
+RUN python -c "import relay.hub.app as a; \
+    assert (a._DASHBOARD_PARTS_DIR / 'manifest.txt').exists(), \
+        f'dashboard_parts/manifest.txt missing from installed package: {a._DASHBOARD_PARTS_DIR}'; \
+    html = a._render_dashboard_html(); \
+    assert html.strip().startswith('<!') and '</html>' in html and len(html) > 100000, \
+        'assembled dashboard HTML looks wrong'"
 
 ENV PYTHONUNBUFFERED=1
 # Where the ClaudeCodeAssistant looks for the bundled investigation skill pack.
