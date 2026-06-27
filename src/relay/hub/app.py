@@ -272,8 +272,38 @@ except ImportError:
     FastAPI = None  # type: ignore[assignment,misc]
     HTTPException = None  # type: ignore[assignment,misc]
 
-# Path to the embedded dashboard HTML.
-_DASHBOARD_HTML_PATH = pathlib.Path(__file__).parent / "dashboard.html"
+# The dashboard UI is authored as ordered fragments under dashboard_parts/
+# (the document open, the <style> sheet, and the body shell) assembled into a
+# single HTML document at serve time. The JavaScript is no longer concatenated:
+# it lives as native ES modules under dashboard_modules/, served read-only at
+# /static/dashboard/ and loaded by the shell via <script type="module">. Editing
+# a CSS/markup section means editing its fragment; editing behavior means editing
+# a module. A monolithic dashboard.html is still honored as a fallback.
+_DASHBOARD_DIR = pathlib.Path(__file__).parent
+_DASHBOARD_PARTS_DIR = _DASHBOARD_DIR / "dashboard_parts"
+_DASHBOARD_MODULES_DIR = _DASHBOARD_DIR / "dashboard_modules"
+_DASHBOARD_HTML_PATH = _DASHBOARD_DIR / "dashboard.html"
+
+
+def _render_dashboard_html() -> str:
+    """Assemble the dashboard HTML from ordered fragments.
+
+    Reads ``dashboard_parts/manifest.txt`` (ignoring blank/``#`` lines) and
+    concatenates each named fragment in order. Falls back to a monolithic
+    ``dashboard.html`` if the parts directory or manifest is absent.
+    """
+    manifest = _DASHBOARD_PARTS_DIR / "manifest.txt"
+    if manifest.is_file():
+        names = [
+            ln.strip()
+            for ln in manifest.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")
+        ]
+        return "".join(
+            (_DASHBOARD_PARTS_DIR / name).read_text(encoding="utf-8")
+            for name in names
+        )
+    return _DASHBOARD_HTML_PATH.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -1608,6 +1638,18 @@ class HubApp:
         """Build and return the FastAPI application. Does not start uvicorn."""
         app = FastAPI(title="Relay Hub", version="0.2.0")
 
+        # Serve the dashboard's ES modules as read-only static files. The browser
+        # loads them directly via <script type="module"> — no build step, no
+        # bundler, no CDN; the wheel ships them under dashboard_modules/.
+        if _DASHBOARD_MODULES_DIR.is_dir():
+            from fastapi.staticfiles import StaticFiles
+
+            app.mount(
+                "/static/dashboard",
+                StaticFiles(directory=str(_DASHBOARD_MODULES_DIR)),
+                name="dashboard-modules",
+            )
+
         hub_state = self._hub_state
         sse_publisher = self._sse_publisher
         incident_store = getattr(self, "_incident_store", None)
@@ -1631,7 +1673,7 @@ class HubApp:
         @app.get("/", response_class=HTMLResponse)
         def dashboard() -> HTMLResponse:
             try:
-                html = _DASHBOARD_HTML_PATH.read_text(encoding="utf-8")
+                html = _render_dashboard_html()
             except FileNotFoundError:
                 html = "<html><body><h1>Dashboard HTML missing</h1></body></html>"
             return HTMLResponse(content=html)

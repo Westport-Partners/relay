@@ -1,0 +1,99 @@
+</head>
+<body>
+
+<div id="app-shell">
+
+  <!-- Persistent left rail -->
+  <nav id="sidebar">
+    <div class="rail-brand"><span class="mark">&#9650;</span> <span>Relay</span></div>
+    <!-- Hub-type indicator: sits under the brand as a "Relay → <type>" stack so
+         it reads as context, not competing branding. Two visual states set by
+         /auth hub_scope — quiet ghost chip for Team, solid teal for Central. -->
+    <div id="hub-scope-badge" class="hub-scope" hidden>
+      <span class="hub-scope-dot"></span><span class="hub-scope-label"></span>
+    </div>
+    <div id="nav-bar">
+      <button class="nav-btn active" data-view="fleet">Fleet</button>
+      <button class="nav-btn" data-view="incidents">Incidents</button>
+      <button class="nav-btn" data-view="metrics">Metrics</button>
+      <button class="nav-btn" data-view="contacts">Contacts</button>
+      <button class="nav-btn" data-view="oncall">On-Call</button>
+      <button class="nav-btn" data-view="schedule">Schedule</button>
+      <button class="nav-btn" data-view="settings">Settings</button>
+      <button class="nav-btn" data-view="maintenance">Maintenance</button>
+      <button class="nav-btn" data-view="rules">Rules</button>
+    </div>
+    <div class="rail-spacer"></div>
+    <div id="auth-indicator" style="display:none;"></div>
+    <footer>
+      <span class="mk">&#9650;</span>
+      <span>Relay — open source by
+        <a href="https://www.westportpartners.com/" target="_blank" rel="noopener">Westport Partners</a>
+      </span>
+    </footer>
+  </nav>
+
+  <!-- Main column -->
+  <div id="main">
+    <div id="topstrip">
+      <span id="view-title">Fleet Status</span>
+      <div id="fleet-summary">Loading…</div>
+      <div id="filter-bar">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="incidents">Incidents only</button>
+      </div>
+      <div id="conn-status" class="warn">Connecting…</div>
+    </div>
+
+    <div id="conn-banner">&#9888; DASHBOARD CONNECTION LOST — data may be stale</div>
+
+    <div id="content">
+      <!-- Fleet view -->
+      <div id="view-fleet" class="view active">
+        <div id="grid"></div>
+        <div id="empty-state">No fleet apps registered yet.</div>
+      </div>
+
+      <!-- Incidents view -->
+      <div id="view-incidents" class="view">
+        <div class="inc-tabs">
+          <button class="nav-btn active" id="inc-tab-open">Open</button>
+          <button class="nav-btn" id="inc-tab-history">History</button>
+        </div>
+        <div id="incidents-list"></div>
+        <div id="incidents-empty" style="display:none;padding:60px 20px;text-align:center;color:var(--text-dim);">No open incidents.</div>
+      </div>
+
+      <!-- Metrics view -->
+      <div id="view-metrics" class="view"></div>
+
+      <!-- Contacts view -->
+      <div id="view-contacts" class="view"></div>
+
+      <!-- On-Call view -->
+      <div id="view-oncall" class="view"></div>
+
+      <!-- Settings view -->
+      <div id="view-settings" class="view"></div>
+
+      <!-- Schedule view -->
+      <div id="view-schedule" class="view"></div>
+
+      <!-- Maintenance view -->
+      <div id="view-maintenance" class="view"></div>
+
+      <!-- Rules view -->
+      <div id="view-rules" class="view"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Incident detail drawer -->
+<div id="drawer-overlay"></div>
+<div id="drawer"></div>
+
+<!-- Dashboard behavior is loaded as native ES modules (no build step). The
+     entry module wires init; it imports the view/helper/state modules served
+     read-only from /static/dashboard/. A module script is deferred by spec, so
+     it runs after the DOM above is parsed. -->
+<script type="module" src="/static/dashboard/main.js"></script>

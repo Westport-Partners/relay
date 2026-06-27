@@ -52,11 +52,20 @@ USER root
 RUN chmod +x ./scripts/relay-entrypoint.sh
 USER relay
 
-# Confirm dashboard.html was included in the installed package
-# (fails the build early if the file is missing from the wheel).
-RUN python -c "import relay.hub.app; import pathlib; \
-    p = pathlib.Path(relay.hub.app.__file__).parent / 'dashboard.html'; \
-    assert p.exists(), f'dashboard.html missing from installed package: {p}'"
+# Confirm the dashboard UI shipped in the installed package: the markup/CSS
+# fragments assemble into a well-formed shell that loads the ES-module entry
+# point, and the module directory (served read-only at /static/dashboard/) is
+# present with its entry module. Fails the build early if anything is missing
+# from the wheel.
+RUN python -c "import relay.hub.app as a; \
+    assert (a._DASHBOARD_PARTS_DIR / 'manifest.txt').exists(), \
+        f'dashboard_parts/manifest.txt missing from installed package: {a._DASHBOARD_PARTS_DIR}'; \
+    assert (a._DASHBOARD_MODULES_DIR / 'main.js').is_file(), \
+        f'dashboard_modules/main.js missing from installed package: {a._DASHBOARD_MODULES_DIR}'; \
+    html = a._render_dashboard_html(); \
+    assert html.strip().startswith('<!') and '</html>' in html, 'assembled dashboard shell looks wrong'; \
+    assert '<script type=\"module\" src=\"/static/dashboard/main.js\">' in html and '<script>' not in html, \
+        'dashboard shell must load the ES-module entry and carry no inline script'"
 
 ENV PYTHONUNBUFFERED=1
 # Where the ClaudeCodeAssistant looks for the bundled investigation skill pack.

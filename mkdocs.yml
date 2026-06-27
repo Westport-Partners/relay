@@ -68,6 +68,7 @@ nav:
       - Scheduling & escalation: scheduling.md
       - Integrations & AI: integrations.md
   - Reference:
+      - Domain Map: domains.md
       - Feature Status: status.md
       - AWS IM Coverage: coverage.md
   - Project:

@@ -1,4 +1,4 @@
-# Relay — Vision & Roadmap
+# Relay — Vision
 
 **Status:** Living document
 
@@ -69,18 +69,6 @@ for mark usage.
 Apache-2.0 — permissive, contributor- and adopter-friendly, with an explicit patent grant and
 no copyleft obligations that would deter adoption. The code license does not grant rights to the
 Westport Partners marks; see [TRADEMARK.md](https://github.com/Westport-Partners/relay/blob/main/TRADEMARK.md).
-
-## Roadmap
-
-- **Foundations (done).** Validated on live AWS: zero-config alarm capture, the in-process
-  detection pipeline, dual-stream paging, durable escalation timers, and the fleet dashboard fed
-  end-to-end — all in one always-on container.
-- **Locked-down adoption (done).** Bring-Your-Own-Role and Bring-Your-Own-VPC, so Relay installs
-  in role- and network-constrained accounts (the IAM surface is one task role + one execution role).
-- **Public-ready polish (in progress).** Apache license, branding, README, docs site, community
-  health files, architecture diagrams, CI.
-- **Next.** Broader integration coverage, AI-assisted incident augmentation (see [integrations.md](integrations.md)),
-  examples and tutorials, and tagged releases adopters can pin to.
 
 ## Contributing
 

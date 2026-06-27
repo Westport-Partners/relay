@@ -1,0 +1,111 @@
+// Metrics view — incident KPIs (counts, MTTR, time-to-ack) from /metrics.
+// Ported from dashboard_parts/27-view-metrics.js.part (#33).
+
+import { esc } from './helpers.js';
+import { navTo } from './router.js';
+
+// Module-local helper — only used inside this file.
+function fmtDuration(seconds) {
+  if (seconds === null || seconds === undefined) return '—';
+  const s = Math.round(seconds);
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+  return Math.floor(s / 86400) + 'd ' + Math.floor((s % 86400) / 3600) + 'h';
+}
+
+export async function loadMetrics() {
+  const view = document.getElementById('view-metrics');
+  view.innerHTML = '<div style="color:var(--text-dim);padding:20px;">Loading…</div>';
+  let m;
+  try {
+    const r = await fetch('/metrics');
+    if (!r.ok) throw new Error('fetch failed');
+    m = await r.json();
+  } catch (_) {
+    view.innerHTML = '<div style="color:var(--red);padding:20px;">Failed to load metrics.</div>';
+    return;
+  }
+
+  const tta = m.time_to_ack_seconds || {};
+  const ttr = m.time_to_resolve_seconds || {};
+
+  const card = (label, value, sub) => `
+    <div class="metric-card">
+      <div class="metric-value">${esc(String(value))}</div>
+      <div class="metric-label">${esc(label)}</div>
+      ${sub ? `<div class="metric-sub">${esc(sub)}</div>` : ''}
+    </div>`;
+
+  // Severity + source breakdown bars.
+  const sevOrder = ['SEV1', 'SEV2', 'SEV3', 'SEV4'];
+  const sevColors = { SEV1: 'var(--red)', SEV2: 'var(--red)', SEV3: 'var(--amber)', SEV4: 'var(--slate)' };
+  const bySev = m.by_severity || {};
+  const sevMax = Math.max(1, ...sevOrder.map(s => bySev[s] || 0));
+  const sevBars = sevOrder.map(s => `
+    <div class="bar-row">
+      <span class="bar-key">${s}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${((bySev[s] || 0) / sevMax * 100).toFixed(0)}%;background:${sevColors[s]};"></span></span>
+      <span class="bar-val">${bySev[s] || 0}</span>
+    </div>`).join('');
+
+  const bySource = m.by_source || {};
+  const srcRows = Object.keys(bySource).length
+    ? Object.entries(bySource).map(([k, v]) => `<span class="tally-chip">${esc(k)}: ${v}</span>`).join('')
+    : '<span style="color:var(--text-dim);">none</span>';
+
+  const durTable = (title, st) => `
+    <div class="metric-dur">
+      <div class="metric-dur-title">${esc(title)}</div>
+      <table class="metric-dur-table">
+        <tr><td>median (p50)</td><td>${fmtDuration(st.p50)}</td></tr>
+        <tr><td>mean</td><td>${fmtDuration(st.mean)}</td></tr>
+        <tr><td>p90</td><td>${fmtDuration(st.p90)}</td></tr>
+        <tr><td>max</td><td>${fmtDuration(st.max)}</td></tr>
+        <tr><td>samples</td><td>${st.count || 0}</td></tr>
+      </table>
+    </div>`;
+
+  const synthCount = m.synthetic_total || 0;
+  const synthBanner = synthCount > 0 ? `
+    <div class="synthetic-metrics-note">
+      <span class="badge-synthetic">TEST DATA</span>
+      ${synthCount} of ${m.total} incident${m.total === 1 ? '' : 's'} in these figures ${synthCount === 1 ? 'is' : 'are'} synthetic (test) data.
+      Clear them from <a href="#" class="synth-purge-link">Maintenance → Purge</a> when you're done verifying.
+    </div>` : '';
+
+  view.innerHTML = `
+    <div class="view-toolbar"><h2>Metrics</h2>
+      <span style="font-size:11px;color:var(--text-dim);margin-left:auto;">All incidents in this scope</span>
+    </div>
+    ${synthBanner}
+    <div class="metric-cards">
+      ${card('Total incidents', m.total, synthCount > 0 ? synthCount + ' synthetic' : '')}
+      ${card('Open', m.open)}
+      ${card('Resolved', m.resolved)}
+      ${card('Acknowledged', m.acknowledged)}
+      ${card('MTTR (median)', fmtDuration(ttr.p50), 'time to resolve')}
+      ${card('Time to ack (median)', fmtDuration(tta.p50), 'time to first ack')}
+    </div>
+    <div class="metric-grid">
+      <div class="metric-panel">
+        <h3>By severity</h3>
+        ${sevBars}
+      </div>
+      <div class="metric-panel">
+        <h3>By source</h3>
+        <div class="schedule-tallies">${srcRows}</div>
+        <h3 style="margin-top:16px;">Durations</h3>
+        <div class="metric-durs">
+          ${durTable('Time to resolve (MTTR)', ttr)}
+          ${durTable('Time to first ack', tta)}
+        </div>
+      </div>
+    </div>`;
+
+  // Deep-link the "Maintenance → Purge" hint to the Maintenance view.
+  const purgeLink = view.querySelector('.synth-purge-link');
+  if (purgeLink) {
+    purgeLink.addEventListener('click', (e) => { e.preventDefault(); navTo('maintenance'); });
+  }
+}

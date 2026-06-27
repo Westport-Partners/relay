@@ -723,7 +723,9 @@ class TestNodeHandlerIgnoreGate:
 
         assert result.get("ignored") is not True
         assert dispatch_spy.called
-        incident_store.put_incident.assert_called_once()
+        # put_incident is called at least once (step 5 initial persist + step 6
+        # timeline persist after escalation start).
+        assert incident_store.put_incident.call_count >= 1
 
     def test_empty_rule_list_proceeds_normally(self, monkeypatch):
         """With no ignore rules the alarm proceeds through the full pipeline."""

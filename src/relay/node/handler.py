@@ -50,9 +50,10 @@ from relay.core.classifier import classify_alarm
 from relay.core.dispatcher import DualStreamDispatcher
 from relay.core.escalation import (
     EscalationEngine,
+    EscalationPhase,
 )
 from relay.core.logging_config import configure_logging
-from relay.core.model import Incident, IncidentState
+from relay.core.model import Incident, IncidentState, Stream, TimelineEvent
 
 logger = logging.getLogger(__name__)
 
@@ -511,6 +512,29 @@ class NodeHandler:
             )
             return None
 
+    def _record_escalation_event(
+        self,
+        incident: Incident,
+        event_type: str,
+        detail: dict[str, Any],
+    ) -> None:
+        """Append a single escalation-related timeline event to *incident*.
+
+        All four escalation events share the same shape: actor="system",
+        stream=Stream.TEAM. This helper is the single chokepoint so every
+        call site stays consistent.  The caller is responsible for persisting
+        the updated incident when required.
+        """
+        incident.add_event(
+            TimelineEvent(
+                incident_id=incident.correlation_id,
+                actor="system",
+                stream=Stream.TEAM,
+                event_type=event_type,
+                detail=detail,
+            )
+        )
+
     def _contacts_for_transition(self, transition: Any) -> list[str]:
         """Resolve a transition's paging targets to a deduped contact_id list.
 
@@ -810,7 +834,29 @@ class NodeHandler:
                 ):
                     incident.state = IncidentState.ESCALATED
                     incident.updated_at = datetime.now(UTC)
-                    self.incident_store.put_incident(incident)
+                # Record timeline events for the real advance (T3).
+                # step_advanced: from the event's step_index to the new current step.
+                if transition.new_phase == EscalationPhase.ESCALATING:
+                    new_step_index = step_index + 1
+                    self._record_escalation_event(
+                        incident,
+                        "escalation.step_advanced",
+                        {"from_step": step_index, "to_step": new_step_index},
+                    )
+                    self._record_escalation_event(
+                        incident,
+                        "escalation.page_sent",
+                        {
+                            "step_index": new_step_index,
+                            "roles": list(
+                                getattr(transition, "roles_to_page", [])
+                            ),
+                            "contact_ids": step_contacts,
+                            "streams": [s for s in getattr(transition, "streams", [])],
+                            "timeout_minutes": getattr(transition, "timeout_minutes", None),
+                        },
+                    )
+                self.incident_store.put_incident(incident)
                 DualStreamDispatcher(
                     notifier=self.notifier,
                     transport=self.transport,
@@ -832,6 +878,25 @@ class NodeHandler:
                             incident_id,
                             exc_info=True,
                         )
+
+        # T4: EXHAUSTED branch — no contacts are paged but we must record the
+        # ladder exhausted event.  The if step_contacts: block above is skipped
+        # when the transition is EXHAUSTED (contact_ids_to_page == []), so we
+        # fetch the incident here, guard against re-emit, and persist.
+        if transition.new_phase == EscalationPhase.EXHAUSTED:
+            incident = self.incident_store.get_incident(incident_id)
+            if incident is not None:
+                already_exhausted = any(
+                    ev.event_type == "escalation.exhausted"
+                    for ev in incident.timeline
+                )
+                if not already_exhausted:
+                    self._record_escalation_event(
+                        incident,
+                        "escalation.exhausted",
+                        {"last_step_index": step_index},
+                    )
+                    self.incident_store.put_incident(incident)
 
         return {
             "statusCode": 200,
@@ -1086,6 +1151,30 @@ class NodeHandler:
                 getattr(esc_transition, "roles_to_page", []),
                 step_contacts,
             )
+            # Record the trigger + initial page on the incident timeline.
+            self._record_escalation_event(
+                incident,
+                "incident.triggered",
+                {
+                    "severity": incident.severity,
+                    "signal_source": incident.signal_source,
+                    "alarm_name": incident.alarm_name,
+                    "policy_id": policy.policy_id,
+                },
+            )
+            self._record_escalation_event(
+                incident,
+                "escalation.page_sent",
+                {
+                    "step_index": 0,
+                    "roles": list(getattr(esc_transition, "roles_to_page", [])),
+                    "contact_ids": step_contacts,
+                    "streams": [s for s in getattr(esc_transition, "streams", [])],
+                    "timeout_minutes": getattr(esc_transition, "timeout_minutes", None),
+                },
+            )
+            # Persist the timeline events recorded above.
+            self.incident_store.put_incident(incident)
             # Merge escalation contacts into notification contact list if not already present
             for cid in step_contacts:
                 if cid not in contact_ids:
