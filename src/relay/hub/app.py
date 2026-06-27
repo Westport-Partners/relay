@@ -3001,7 +3001,7 @@ class HubApp:
             enabled = bool(payload.get("enabled", True))
             try:
                 rule = _RoutingRule(
-                    **{k: v for k, v in payload.items() if k != "enabled"},
+                    **{k: v for k, v in payload.items() if k not in ("enabled", "rule_id")},
                     rule_id=rule_id,
                 )
             except ValidationError as exc:
@@ -3168,6 +3168,49 @@ class HubApp:
                 return pipeline.handle_alarm(payload)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
+
+        # ----------------------------------------------------------------
+        # POST /ingest/heartbeat — in-process heartbeat injection (local runtimes)
+        #
+        # Accepts a relay.heartbeat detail dict (the same shape a Node emits over
+        # EventBridge) and feeds it straight to HubProcessor._handle_heartbeat,
+        # which records it in the fleet store + in-memory cache and merges the
+        # org_path into the registration-derived tree. Gated exactly like
+        # /ingest/alarm (local-aws / local-mock, or RELAY_ALLOW_INGEST=true) so it
+        # is never reachable in production Fargate.
+        #
+        # This is what lets a collapsed single-container runtime (no SQS, no
+        # separate Node) keep its big-board tiles LIVE between incidents, and what
+        # the test-environment bootstrap loops to populate a realistic fleet.
+        # ----------------------------------------------------------------
+        @app.post("/ingest/heartbeat")
+        def ingest_heartbeat(payload: dict[str, Any]) -> dict[str, Any]:
+            allow_ingest = os.environ.get("RELAY_ALLOW_INGEST", "").lower() == "true"
+            if runtime not in {"local-aws", "local-mock"} and not allow_ingest:
+                raise HTTPException(
+                    status_code=403,
+                    detail="ingest disabled in this runtime",
+                )
+            processor = getattr(self, "_processor", None)
+            if processor is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="hub processor unavailable",
+                )
+            # Accept either a bare heartbeat detail or an EventBridge-style
+            # envelope ({"detail": {...}}), mirroring handle_event's tolerance.
+            detail = payload.get("detail", payload)
+            if not detail.get("account_id") or not detail.get("app_name"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="heartbeat requires account_id and app_name",
+                )
+            processor._handle_heartbeat(detail)
+            return {
+                "ok": True,
+                "account_id": detail.get("account_id"),
+                "app_name": detail.get("app_name"),
+            }
 
         # ----------------------------------------------------------------
         # POST /synthetic/incident — fire a synthetic smoke-test incident

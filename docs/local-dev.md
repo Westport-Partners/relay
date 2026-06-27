@@ -97,7 +97,60 @@ object-form metric dimensions — the same shape CloudWatch sends in production.
 | `RELAY_FLEET_TABLE_NAME` | `relay-local` |
 | `AWS_REGION` | `us-east-1` |
 | `RELAY_CONFIG_SOURCE` | `local` |
-| `RELAY_UI_AUTH_MODE` | `dev` (user: `operator`) |
+| `RELAY_AUTH_MODE` | `dev` (user: `operator`) |
+
+---
+
+## Self-populating demo (`RELAY_DEMO=true`)
+
+The bare stack above starts an **empty** Hub — no apps, no people, no incidents.
+To see what a real, populated deployment looks like with a single command, set
+`RELAY_DEMO=true`:
+
+```bash
+RELAY_DEMO=true docker compose up
+open http://localhost:8080/    # a full agency big-board, filling in live
+```
+
+This runs the **test-environment harness** (`tools/testenv/`) against the Hub as
+it comes up. It generates a deterministic fake "government agency" and drives the
+Hub's HTTP API to populate it:
+
+- **~39 deployment tiles** across four product lines — Primary Product Line,
+  Secondary Product Line, Infrastructure, Administrative — in prod / test / dev.
+- **25 contacts** with on-call availability, and an auto-generated weekly
+  schedule (with a couple of deliberate coverage gaps to show gap-highlighting).
+- A few **routing + ignore rules** demonstrating mission-vs-back-office handling.
+- A stream of **fake incidents** so the board visibly evolves.
+
+The org is generated with [Faker](https://faker.readthedocs.io/) under a fixed
+seed, so the same world regenerates identically every run. It models a real
+agency's structure but names no real agency. Phone numbers use the reserved
+`+1-555-0100xxx` test range (never real, dialable numbers).
+
+### Demo knobs
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RELAY_DEMO` | `false` | `true` enables the self-populating harness on startup |
+| `RELAY_DEMO_MODE` | `drip` | `drip` keeps the board live + trickles incidents; `once` seeds + a single incident burst, then stops |
+| `RELAY_DEMO_INTERVAL` | `20` | Seconds between drip incidents |
+| `RELAY_DEMO_SEED` | `42` | World-generation seed |
+
+### Running the harness by hand
+
+The harness also runs standalone against any reachable Hub (e.g. a container you
+started separately), which is useful when iterating on the scenarios:
+
+```bash
+pip install -e ".[demo]"     # faker + httpx (included in the [dev] extra too)
+python tools/testenv/harness.py --base-url http://localhost:8080
+python tools/testenv/harness.py --once       # seed + one burst, then exit
+python tools/testenv/world.py --emit summary  # preview the generated world
+```
+
+Demo writes require the Hub to be in `dev` (or `alb`) auth mode; the compose
+stack sets `RELAY_AUTH_MODE=dev`, and `RELAY_DEMO=true` forces it on if unset.
 
 ---
 
@@ -120,8 +173,8 @@ docker run -d --name relay -p 8080:8080 \
   -e RELAY_FLEET_TABLE_NAME=<your-table> \
   -e RELAY_CONFIG_SOURCE=local \
   -e RELAY_CONFIG_DIR=/app/config \
-  -e RELAY_UI_AUTH_MODE=dev \
-  -e RELAY_UI_DEV_USER=you \
+  -e RELAY_AUTH_MODE=dev \
+  -e RELAY_DEV_USER=you \
   relay-hub:dev
 
 docker logs -f relay
