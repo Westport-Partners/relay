@@ -83,6 +83,9 @@ Thumbs.db
 node_modules/
 package-lock.json
 yarn.lock
+
+# uv lock file — not committed (resolved per-environment; CI uses pyproject)
+uv.lock
 .env_info
 .env
 
