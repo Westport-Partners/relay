@@ -92,5 +92,8 @@
 <div id="drawer-overlay"></div>
 <div id="drawer"></div>
 
-<script>
-"use strict";
+<!-- Dashboard behavior is loaded as native ES modules (no build step). The
+     entry module wires init; it imports the view/helper/state modules served
+     read-only from /static/dashboard/. A module script is deferred by spec, so
+     it runs after the DOM above is parsed. -->
+<script type="module" src="/static/dashboard/main.js"></script>

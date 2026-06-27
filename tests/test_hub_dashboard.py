@@ -950,10 +950,13 @@ class TestDynamicCatalog:
 
 
 class TestDashboardAssembly:
-    """The dashboard UI is authored as ordered fragments under dashboard_parts/
-    and assembled at serve time. These lock the contract: a manifest exists, the
-    fragments it names exist, and the assembled document is a single well-formed
-    HTML page with exactly one <script>/<style> pair (shared global scope)."""
+    """The dashboard markup/CSS is authored as ordered fragments under
+    dashboard_parts/ and assembled at serve time; behavior is authored as native
+    ES modules under dashboard_modules/ and served read-only at /static/dashboard/.
+    These lock the contract: the manifest's fragments exist, the assembled shell
+    is a single well-formed HTML page with one <style> pair and one module-script
+    tag (no inline JS), the entry module exists, and every relative import between
+    modules resolves to a real exported symbol."""
 
     def test_manifest_and_named_fragments_exist(self):
         from relay.hub.app import _DASHBOARD_PARTS_DIR
@@ -973,15 +976,20 @@ class TestDashboardAssembly:
         from relay.hub.app import _render_dashboard_html
 
         html = _render_dashboard_html()
-        # One document, one shared scope: exactly one script + one style pair.
-        assert html.count("<script>") == 1
+        # The shell carries no inline JS — behavior loads as ES modules. There is
+        # exactly one <style> pair and exactly one module script tag pointing at
+        # the static entry module; no bare inline <script> remains.
+        assert html.count("<script>") == 0, "no inline <script> — JS is ES modules"
+        assert html.count('<script type="module"') == 1
         assert html.count("</script>") == 1
+        assert '/static/dashboard/main.js' in html
         assert html.count("<style>") == 1
         assert html.count("</style>") == 1
         assert html.lstrip().startswith("<!"), "must start with a doctype"
         assert "</html>" in html
-        # Substantial — guards against a truncated/empty assembly.
-        assert len(html) > 100_000
+        # Substantial — guards against a truncated/empty assembly (CSS-dominated
+        # now that the JS lives in modules).
+        assert len(html) > 30_000
 
     def test_assembly_is_concatenation_in_manifest_order(self):
         from relay.hub.app import _DASHBOARD_PARTS_DIR, _render_dashboard_html
@@ -997,3 +1005,50 @@ class TestDashboardAssembly:
             (_DASHBOARD_PARTS_DIR / name).read_text(encoding="utf-8") for name in names
         )
         assert _render_dashboard_html() == expected
+
+    def test_module_dir_and_entry_exist(self):
+        from relay.hub.app import _DASHBOARD_MODULES_DIR
+
+        assert _DASHBOARD_MODULES_DIR.is_dir(), "dashboard_modules/ must ship in the package"
+        assert (_DASHBOARD_MODULES_DIR / "main.js").is_file(), "entry module main.js missing"
+
+    def test_module_imports_resolve_to_real_exports(self):
+        """Every `import { … } from './x.js'` must target a sibling module that
+        actually exports each named symbol — catches a broken refactor that would
+        only surface as a runtime error in the browser."""
+        import re
+
+        from relay.hub.app import _DASHBOARD_MODULES_DIR
+
+        mods = {p.name: p.read_text(encoding="utf-8") for p in _DASHBOARD_MODULES_DIR.glob("*.js")}
+        assert mods, "no ES modules found"
+
+        def exported_names(text: str) -> set[str]:
+            names: set[str] = set()
+            for m in re.finditer(
+                r"^export\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z0-9_]+)",
+                text,
+                re.M,
+            ):
+                names.add(m.group(1))
+            for m in re.finditer(r"^export\s*\{([^}]*)\}", text, re.M):
+                for part in m.group(1).split(","):
+                    nm = part.strip().split(" as ")[-1].strip()
+                    if nm:
+                        names.add(nm)
+            return names
+
+        exports = {name: exported_names(text) for name, text in mods.items()}
+
+        problems: list[str] = []
+        for name, text in mods.items():
+            for m in re.finditer(r"import\s*\{([^}]*)\}\s*from\s*'\./([^']+)'", text):
+                syms = [s.strip().split(" as ")[0].strip() for s in m.group(1).split(",") if s.strip()]
+                target = m.group(2)
+                if target not in mods:
+                    problems.append(f"{name}: imports from missing module {target}")
+                    continue
+                for s in syms:
+                    if s not in exports[target]:
+                        problems.append(f"{name}: imports {{{s}}} from {target}, which does not export it")
+        assert not problems, "broken ES-module imports:\n" + "\n".join(problems)

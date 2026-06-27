@@ -273,14 +273,15 @@ except ImportError:
     HTTPException = None  # type: ignore[assignment,misc]
 
 # The dashboard UI is authored as ordered fragments under dashboard_parts/
-# (one per view/section, split at the in-file banner markers) and assembled into
-# a single HTML document at serve time. Concatenating the manifest's fragments in
-# order is byte-identical to the historical single-file dashboard.html. Editing a
-# section means editing its fragment; the set still shares one <style> pair and
-# one global-scope <script> (the parts are concatenated, NOT loaded as separate
-# modules). A monolithic dashboard.html is still honored as a fallback.
+# (the document open, the <style> sheet, and the body shell) assembled into a
+# single HTML document at serve time. The JavaScript is no longer concatenated:
+# it lives as native ES modules under dashboard_modules/, served read-only at
+# /static/dashboard/ and loaded by the shell via <script type="module">. Editing
+# a CSS/markup section means editing its fragment; editing behavior means editing
+# a module. A monolithic dashboard.html is still honored as a fallback.
 _DASHBOARD_DIR = pathlib.Path(__file__).parent
 _DASHBOARD_PARTS_DIR = _DASHBOARD_DIR / "dashboard_parts"
+_DASHBOARD_MODULES_DIR = _DASHBOARD_DIR / "dashboard_modules"
 _DASHBOARD_HTML_PATH = _DASHBOARD_DIR / "dashboard.html"
 
 
@@ -1636,6 +1637,18 @@ class HubApp:
     def build_fastapi_app(self) -> FastAPI:
         """Build and return the FastAPI application. Does not start uvicorn."""
         app = FastAPI(title="Relay Hub", version="0.2.0")
+
+        # Serve the dashboard's ES modules as read-only static files. The browser
+        # loads them directly via <script type="module"> — no build step, no
+        # bundler, no CDN; the wheel ships them under dashboard_modules/.
+        if _DASHBOARD_MODULES_DIR.is_dir():
+            from fastapi.staticfiles import StaticFiles
+
+            app.mount(
+                "/static/dashboard",
+                StaticFiles(directory=str(_DASHBOARD_MODULES_DIR)),
+                name="dashboard-modules",
+            )
 
         hub_state = self._hub_state
         sse_publisher = self._sse_publisher

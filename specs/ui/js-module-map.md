@@ -311,15 +311,58 @@ safe call-time cyclic import.
    of a not-yet-ported symbol is impossible because un-ported views still live in
    the assembled blob until their commit — see Step 4 transition note below.)
 
-### Step 4 transition note
+## LOCKED DECISIONS (Step 2 — supersede earlier "transition note")
 
-During the per-view migration the page must keep working with **some** views as
-modules and **some** still concatenated. Cleanest approach: keep the concatenated
-`<script>` for un-ported fragments AND add `<script type="module">` for ported
-ones, but a global and a module can't share scope. Therefore the safer migration
-is **all-or-nothing within Step 3's slice plus a single Step 4 commit per view that
-also removes that fragment from `manifest.txt`'s JS section** — the assembled
-script shrinks as the module set grows, and `main.js` imports only ported views,
-calling still-global loaders via `window.loadX` shims **only if** a cross-call
-crosses the boundary. Decide the exact bridge mechanism at the top of Step 4; the
-graph above shows every boundary-crossing call you must bridge.
+After verifying the true cross-module reader-sets (grep, code-only), the design
+is locked as follows:
+
+### D1 — Migration strategy: "build dark, cut over atomically"
+
+A classic global `<script>` and a `<script type="module">` **cannot share a
+scope**, and a deferred module runs *after* the classic inline script, so an
+incremental window-bridge would require editing every un-ported fragment and
+juggling load order. Instead:
+
+- Build all module files under `src/relay/hub/dashboard_modules/` **without
+  loading them** — intermediate commits keep serving the existing assembled blob,
+  so the page works at every commit and each module file is reviewable on its own.
+- One **atomic cutover commit** swaps the inline `<script>…</script>` for
+  `<script type="module" src="/static/dashboard/main.js"></script>`, removes the
+  `.js.part` fragments from `manifest.txt`, and deletes the now-dead nav-map
+  comment. The full browser exercise happens at this commit (all views at once).
+- This trades per-view in-browser testing for zero bridge code and a trivial
+  revert (the old fragments survive until the cutover). Node (`node --check`)
+  syntax-validates each module as it's written; the assembly tests keep the
+  CSS/shell concatenation honest throughout.
+
+### D2 — `state.js` shape: `export let` + setters (NOT a big `state` object)
+
+ESM live bindings mean a read-only `import { CAN_WRITE }` already reflects a
+reassignment **in the owning module**, so every *reader* just imports the bare
+symbol — **no rename, no churn at read sites** (the vast majority). Only the few
+*external write* sites change, routed through setters exported from `state.js`
+(an imported binding is read-only, so a non-owner cannot assign it directly).
+
+`state.js` holds exactly the 6 genuinely cross-module symbols (verified reader-set
+in parens):
+
+| Symbol | Readers | Writer(s) | Mechanism |
+|---|---|---|---|
+| `CAN_WRITE` | drawer, contacts, settings, maintenance, schedule, rules, rule-forms | auth | `export let` + `setAuth()` |
+| `TEAM_TZ` | oncall, schedule | auth | `export let` + `setAuth()` |
+| `tiles` (Map) | fleet, schedule, stream | stream (`.set/.clear`) | `export const` (mutated in place) |
+| `activeFilter` | fleet | main (filter btn) | `export let` + `setActiveFilter()` |
+| `activeView` | incident-drawer | router | `export let` + `setActiveView()` |
+| `escalationPolicies` | rule-forms | **rules + incident-drawer** | `export let` + `setEscalationPolicies()` |
+
+Demoted to **module-local** (single-module, NOT exported): `AUTH_SUBJECT`,
+`lastPingAt` (→ `auth`/`stream`); `routingRulesData`, `rulesData`, `rulesFilterVal`,
+`newRuleType` (→ `rules`); `incidentsTab` (→ `incidents`); `editingContactId`,
+`contactSort` (→ `contacts`); `currentRole`, `currentWeekStart` (→ `schedule`).
+
+### D3 — Serving
+
+`app.mount("/static/dashboard", StaticFiles(directory=_DASHBOARD_MODULES_DIR))`.
+The dir ships in the wheel under `src/relay/hub/dashboard_modules/` (same package-
+data discovery as `dashboard_parts/`). StaticFiles' default ETag/Last-Modified is
+sufficient; no CDN, no build, offline preserved.
