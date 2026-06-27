@@ -496,6 +496,52 @@ class TestPurgeIncidents:
         # Incident must still be present.
         assert store.get_incident("purge-dryrun-001") is not None
 
+    def test_purge_reports_affected_tiles(self, dynamo_table):
+        """purge_incidents reports the distinct fleet-tile keys it touched so the
+        caller can recompute those FLEET# aggregates (issue #30)."""
+        store = _make_incident_store(dynamo_table)
+
+        ts = datetime(2026, 8, 1, 0, 0, 0, tzinfo=_UTC)
+        # Two incidents on the same app (one tile) + one on a different app.
+        inc_a1 = _incident_at("purge-tiles-a1", ts, synthetic=True)
+        inc_a2 = _incident_at("purge-tiles-a2", ts, synthetic=True)
+        inc_b = Incident(
+            correlation_id="purge-tiles-b",
+            account_id="123456789012",
+            region="us-east-1",
+            app_name="otherapp",
+            severity=Severity.SEV3,
+            signal_source=SignalSource.CLOUDWATCH_ALARM,
+            alarm_name="otherapp-alarm",
+            created_at=ts,
+            updated_at=ts,
+            synthetic=True,
+        )
+        store.put_incident(inc_a1)
+        store.put_incident(inc_a2)
+        store.put_incident(inc_b)
+
+        result = store.purge_incidents(synthetic_only=True)
+
+        tiles = result["affected_tiles"]
+        # Deduped: testapp appears once despite two incidents.
+        apps = sorted(t["app_name"] for t in tiles)
+        assert apps == ["otherapp", "testapp"]
+        for t in tiles:
+            assert set(t) == {"account_id", "app_name", "environment", "deployment_id"}
+
+    def test_purge_dry_run_still_reports_affected_tiles(self, dynamo_table):
+        """A dry-run preview still reports which tiles would shift."""
+        store = _make_incident_store(dynamo_table)
+        ts = datetime(2026, 8, 2, 0, 0, 0, tzinfo=_UTC)
+        store.put_incident(_incident_at("purge-tiles-dry", ts, synthetic=True))
+
+        result = store.purge_incidents(synthetic_only=True, dry_run=True)
+
+        assert result["dry_run"] is True
+        assert result["deleted"] == 0
+        assert any(t["app_name"] == "testapp" for t in result["affected_tiles"])
+
     def test_cascade_deletes_esc_rows(self, dynamo_table):
         """Purging an incident also removes its ESC#/STATE and ESC#/DEADLINE rows."""
         store = _make_incident_store(dynamo_table)

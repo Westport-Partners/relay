@@ -598,6 +598,89 @@ class TestFleetStoreApplyIncident:
 
 
 # ===========================================================================
+# 4b. FleetStore.recompute — repair aggregate after a direct delete (purge)
+# ===========================================================================
+
+
+class TestFleetStoreRecompute:
+    def _make_incident(
+        self,
+        correlation_id: str,
+        severity: Severity = Severity.SEV2,
+        app_name: str = "app1",
+        account_id: str = "123",
+        environment: str = "unrouted",
+        deployment_id: str = "unknown",
+    ) -> Incident:
+        now = datetime.now(UTC)
+        return Incident(
+            correlation_id=correlation_id,
+            account_id=account_id,
+            region="us-east-1",
+            app_name=app_name,
+            environment=environment,
+            deployment_id=deployment_id,
+            severity=severity,
+            signal_source=SignalSource.CLOUDWATCH_ALARM,
+            alarm_name="test-alarm",
+            state=IncidentState.TRIGGERED,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def test_recompute_to_zero_clears_red_tile(self, fleet_store, clock):
+        # A SEV2 incident drives the tile red, count=1.
+        inc = self._make_incident("c1", severity=Severity.SEV2)
+        tile = fleet_store.apply_incident(inc)
+        assert tile.open_incidents == 1
+        assert tile.status == "red"
+
+        # Simulate a purge that deleted the incident row: recompute from the now-
+        # empty survivor list. The tile must clear (count 0, no severity).
+        tile = fleet_store.recompute("123", "app1", [], deployment_id="unknown")
+        assert tile is not None
+        assert tile.open_incidents == 0
+        assert tile.worst_severity is None
+        assert tile.status != "red"
+
+    def test_recompute_recounts_surviving_incidents(self, fleet_store, clock):
+        # Three incidents open (SEV1 worst).
+        fleet_store.apply_incident(self._make_incident("a", severity=Severity.SEV3))
+        fleet_store.apply_incident(self._make_incident("b", severity=Severity.SEV1))
+        tile = fleet_store.apply_incident(
+            self._make_incident("c", severity=Severity.SEV3)
+        )
+        assert tile.open_incidents == 3
+        assert tile.worst_severity == Severity.SEV1
+
+        # Purge removed the SEV1 + one SEV3; one SEV3 survives.
+        survivor = self._make_incident("a", severity=Severity.SEV3)
+        tile = fleet_store.recompute("123", "app1", [survivor], deployment_id="unknown")
+        assert tile is not None
+        assert tile.open_incidents == 1
+        assert tile.worst_severity == Severity.SEV3
+
+    def test_recompute_unregistered_tile_returns_none(self, fleet_store):
+        assert fleet_store.recompute("nope", "ghost", []) is None
+
+    def test_recompute_respects_environment_and_deployment(self, fleet_store, clock):
+        inc = self._make_incident(
+            "p1", severity=Severity.SEV2, environment="prod", deployment_id="dep-1"
+        )
+        fleet_store.apply_incident(inc)
+        # Wrong env/dep is a different tile — recompute there is a no-op (None).
+        assert fleet_store.recompute(
+            "123", "app1", [], environment="dev", deployment_id="dep-1"
+        ) is None
+        # Correct key clears the prod tile.
+        tile = fleet_store.recompute(
+            "123", "app1", [], environment="prod", deployment_id="dep-1"
+        )
+        assert tile is not None
+        assert tile.open_incidents == 0
+
+
+# ===========================================================================
 # 5. Hydrate-from-DynamoDB rebuilds cache
 # ===========================================================================
 

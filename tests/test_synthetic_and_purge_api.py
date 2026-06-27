@@ -365,6 +365,117 @@ def test_purge_requires_writer_auth():
     assert r.status_code == 403
 
 
+def test_purge_recomputes_affected_fleet_tiles_and_publishes(monkeypatch):
+    """After a real purge, the endpoint must recompute each affected fleet tile
+    (from the surviving open incidents) and push an SSE delta so the big board
+    clears live — not wait for a heartbeat or restart (issue #30)."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+
+    class _StoreWithTiles:
+        def purge_incidents(self, **kwargs):
+            return {
+                "matched": 2,
+                "deleted": 2,
+                "synthetic": 2,
+                "dry_run": False,
+                "companions_deleted": 0,
+                "affected_tiles": [
+                    {
+                        "account_id": "123",
+                        "app_name": "app1",
+                        "environment": "prod",
+                        "deployment_id": "dep-1",
+                    }
+                ],
+            }
+
+        def list_open_incidents(self, account_id=None):
+            return []  # everything purged; tile should clear
+
+    recompute_calls: list[tuple] = []
+
+    class _RecordingHubState:
+        def recompute_tile(
+            self, account_id, app_name, open_incidents, environment, deployment_id
+        ):
+            recompute_calls.append(
+                (account_id, app_name, len(open_incidents), environment, deployment_id)
+            )
+            from relay.hub.health import FleetTile, Liveness
+
+            return FleetTile(
+                account_id=account_id,
+                app_name=app_name,
+                environment=environment,
+                deployment_id=deployment_id,
+                status="green",
+                liveness=Liveness.LIVE,
+                open_incidents=0,
+                worst_severity=None,
+                last_heartbeat_at=None,
+                registered_at=datetime.now(UTC),
+            )
+
+    app_obj = HubApp.__new__(HubApp)
+    app_obj._pipeline = _FakePipeline()
+    app_obj._incident_store = _StoreWithTiles()
+    app_obj._runtime = "fargate"
+    app_obj._hub_state = _RecordingHubState()
+    sse = SSEPublisher()
+    app_obj._sse_publisher = sse
+    q = sse.subscribe()
+    client = TestClient(app_obj.build_fastapi_app())
+
+    r = client.post("/admin/purge", json={"synthetic_only": True, "dry_run": False})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["tiles_recomputed"] == 1
+    assert recompute_calls == [("123", "app1", 0, "prod", "dep-1")]
+    # An SSE delta was published for the cleared tile.
+    msg = q.get_nowait()
+    assert "event: delta" in msg
+
+
+def test_purge_dry_run_does_not_recompute_tiles(monkeypatch):
+    """A dry-run preview must not recompute or publish — nothing was deleted."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+
+    class _StoreWithTiles:
+        def purge_incidents(self, **kwargs):
+            return {
+                "matched": 2,
+                "deleted": 0,
+                "synthetic": 2,
+                "dry_run": True,
+                "companions_deleted": 0,
+                "affected_tiles": [
+                    {"account_id": "123", "app_name": "app1",
+                     "environment": "prod", "deployment_id": "dep-1"}
+                ],
+            }
+
+        def list_open_incidents(self, account_id=None):
+            raise AssertionError("must not be called on dry_run")
+
+    app_obj = HubApp.__new__(HubApp)
+    app_obj._pipeline = _FakePipeline()
+    app_obj._incident_store = _StoreWithTiles()
+    app_obj._runtime = "fargate"
+    hs = HubState.__new__(HubState)
+    hs._tiles = {}
+    hs.lock = threading.Lock()
+    hs._store = None
+    hs._cadence = 60
+    hs._clock = lambda: datetime.now(UTC)
+    app_obj._hub_state = hs
+    app_obj._sse_publisher = SSEPublisher()
+    client = TestClient(app_obj.build_fastapi_app())
+
+    r = client.post("/admin/purge", json={"dry_run": True})
+    assert r.status_code == 200, r.text
+    assert "tiles_recomputed" not in r.json()
+
+
 def test_purge_naive_datetime_gets_utc_tzinfo(monkeypatch):
     """Naive ISO strings (no tz offset) must be attached UTC tzinfo."""
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")

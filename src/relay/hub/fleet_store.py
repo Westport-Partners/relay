@@ -544,6 +544,91 @@ class FleetStore:
 
         return self._tile_from_item(item)
 
+    def recompute(
+        self,
+        account_id: str,
+        app_name: str,
+        open_incidents: list[Incident],
+        environment: str = "unrouted",
+        deployment_id: str | None = None,
+    ) -> FleetTile | None:
+        """Re-derive a tile's aggregate from the surviving open incidents.
+
+        Unlike :meth:`apply_incident` (which increments/decrements per event),
+        this recomputes ``open_incident_count`` and ``worst_severity`` from
+        scratch for one ``(account_id, app_name, environment, deployment_id)``
+        tile. It exists for paths that delete incidents directly and so bypass
+        the per-event decrement — chiefly :meth:`purge_incidents`, after which a
+        tile's stored +1s would otherwise stay baked in forever.
+
+        ``open_incidents`` must be the list of currently-open incidents that map
+        to this tile (the caller filters the incident store). Count is their
+        length; worst_severity is the most-severe among them (SEV1 < SEV2 < … by
+        the lexicographic convention this module relies on), or removed entirely
+        when the list is empty.
+
+        Returns the refreshed :class:`FleetTile`, or ``None`` if the tile is not
+        registered in the fleet table (nothing to repair).
+        """
+        dep_id = deployment_id if deployment_id is not None else app_name
+        open_count = len(open_incidents)
+        worst_sev: Severity | None = None
+        if open_incidents:
+            # min() over the severity values: lexicographically smallest == most
+            # severe (SEV1 < SEV2 < SEV3 < SEV4), matching apply_incident.
+            worst_sev = min(
+                (i.severity for i in open_incidents),
+                key=lambda s: s.value,
+            )
+
+        try:
+            if open_count == 0:
+                response = self._table.update_item(
+                    Key=self._key(account_id, app_name, environment, dep_id),
+                    UpdateExpression=(
+                        "SET open_incident_count = :zero, has_acked = :false"
+                        " REMOVE worst_severity"
+                    ),
+                    ConditionExpression="attribute_exists(pk)",
+                    ExpressionAttributeValues={":zero": 0, ":false": False},
+                    ReturnValues="ALL_NEW",
+                )
+            else:
+                response = self._table.update_item(
+                    Key=self._key(account_id, app_name, environment, dep_id),
+                    UpdateExpression=(
+                        "SET open_incident_count = :c, worst_severity = :sev"
+                    ),
+                    ConditionExpression="attribute_exists(pk)",
+                    ExpressionAttributeValues={
+                        ":c": open_count,
+                        ":sev": worst_sev.value if worst_sev else None,
+                    },
+                    ReturnValues="ALL_NEW",
+                )
+        except ClientError as exc:
+            if (
+                exc.response.get("Error", {}).get("Code")
+                == "ConditionalCheckFailedException"
+            ):
+                # Tile not registered — nothing to recompute.
+                logger.debug(
+                    "recompute for unregistered tile %s/%s/%s/%s; skipping",
+                    account_id,
+                    app_name,
+                    environment,
+                    dep_id,
+                )
+                return None
+            logger.exception(
+                "DynamoDB update_item failed for recompute %s/%s",
+                account_id,
+                app_name,
+            )
+            raise
+
+        return self._tile_from_item(response["Attributes"])
+
     def get_tile(self, account_id: str, app_name: str) -> FleetTile | None:
         """Fetch a single tile from DynamoDB.  Returns None if not registered."""
         try:

@@ -473,6 +473,34 @@ class HubState:
         )
         return tile
 
+    def recompute_tile(
+        self,
+        account_id: str,
+        app_name: str,
+        open_incidents: list[Incident],
+        environment: str = "unrouted",
+        deployment_id: str | None = None,
+    ) -> FleetTile | None:
+        """Recompute one tile's aggregate from surviving open incidents + cache it.
+
+        Used after a purge deletes incident rows directly (bypassing the
+        per-event decrement). Delegates to ``FleetStore.recompute``; returns the
+        refreshed tile (and updates the in-memory cache), or ``None`` when the
+        tile is not registered.
+        """
+        tile = self._store.recompute(
+            account_id, app_name, open_incidents, environment, deployment_id
+        )
+        if tile is not None:
+            self.upsert_tile(tile)
+            logger.debug(
+                "HubState recomputed: key=%s status=%s open=%s",
+                tile.key,
+                tile.status,
+                tile.open_incidents,
+            )
+        return tile
+
     def record_heartbeat(
         self,
         account_id: str,
@@ -1812,9 +1840,10 @@ class HubApp:
             ]
 
         # ----------------------------------------------------------------
-        # GET /incidents/history — ALL incidents incl. resolved/closed (read-only)
-        # MUST be declared before /incidents/{correlation_id} so "history" isn't
-        # matched as a correlation_id.
+        # GET /incidents/history — terminal-state incidents only (RESOLVED,
+        # CLOSED). Open incidents (TRIGGERED/ACKNOWLEDGED/ESCALATED) live on the
+        # Open tab and are excluded here. MUST be declared before
+        # /incidents/{correlation_id} so "history" isn't matched as a correlation_id.
         # ----------------------------------------------------------------
         @app.get("/incidents/history")
         def incidents_history() -> list[dict[str, Any]]:
@@ -1825,6 +1854,8 @@ class HubApp:
             except Exception:
                 logger.warning("list_incidents failed", exc_info=True)
                 return []
+            terminal = {IncidentState.RESOLVED, IncidentState.CLOSED}
+            incidents = [i for i in incidents if i.state in terminal]
             incidents.sort(key=lambda i: i.created_at, reverse=True)
             return [
                 {
@@ -3425,6 +3456,67 @@ class HubApp:
                 synthetic_only=synthetic_only,
                 dry_run=dry_run,
             )
+
+            # Purge deletes incident rows directly, bypassing the per-event
+            # fleet decrement (FleetStore.apply_incident on RESOLVED/CLOSED), so
+            # affected FLEET# tiles keep stale open counts / worst_severity and
+            # the big board stays red until the next heartbeat or restart. Repair
+            # them now: recompute each touched tile from the surviving open
+            # incidents and push an SSE delta so connected boards clear live.
+            # Skipped on dry_run (nothing was deleted) and when the store can't
+            # list incidents to recompute from.
+            affected = purge_result.get("affected_tiles") or []
+            if (
+                not dry_run
+                and affected
+                and incident_store is not None
+                and hasattr(incident_store, "list_open_incidents")
+            ):
+                try:
+                    survivors = incident_store.list_open_incidents()
+                except Exception:
+                    logger.warning(
+                        "list_open_incidents failed during purge fleet recompute",
+                        exc_info=True,
+                    )
+                    survivors = []
+                repaired = 0
+                for tkey in affected:
+                    account_id = tkey.get("account_id")
+                    app_name = tkey.get("app_name")
+                    environment = tkey.get("environment") or "unrouted"
+                    deployment_id = tkey.get("deployment_id")
+                    if account_id is None or app_name is None:
+                        continue
+                    tile_open = [
+                        i
+                        for i in survivors
+                        if i.account_id == account_id
+                        and i.app_name == app_name
+                        and (i.environment or "unrouted") == environment
+                        and i.deployment_id == deployment_id
+                    ]
+                    try:
+                        tile = hub_state.recompute_tile(
+                            account_id,
+                            app_name,
+                            tile_open,
+                            environment,
+                            deployment_id,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "fleet tile recompute failed for %s/%s after purge",
+                            account_id,
+                            app_name,
+                            exc_info=True,
+                        )
+                        continue
+                    if tile is not None:
+                        sse_publisher.publish_delta(tile)
+                        repaired += 1
+                purge_result["tiles_recomputed"] = repaired
+
             return purge_result
 
         return app

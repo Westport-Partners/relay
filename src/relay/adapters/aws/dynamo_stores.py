@@ -383,8 +383,13 @@ class DynamoIncidentStore:
             dry_run:        If True, count matches without deleting anything.
 
         Returns:
-            dict with keys: matched, deleted, synthetic, dry_run, companions_deleted.
-            ``deleted`` and ``companions_deleted`` are 0 when dry_run=True.
+            dict with keys: matched, deleted, synthetic, dry_run, companions_deleted,
+            affected_tiles. ``deleted`` and ``companions_deleted`` are 0 when
+            dry_run=True. ``affected_tiles`` is the list of distinct
+            ``{account_id, app_name, environment, deployment_id}`` keys whose
+            fleet aggregate may now be stale (one per deployment touched by the
+            purge) so the caller can recompute/repair those FLEET# tiles. It is
+            populated even on dry_run (so a preview can report what would shift).
 
         Notes:
             - If both ``before`` and ``after`` are given the range is [after, before]
@@ -399,7 +404,7 @@ class DynamoIncidentStore:
             _before = before if before.tzinfo else before.replace(tzinfo=UTC)
             _after = after if after.tzinfo else after.replace(tzinfo=UTC)
             if _after > _before:
-                return {"matched": 0, "deleted": 0, "synthetic": 0, "dry_run": dry_run, "companions_deleted": 0}
+                return {"matched": 0, "deleted": 0, "synthetic": 0, "dry_run": dry_run, "companions_deleted": 0, "affected_tiles": []}
 
         # Scan all INCIDENT#.../META items.
         filter_expr = Attr("pk").begins_with("INCIDENT#") & Attr("sk").eq(_SENTINEL_SK_META)
@@ -456,6 +461,30 @@ class DynamoIncidentStore:
 
         matched = len(to_delete)
 
+        # Collect the distinct fleet-tile keys touched by this purge so the caller
+        # can recompute their FLEET# aggregates (open_incident_count /
+        # worst_severity) — purge deletes incident rows directly and bypasses the
+        # apply_incident decrement path, so those tiles would otherwise stay stale.
+        affected_tiles: list[dict[str, str | None]] = []
+        _seen_tiles: set[tuple[str | None, str | None, str, str | None]] = set()
+        for item in to_delete:
+            account_id = item.get("account_id")
+            app_name = item.get("app_name")
+            environment = item.get("environment") or "unrouted"
+            deployment_id = item.get("deployment_id")
+            tile_key = (account_id, app_name, environment, deployment_id)
+            if tile_key in _seen_tiles:
+                continue
+            _seen_tiles.add(tile_key)
+            affected_tiles.append(
+                {
+                    "account_id": account_id,
+                    "app_name": app_name,
+                    "environment": environment,
+                    "deployment_id": deployment_id,
+                }
+            )
+
         if dry_run or matched == 0:
             return {
                 "matched": matched,
@@ -463,6 +492,7 @@ class DynamoIncidentStore:
                 "synthetic": matched_synthetic,
                 "dry_run": dry_run,
                 "companions_deleted": 0,
+                "affected_tiles": affected_tiles,
             }
 
         # Perform deletions via batch_writer for the INCIDENT items; companion
@@ -502,6 +532,7 @@ class DynamoIncidentStore:
             "synthetic": matched_synthetic,
             "dry_run": dry_run,
             "companions_deleted": companions_deleted,
+            "affected_tiles": affected_tiles,
         }
 
 
