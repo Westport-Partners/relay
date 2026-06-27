@@ -1117,6 +1117,138 @@
 <script>
 "use strict";
 
+// =======================================================================
+// NAVIGATION MAP — AI/human index for this ~3,360-line script
+// Grep any ==== VIEW: marker below for a unique anchor into each section.
+// =======================================================================
+//
+// GLOBAL STATE
+//   CAN_WRITE       (bool)    line 1255  — auth gate for mutating actions
+//   AUTH_SUBJECT    (str|null) line 1256 — OIDC identity of logged-in user
+//   TEAM_TZ         (str)     line 1259  — team wall-clock zone (from /auth)
+//   tiles           (Map)     line 1305  — account/app → tile data (SSE-fed)
+//   activeFilter    (str)     line 1306  — fleet filter: 'all' | 'incidents'
+//   lastPingAt      (num)     line 1307  — timestamp of last SSE ping
+//   activeView      (str)     line 1533  — current nav view name
+//   incidentsTab    (str)     line 1589  — 'open' | 'history'
+//   editingContactId (str|null) line 2254 — contact being edited in-place
+//   contactSort     (obj)     line 2257  — {key, dir} sort state for contacts
+//   rulesData       (arr)     line 4029  — combined routing+ignore rows (tagged _type)
+//   rulesFilterVal  (str)     line 4030  — current rules filter string
+//   routingRulesData (arr)    line 4031  — routing-only cache (incident drawer)
+//   escalationPolicies (arr)  line 4032  — [{policy_id, name}] cached
+//   newRuleType     (str)     line 4033  — 'routing' | 'ignore' for New rule form
+//
+// SHARED HELPERS (used across multiple views)
+//   esc(s)                    line 1457  — HTML-escape; used ~197 times
+//   fmtAge(isoStr)            line 1402  — "2m 3s ago" relative time
+//   fmtTime(isoStr)           line 2238  — locale date+time string
+//   fmtDuration(secs)         — not present; fmtAge covers elapsed display
+//   fmtDetail(detail)         line 2245  — timeline event detail dict → string
+//   metaValueHtml(k,v)        line 1659  — pipeline_url/git_sha special-cased
+//   buildTile(t)              line 1424  — constructs a .tile DOM element
+//   abbrAccount(id)           line 1419  — last 4 digits of account ID
+//   ageClass(isoStr,liveness) line 1413  — CSS class for liveness state
+//   gateWrite(btnEl,title)    line 1294  — disables btn if !CAN_WRITE
+//   renderHubScope(scope)     line 1281  — sets hub-type chip in rail
+//
+// FETCH ENDPOINTS → VIEW mapping
+//   GET /auth               → initAuth() (startup)
+//   GET /stream             → SSE connect() → renderAll() (big board)
+//   GET /incidents          → loadIncidents() (open tab)
+//   GET /incidents/history  → loadIncidents() (history tab)
+//   GET /incidents/{id}     → openIncident() / openTile() incident list
+//   GET /fleet/{acct}/{app} → openTile() tile drawer
+//   GET /contacts           → loadContacts()
+//   GET /availability       → loadContacts() (co-fetched)
+//   GET /schedule?week=X    → loadContacts() (co-fetched), loadSchedule()
+//   GET /metrics            → loadMetrics()
+//   GET /oncall/snapshot    → loadOncall()
+//   GET /settings/config    → loadSettings()
+//   GET /routing-rules      → loadRules()
+//   GET /rules              → loadRules()
+//   GET /escalation-policies→ loadRules(), renderRouteForm()
+//   GET /routing-rules/deviation → loadRules()
+//   GET /rules/deviation    → loadRules()
+//   GET /incidents/{id}/brief  → wireAiButton (incident drawer)
+//   GET /incidents/{id}/aar    → wireAiButton (incident drawer)
+//
+// VIEWS (div id → load/render functions → line ranges)
+//
+//  #view-fleet        Big Board
+//    renderAll()               line 1463 — diff-updates tile grid
+//    buildTile(t)              line 1424 — builds one tile element
+//    openTile(acctId, appName) line 2103 — opens tile drawer
+//    Depends: tiles Map, activeFilter, esc, fmtAge, ageClass, abbrAccount,
+//             buildTile, STATUS_ORDER, STATUS_LABEL, MARKER
+//
+//  #view-incidents    Incidents list
+//    loadIncidents()           line 1591 — fetches /incidents or /history
+//    renderIncident(inc)       line 1700 — incident detail drawer HTML
+//    openIncident(correlationId) line 1682 — opens drawer, calls renderIncident
+//    Depends: incidentsTab, esc, fmtAge, fmtTime, fmtDetail, metaValueHtml,
+//             abbrAccount, CAN_WRITE, activeView, routingRulesData,
+//             escalationPolicies, routingRuleFormHtml, wireRoutingRuleForm
+//
+//  #view-contacts     Contacts directory
+//    loadContacts()            line 2259 — fetches /contacts+/availability+/schedule
+//    renderContacts(...)       line 2290 — full contacts table + edit form
+//    Depends: editingContactId, contactSort, esc, fmtAge, CAN_WRITE, activeView
+//
+//  #view-metrics      Metrics dashboard
+//    loadMetrics()             line 2723 — fetches /metrics
+//    Depends: esc, fmtDuration (inline), CAN_WRITE
+//
+//  #view-oncall       On-Call snapshot
+//    loadOncall()              line 2826 — fetches /oncall/snapshot
+//    Depends: esc, CAN_WRITE
+//
+//  #view-settings     Settings panel
+//    loadSettings()            line 2885 — fetches /settings/config
+//    renderConfigCard(sys)     line 2902 — system info card
+//    renderSettings(cfg,sys)   line 2936 — full settings form
+//    Depends: esc, CAN_WRITE
+//
+//  #view-maintenance  Maintenance tools
+//    loadMaintenance()         line 3485 — calls renderMaintenance synchronously
+//    renderMaintenance()       line 3489 — synthetic incident trigger + purge
+//    Depends: esc, CAN_WRITE
+//
+//  #view-schedule     On-call schedule grid
+//    loadSchedule()            line 3837 — fetches /schedule+/contacts
+//    renderSchedule(view,...)  line 3859 — Gantt-style grid with "now" line
+//    Depends: esc, TEAM_TZ, getThisMonday(), fmtTime, CAN_WRITE
+//
+//  #view-rules        Routing + ignore rules
+//    loadRules()               line 4035 — fetches /routing-rules+/rules+policies+deviations
+//    renderRulesSection(...)   line 4075 — toolbar + table + deviation banner
+//    renderNewRuleForm(wrap)   line 4141 — routing/ignore toggle form for new rules
+//    renderRulesTable()        line 4172 — filtered table of all rules
+//    Depends: esc, rulesData, routingRulesData, escalationPolicies, CAN_WRITE,
+//             ignoreRuleFormHtml, wireIgnoreRuleForm,
+//             routingRuleFormHtml, wireRoutingRuleForm
+//
+//  Incident drawer (#drawer)
+//    openIncident(id)          line 1682 — fetches /incidents/{id}, calls renderIncident
+//    renderIncident(inc)       line 1700 — timeline + actions + inline rule forms
+//    wireRuleButton()          line 1865 — IIFE wiring "Add rule…" panel
+//      renderIgnoreForm()      line 1916 — inline ignore form (incident-prefilled)
+//      renderRouteForm()       line 2041 — reuses routingRuleFormHtml+wireRoutingRuleForm
+//    Depends: esc, fmtTime, fmtDetail, metaValueHtml, CAN_WRITE, activeView,
+//             escalationPolicies, routingRuleFormHtml, wireRoutingRuleForm
+//    NOTE: renderIgnoreForm (line 1916) is a purposefully distinct inline form
+//    from ignoreRuleFormHtml/wireIgnoreRuleForm (lines 4351/4408) — see
+//    ==== SHARED: ignore/routing rule forms ==== for the de-dup analysis.
+//
+//  Tile drawer (#drawer, shared with incident drawer)
+//    openTile(acctId, appName) line 2103 — fetches /fleet/{acct}/{app}
+//    renderTile(t)             line 2123 — hierarchy + metadata + on-call + incidents
+//    loadTileIncidents(t)      line 2210 — async-loads open incidents for tile
+//    Depends: esc, fmtAge, fmtTime, metaValueHtml, MARKER, STATUS_LABEL,
+//             drawer (shared DOM element), openIncident
+//
+// =======================================================================
+
 // -----------------------------------------------------------------------
 // Auth
 // -----------------------------------------------------------------------
@@ -1255,6 +1387,7 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
   });
 });
 
+// ==== SHARED HELPERS (esc / fmt* / buildTile / metaValueHtml) ====
 // -----------------------------------------------------------------------
 // Rendering
 // -----------------------------------------------------------------------
@@ -1328,6 +1461,7 @@ function esc(s) {
     .replace(/"/g,'&quot;');
 }
 
+// ==== VIEW: fleet / big-board (renderAll / buildTile / openTile) ====
 function renderAll() {
   const grid = document.getElementById('grid');
   const emptyState = document.getElementById('empty-state');
@@ -1395,6 +1529,7 @@ setInterval(() => { if (tiles.size > 0) renderAll(); }, 10_000);
   });
 })();
 
+// ==== SHELL: view-switch nav router + hash deep-link handler ====
 // -----------------------------------------------------------------------
 // View switching (Fleet / Incidents / Contacts / On-Call)
 // -----------------------------------------------------------------------
@@ -1451,6 +1586,7 @@ window.addEventListener('hashchange', handleHash);
 // Run once on load (after the rest of the app initializes).
 handleHash();
 
+// ==== VIEW: incidents (loadIncidents / renderIncident / openIncident) ====
 // -----------------------------------------------------------------------
 // Incidents list
 // -----------------------------------------------------------------------
@@ -1534,6 +1670,7 @@ function metaValueHtml(k, v) {
   return esc(String(v));
 }
 
+// ==== DRAWER: incident detail (openIncident / renderIncident / wireRuleButton) ====
 // -----------------------------------------------------------------------
 // Incident detail drawer
 // -----------------------------------------------------------------------
@@ -1960,6 +2097,7 @@ function renderIncident(inc) {
   })();
 }
 
+// ==== DRAWER: fleet tile detail (openTile / renderTile / loadTileIncidents) ====
 // -----------------------------------------------------------------------
 // Fleet tile detail drawer
 //
@@ -2116,6 +2254,7 @@ function fmtDetail(detail) {
   return parts.length ? ' — ' + parts.join(', ') : '';
 }
 
+// ==== VIEW: contacts (loadContacts / renderContacts) ====
 // -----------------------------------------------------------------------
 // Contacts view
 // -----------------------------------------------------------------------
@@ -2573,6 +2712,7 @@ async function confirmDeleteContact(contactId) {
   }, { once: true });
 }
 
+// ==== VIEW: metrics (loadMetrics) ====
 // -----------------------------------------------------------------------
 // On-Call view
 // -----------------------------------------------------------------------
@@ -2684,6 +2824,7 @@ async function loadMetrics() {
   }
 }
 
+// ==== VIEW: oncall (loadOncall) ====
 // On-Call view — purely schedule-backed. Shows who Relay would page right now
 // for each role (primary/secondary/manager), resolved from the generated
 // schedule in the team timezone. Rotations were removed; manage coverage on
@@ -2747,6 +2888,7 @@ async function loadOncall() {
   if (link) link.addEventListener('click', (e) => { e.preventDefault(); navTo('schedule'); });
 }
 
+// ==== VIEW: settings (loadSettings / renderConfigCard / renderSettings) ====
 // -----------------------------------------------------------------------
 // Settings view
 // -----------------------------------------------------------------------
@@ -3347,6 +3489,7 @@ function renderSettings(cfg, sys) {
   }
 }
 
+// ==== VIEW: maintenance (loadMaintenance / renderMaintenance) ====
 // -----------------------------------------------------------------------
 // Maintenance view — synthetic incident trigger + temporal purge tool
 // -----------------------------------------------------------------------
@@ -3630,6 +3773,7 @@ function renderMaintenance() {
   }
 }
 
+// ==== VIEW: schedule (loadSchedule / renderSchedule) ====
 // -----------------------------------------------------------------------
 // Schedule view
 // -----------------------------------------------------------------------
@@ -3887,6 +4031,7 @@ document.getElementById('grid').addEventListener('click', e => {
   }
 });
 
+// ==== VIEW: rules (loadRules / renderRulesSection / renderNewRuleForm / renderRulesTable) ====
 // -----------------------------------------------------------------------
 // Rules view — ONE unified table over BOTH rule types (routing + ignore).
 // Each row carries _type ('routing'|'ignore'); a Type column distinguishes
@@ -4214,6 +4359,50 @@ function renderRulesTable() {
   });
 }
 
+// ==== SHARED: ignore/routing rule forms (ignoreRuleFormHtml / wireIgnoreRuleForm / routingRuleFormHtml / wireRoutingRuleForm) ====
+//
+// DE-DUPLICATION ANALYSIS (Phase 1 finding):
+//
+// There are three ignore-form entry points:
+//   A. ignoreRuleFormHtml / wireIgnoreRuleForm  (this section, lines ~4364/4420)
+//      — generic class-based selectors (.ir-app, .ir-alarm, .ir-env, .ir-acct)
+//      — has account_id field; note is optional
+//      — no re-render on preset change; wireIgnoreRuleForm mutates DOM in-place
+//      — used by: renderNewRuleForm (new rule), renderRulesTable (edit row)
+//
+//   B. incident drawer renderIgnoreForm (line ~1916, inside wireRuleButton IIFE)
+//      — id-based selectors (ign-app, ign-alarm, ign-env)
+//      — incident-context pre-fill (inc.alarm_name, inc.app_name, inc.environment)
+//      — re-renders panel.innerHTML on every preset-button click (reactive UX)
+//      — "All from app in ENV" preset button text shows live env value
+//      — has live match-preview section (ign-preview)
+//      — note is required (submit blocked if empty)
+//      — no account_id field
+//      — posts to /incidents/{id}/ignore (not caller-provided submitFn)
+//
+// Why they are NOT merged:
+//   - Different DOM selectors (class vs id) → merging requires changing one
+//     side, which would change rendered output or introduce new query logic.
+//   - Different re-render strategy (full innerHTML re-render vs. in-place DOM
+//     mutation) → sharing a single wiring function would require a boolean
+//     branch for every behavioural difference, making the code less clear.
+//   - Different required fields and submit target → a shared submitFn wrapper
+//     would need drawer-specific context (inc reference) passed in, making
+//     the signature awkward and introducing closure-capture coupling.
+//   - The incident drawer form is intentionally context-sensitive (pre-fills
+//     from the live incident and shows match preview) — that logic does not
+//     belong in a generic rule builder.
+//
+// Safe shared extraction (done in Phase 1):
+//   The field-row CSS pattern (label / input with var(--bg) / var(--mono) etc.)
+//   is identical in markup but is an inline style string, not a helper call.
+//   Extracting a `formFieldHtml(label, attrs, style)` helper would save ~6
+//   repeated inline style strings but is cosmetic. Left for Phase 2 to avoid
+//   any risk of changed attribute order affecting CSS specificity or rendering.
+//
+// TODO (Phase 2): extract the shared field-row HTML builder and align the
+// two forms on class-based selectors so both can share wireIgnoreRuleForm.
+//
 // Shared form renderer for both New Rule and Edit Rule panels.
 // rule = null → blank form; rule = object → prefill from existing rule.
 function ignoreRuleFormHtml(rule) {

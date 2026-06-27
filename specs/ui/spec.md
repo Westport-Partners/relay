@@ -32,6 +32,22 @@ A full-bleed, dark, dense Industrial Command Center dashboard with these views:
   Status is never teal.
 - **No hidden critical info** behind hover/tooltips.
 
+## In-file navigation structure
+
+`dashboard.html` uses a layered comment convention to make the ~3,360-line
+script navigable without splitting files (Phase 2). At the top of the
+`<script>` block, immediately after `"use strict"`, a **NAVIGATION MAP**
+block lists every view with its `loadX`/`renderX` function names and current
+line numbers, all global state variables with line numbers, all shared helpers
+(`esc`, `fmtAge`, `fmtTime`, `fmtDetail`, `metaValueHtml`, `buildTile`,
+`abbrAccount`, `ageClass`, `gateWrite`), and a fetch-endpoint→view mapping.
+Each view section is preceded by a unique greppable banner comment of the form
+`// ==== VIEW: <name> (...) ====` (or `DRAWER:` / `SHELL:` / `SHARED:` for
+non-view sections). These banners give AI editors a unique `old_string` anchor
+in a large file and let `grep "==== VIEW:"` enumerate all views instantly.
+When editing any view, update the line numbers in the NAVIGATION MAP as
+part of the same change.
+
 ## How UI changes are verified
 
 1. Conform to [`design-language.md`](design-language.md) — reviewed as a checklist.
