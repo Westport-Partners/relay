@@ -150,4 +150,4 @@ RELAY_STACK_SELECTOR=compute \
 
 The role that runs the deploy (human or CI runner) still needs permission to call
 CloudFormation and the services each stack provisions. In BYOR mode the stack does not create roles, so `iam:CreateRole` can be
-omitted from that policy — but all other permissions remain. Full reference: [infra/RUNNER_IAM.md](../infra/RUNNER_IAM.md).
+omitted from that policy — but all other permissions remain. Full reference: [infra/RUNNER_IAM.md](https://github.com/Westport-Partners/relay/blob/main/infra/RUNNER_IAM.md).

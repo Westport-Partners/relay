@@ -39,7 +39,8 @@ jobs:
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Build documentation site
-        run: mkdocs build -d site
+        # --strict fails the build on broken nav/links so doc rot can't ship.
+        run: mkdocs build --strict -d site
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1

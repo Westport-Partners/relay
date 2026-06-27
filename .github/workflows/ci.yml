@@ -39,5 +39,12 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
+      # Advisory until the pre-existing strict-mypy backlog is cleared, then make
+      # this blocking (drop continue-on-error). Tracked separately; the goal is
+      # to add no NEW type errors in the meantime.
+      - name: Types (mypy, advisory)
+        run: mypy src
+        continue-on-error: true
+
       - name: Test (pytest)
         run: pytest -q
