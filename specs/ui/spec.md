@@ -3,12 +3,18 @@
 **Owns:** the operator-facing web UI — the single-page dashboard that renders the
 big board, incidents, schedule, contacts, rules, metrics, and settings.
 
-**Primary code:** `src/relay/hub/dashboard_parts/` — ordered HTML/JS/CSS fragments
-(one per view/section) listed in `manifest.txt` and **assembled into one document
-at serve time** by `hub/app.py` (`_render_dashboard_html`). Concatenating the
-manifest's fragments in order produces a single self-contained page sharing one
-`<style>` pair and one global-scope `<script>` (the parts are concatenated, **not**
-loaded as separate modules). No build step; one wheel/container artifact.
+**Primary code:**
+- **Behavior:** `src/relay/hub/dashboard_modules/` — native **ES modules** (one per
+  view/drawer/concern, plus `helpers`/`state`/`constants` foundations and a `main.js`
+  entry). The browser loads them directly via `<script type="module">`; the Hub
+  serves them read-only at `/static/dashboard/`. **No build step, no bundler, no
+  npm, no CDN** — vanilla browser ESM, offline, one wheel/container artifact.
+- **Shell + CSS:** `src/relay/hub/dashboard_parts/` — ordered HTML/CSS fragments
+  (document open, `<style>` sheet, body shell, document close) listed in
+  `manifest.txt` and **assembled at serve time** by `hub/app.py`
+  (`_render_dashboard_html`) into the page shell, which ends with
+  `<script type="module" src="/static/dashboard/main.js">`.
+
 **Design contract:**
 [`design-language.md`](design-language.md) — **binding** for every UI change.
 **Related:** every domain with a UI surface describes its *data contract* in its
@@ -39,27 +45,39 @@ A full-bleed, dark, dense Industrial Command Center dashboard with these views:
 
 ## File structure (for editing)
 
-The UI lives in `src/relay/hub/dashboard_parts/` as ordered fragments, one per
-view/section, named `NN-<kind>-<name>.{js.part,part.html}` and listed in
-`manifest.txt`:
+**Behavior — ES modules in `src/relay/hub/dashboard_modules/`.** One module per
+view/drawer/concern with explicit `import`/`export`. To change a view, edit its
+module; its dependencies are declared at the top of the file, so an edit is bounded
+and a module **cannot** silently depend on another view's internals.
 
-- `00-02` — document open, `<style>`, and the body shell + `<script>` open.
-- `10-preamble-navmap.js.part` — the **NAVIGATION MAP** comment (every view's
-  `loadX`/`renderX` fns, global state vars, shared helpers, fetch→view mapping)
-  plus the global state declarations.
-- `20-shared-helpers` then one fragment per **VIEW** / **DRAWER** / **SHELL** /
-  **SHARED** section (incidents, contacts, metrics, oncall, settings,
-  maintenance, schedule, rules, the two drawers, the rule-form helpers).
-- `99-doc-close.part.html` — `</script></body></html>`.
+- **Foundations (leaves):** `constants.js` (status taxonomy), `helpers.js` (pure
+  presentation: `esc`, `fmtAge`, `fmtTime`, `fmtDetail`, `metaValueHtml`,
+  `buildTile`, …), `state.js` (the few genuinely cross-module mutable globals as
+  live-binding exports + setters — `CAN_WRITE`, `TEAM_TZ`, `tiles`, `activeFilter`,
+  `activeView`, `escalationPolicies`).
+- **Structure:** `auth.js`, `stream.js` (SSE), `fleet.js` (big board), `router.js`
+  (view-switch + hash deep-links), `main.js` (the entry module that runs init in
+  order — loaded via `<script type="module">`).
+- **Views / drawers / shared:** `incidents.js`, `incident-drawer.js`,
+  `tile-drawer.js`, `contacts.js`, `metrics.js`, `oncall.js`, `settings.js`,
+  `maintenance.js`, `schedule.js`, `rules.js`, `rule-forms.js`.
 
-To change a section, edit its fragment — it's a ~100-500 line file, so an AI
-edit is bounded and a view edit physically cannot corrupt another view. The set
-still shares one global JS scope and one `<style>`; the parts are **concatenated**
-in manifest order (not loaded as separate `<script>`/ES modules). Each fragment
-keeps its `// ==== VIEW: … ====` banner as an in-file anchor. **Invariant:**
-concatenating the manifest's fragments must remain a single well-formed document
-with exactly one `<script>`/`<style>` pair (locked by
-`tests/test_hub_dashboard.py::TestDashboardAssembly`).
+The full per-module export/import inventory and dependency graph is in
+[`js-module-map.md`](js-module-map.md) — the source of truth for the JS layout.
+Import cycles between views/drawers are expected and **safe** (every cross-module
+reference is call-time, not load-time); ESM permits them.
+
+**Shell + CSS — fragments in `src/relay/hub/dashboard_parts/`.** Four ordered
+fragments listed in `manifest.txt`: `00-doc-open` (doctype/head), `01-styles`
+(the `<style>` sheet), `02-body-shell` (the markup, ending with the module
+`<script>` tag), `99-doc-close`. To change layout or styling, edit the relevant
+fragment.
+
+**Invariants** (locked by `tests/test_hub_dashboard.py::TestDashboardAssembly`):
+the assembled shell is a single well-formed document with exactly one `<style>`
+pair and exactly one `<script type="module">` tag (**no inline `<script>`**); the
+module entry `main.js` ships in the package; and every relative `import` between
+modules resolves to a real exported symbol.
 
 ## How UI changes are verified
 

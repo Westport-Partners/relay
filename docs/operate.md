@@ -168,7 +168,8 @@ All endpoints are served by the container. The base URL is the same as the dashb
 
 | Method | Path | Purpose | Write? |
 |--------|------|---------|--------|
-| GET | `/` | Serve the dashboard SPA | |
+| GET | `/` | Serve the dashboard SPA shell | |
+| GET | `/static/dashboard/*` | Dashboard ES modules (read-only static; no build step) | |
 | GET | `/health` | Container liveness check | |
 | GET | `/stream` | SSE stream — fleet snapshots + deltas | |
 | GET | `/config` | Runtime config visible to the frontend | |
