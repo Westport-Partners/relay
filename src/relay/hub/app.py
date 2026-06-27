@@ -2424,7 +2424,11 @@ class HubApp:
             from relay.core.scheduling import Role
             valid_roles = {r.value for r in Role}
             raw_roles = payload.get("roles")
-            if isinstance(raw_roles, list) and raw_roles:
+            if isinstance(raw_roles, list):
+                # An explicit list is authoritative — including an empty one,
+                # which means "eligible for no roles" (a contact can be created
+                # with none). Only a MISSING/non-list "roles" key falls back to
+                # the primary+secondary default.
                 roles = [r for r in raw_roles if r in valid_roles]
             else:
                 # Default: eligible for primary + secondary (manager is opt-in).
@@ -2523,7 +2527,10 @@ class HubApp:
                 }
                 valid_roles = {r.value for r in Role}
                 rec_roles = rec.get("roles")
-                if isinstance(rec_roles, list) and rec_roles:
+                # Mirror PUT /availability: an explicit list (incl. empty) is
+                # authoritative — a contact eligible for no roles is scheduled
+                # for none. Only a MISSING/non-list key falls back to the default.
+                if isinstance(rec_roles, list):
                     roles_set = {Role(r) for r in rec_roles if r in valid_roles}
                 else:
                     roles_set = {Role.PRIMARY, Role.SECONDARY}

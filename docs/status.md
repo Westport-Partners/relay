@@ -85,6 +85,7 @@ can be re-verified against the repo, not taken on faith.
 | Feature | Status | Evidence | Notes |
 |---|---|---|---|
 | Contact model + CRUD + UI | ✅ | `adapters/aws/dynamo_stores.py` (`DynamoContactStore`); `hub/app.py` (`/contacts`) | PII in DynamoDB only, never in Git. |
+| Contacts directory UX (filter, role badges, role eligibility at create) | ✅ | `hub/dashboard_modules/contacts.js`; `hub/app.py` (`PUT /availability` empty-roles semantics) | Filter bar (text + role + available-only), per-contact role badges, optional eligible-roles at create (two-call POST `/contacts` + PUT `/availability`), availability expander close button, "On-call" column renamed "Available". Eligible roles persist on the `Availability` record; an explicit empty selection means "no roles". Last verified against code: 2026-06-27. |
 | Email + SMS channels modeled | ✅ | `core/model.py`; `adapters/aws/sns_notifier.py` | |
 | Channel activation handshake (START/STOP opt-in) | ⛔/🟡 | — | Relies on SNS subscription management instead of IM's per-channel activation. |
 

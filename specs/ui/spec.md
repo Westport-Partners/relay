@@ -28,7 +28,9 @@ A full-bleed, dark, dense Industrial Command Center dashboard with these views:
 - **Incidents** — austere full-width table; click a row → incident drawer
   (timeline, properties, actions: ack / resolve / route / ignore / add responder).
 - **Schedule** — role-aware grid with gap highlighting.
-- **Contacts** — searchable directory (CRUD).
+- **Contacts** — searchable/filterable directory (CRUD): text + role + available-only
+  filters, per-contact role-eligibility badges, optional eligible-roles at create,
+  inline availability expander (with close button).
 - **Rules** — UI-managed routing + ignore rules (DB-backed, deviation banner).
 - **Metrics** — MTTR / time-to-ack / counts (flags synthetic data).
 - **Settings** — GitLab token, ServiceNow creds, Teams webhook; Test buttons show raw responses.

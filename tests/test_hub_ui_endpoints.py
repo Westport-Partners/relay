@@ -859,6 +859,41 @@ def test_availability_roundtrip_and_auto_schedule(monkeypatch):
     assert len(g["slots"]) == 63
 
 
+def test_put_availability_explicit_empty_roles_stays_empty(monkeypatch):
+    """An explicit empty roles list means 'eligible for no roles' and must be
+    honored (a contact can be created with none) — not defaulted."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    store = _FakeScheduleStore()
+    c = _client_sched(monkeypatch, store=store)
+    r = c.put("/availability/cnt-none",
+              json={"available": False, "slots": {}, "ooo": None, "roles": []})
+    assert r.status_code == 200
+    assert store.avail["cnt-none"]["roles"] == []
+
+
+def test_put_availability_omitted_roles_defaults(monkeypatch):
+    """A MISSING roles key falls back to the primary+secondary default."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    store = _FakeScheduleStore()
+    c = _client_sched(monkeypatch, store=store)
+    r = c.put("/availability/cnt-def",
+              json={"available": True, "slots": _ALL, "ooo": None})
+    assert r.status_code == 200
+    assert store.avail["cnt-def"]["roles"] == ["primary", "secondary"]
+
+
+def test_put_availability_explicit_roles_filtered_to_valid(monkeypatch):
+    """An explicit list keeps only valid roles (invalid values dropped)."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    store = _FakeScheduleStore()
+    c = _client_sched(monkeypatch, store=store)
+    r = c.put("/availability/cnt-mgr",
+              json={"available": True, "slots": _ALL, "ooo": None,
+                    "roles": ["manager", "bogus"]})
+    assert r.status_code == 200
+    assert store.avail["cnt-mgr"]["roles"] == ["manager"]
+
+
 def test_auto_schedule_requires_auth():
     c = _client_sched(None)
     assert c.post("/schedule/auto?week=2026-06-22").status_code == 403
