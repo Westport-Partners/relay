@@ -1,0 +1,71 @@
+// Incidents list view — loads open or history tab from /incidents.
+// Ported from dashboard_parts/23-view-incidents.js.part (#33).
+
+import { esc, fmtAge, abbrAccount, metaValueHtml } from './helpers.js';
+import { openIncident } from './incident-drawer.js';
+
+// Module-local tab state (single writer, never read across modules).
+let incidentsTab = 'open'; // 'open' | 'history'
+
+export async function loadIncidents() {
+  // Wire tab buttons if not already wired (they get recreated each nav-switch)
+  const tabOpen = document.getElementById('inc-tab-open');
+  const tabHist = document.getElementById('inc-tab-history');
+  if (tabOpen && !tabOpen.dataset.wired) {
+    tabOpen.dataset.wired = '1';
+    tabOpen.addEventListener('click', () => {
+      incidentsTab = 'open';
+      tabOpen.classList.add('active'); tabHist.classList.remove('active');
+      loadIncidents();
+    });
+    tabHist.addEventListener('click', () => {
+      incidentsTab = 'history';
+      tabHist.classList.add('active'); tabOpen.classList.remove('active');
+      loadIncidents();
+    });
+  }
+
+  const list = document.getElementById('incidents-list');
+  const empty = document.getElementById('incidents-empty');
+  list.innerHTML = '<div style="color:var(--text-dim);padding:20px;">Loading…</div>';
+  empty.style.display = 'none';
+  const url = incidentsTab === 'history' ? '/incidents/history' : '/incidents';
+  let data = [];
+  try {
+    const r = await fetch(url);
+    data = await r.json();
+  } catch (e) {
+    list.innerHTML = '<div style="color:var(--red);padding:20px;">Failed to load incidents.</div>';
+    return;
+  }
+  if (!data.length) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    empty.textContent = incidentsTab === 'history' ? 'No incident history.' : 'No open incidents.';
+    return;
+  }
+  empty.style.display = 'none';
+  list.innerHTML = '';
+  for (const i of data) {
+    const row = document.createElement('div');
+    // Tint + left-border active rows by urgency: red for SEV1/2, amber for SEV3.
+    const active = i.state === 'TRIGGERED' || i.state === 'ESCALATED';
+    const sevCls = (i.severity === 'SEV1' || i.severity === 'SEV2') ? 'inc-row-red'
+                 : (i.severity === 'SEV3') ? 'inc-row-amber' : '';
+    row.className = 'inc-row' + (active && sevCls ? ' ' + sevCls : '');
+    row.addEventListener('click', () => openIncident(i.correlation_id));
+    row.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
+        <span class="inc-sev ${esc(i.severity)}">${esc(i.severity || '—')}</span>
+        ${i.synthetic ? '<span class="badge-synthetic">TEST</span>' : ''}
+      </div>
+      <div>
+        <div class="inc-app">${esc(i.app_name)}</div>
+        <div class="inc-sub">${esc(i.environment)} · ${esc(i.alarm_name || '')}</div>
+      </div>
+      <span class="inc-state">${esc(i.state || '')}</span>
+      <span class="inc-sub">${esc(abbrAccount(i.account_id || ''))}</span>
+      <span class="inc-when">${esc(fmtAge(i.created_at) || '')}</span>`;
+    list.appendChild(row);
+  }
+}
