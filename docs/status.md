@@ -97,7 +97,7 @@ can be re-verified against the repo, not taken on faith.
 | `assignment_at(when, role)` / per-role "on call now" | ✅ | `core/scheduling.py` (`assignment_at`, `assignments_at`) | |
 | Timezone-aware "who's on call now" | ✅ | `core/role_resolver.py` (team TZ resolution) | |
 | Gap highlighting (uncovered slots flagged per role) | ✅ | `hub/app.py` + Schedule view (`coverage_by_role`) | |
-| Multi-stage escalation (timeouts, ack stops it) | ✅ | `core/escalation.py`; `core/model.py` (`EscalationStep`) | Pure state machine; EventBridge Scheduler one-shot timers. |
+| Multi-stage escalation (timeouts, ack stops it) | ✅ | `core/escalation.py`; `core/model.py` (`EscalationStep`); `node/handler.py` (`_handle_alarm`, `_handle_timeout`, `_record_escalation_event`) | Pure state machine; EventBridge Scheduler one-shot timers. Emits `incident.triggered` + `escalation.page_sent`/`step_advanced`/`exhausted` on the incident timeline. Last verified against code: 2026-06-27. |
 | Escalation references **roles**, contact_ids as escape hatch | ✅ | `core/escalation.py`; `config/escalation.yaml` | Validator requires ≥1 of roles/contacts. |
 | Role→person resolution **wired into the paging path** | ✅ | `node/handler.py:185-190` (`ScheduleRoleResolver(DynamoScheduleStore(...))` default) | Wired in the container's default construction. |
 | Ad-hoc schedule overrides (cover-me) stored + respected | ✅ | `dynamo_stores.py` (override CRUD); `scheduling.py` (`apply_overrides`); `hub/app.py` (`PUT/DELETE /schedule/override`) | |
@@ -122,6 +122,7 @@ can be re-verified against the repo, not taken on faith.
 | Feature | Status | Evidence | Notes |
 |---|---|---|---|
 | Incident model (status, timeline, properties, tags, severity) | ✅ | `core/model.py` (`Incident`, append-only `TimelineEvent`) | SEV1–SEV4 as the impact proxy. |
+| Paging + escalation events on the incident timeline | ✅ | `node/handler.py` (`_record_escalation_event`, `_handle_alarm`, `_handle_timeout`) | Four events: `incident.triggered`, `escalation.page_sent` (contacts resolved at page time), `escalation.step_advanced`, `escalation.exhausted`. Idempotent: duplicate/stale timeouts append nothing. Last verified against code: 2026-06-27. |
 | State machine TRIGGERED→ACKNOWLEDGED→(ESCALATED)→RESOLVED→CLOSED | ✅ | `core/model.py` (`IncidentState`) | Richer than IM's open/resolved. |
 | Incident detail view (timeline, properties, actions) | ✅ | `hub/app.py`; dashboard | |
 | Synthetic ("test"/"fake") incidents | ✅ | `core/model.py` (`Incident.synthetic`); `adapters/aws/cloudwatch_source.py` (`relay_synthetic` marker); `hub/app.py` (`POST /synthetic/incident`); dashboard Maintenance view | Operator-triggered fake incident runs the full pipeline (paging, tiles, adapters, federation) to verify a fresh deploy. Flagged `TEST` everywhere; counted in metrics on purpose (that's the verification), then cleared via the purge tool. |
