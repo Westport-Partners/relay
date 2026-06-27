@@ -3,9 +3,10 @@
 **Owns:** what an operator can *see and measure* about incidents — the incident
 timeline, KPIs (MTTR, time-to-ack), the fleet big-board, and liveness.
 
-**Primary code:** `core/metrics.py` (`compute_metrics`), `hub/health.py`
-(`Liveness`, `FleetTile`), `core/model.py` (`TimelineEvent`), `hub/app.py`
-(`GET /metrics`, `GET /incidents/{id}`). **status.md:** §8 (and the timeline
+**Primary code:** `core/metrics.py` (`compute_metrics`), `core/flow.py`
+(`build_flow`), `hub/health.py` (`Liveness`, `FleetTile`), `core/model.py`
+(`TimelineEvent`), `hub/app.py` (`GET /metrics`, `GET /incidents/{id}`,
+`GET /incidents/{id}/flow`). **status.md:** §8 (and the timeline
 lives on the §5 incident model). **Related domains:**
 [escalation](../escalation/spec.md) (emits timeline events),
 [incident-records](../incident-records/spec.md) (owns the model),
@@ -36,10 +37,25 @@ lives on the §5 incident model). **Related domains:**
   per-minute heartbeat, so a silent app goes red.
 - **Tile detail drawer.** Clicking a tile opens one data-driven drawer (on-call,
   hierarchy, metadata, AWS tags, open incidents) — sections render only when data exists.
+- **Process-flow view.** The incident drawer renders the **expected escalation
+  ladder** (primary → secondary → manager, each rung's notify-streams + timeout)
+  as a spine, with the **actual events** slotted onto it: reached rungs filled
+  with their page timestamp, unreached rungs ghosted, a red "now-line" before the
+  first unreached rung. `core/flow.py` `build_flow(incident, policy, contacts)` is
+  a pure, AWS-free transform that merges the policy with the timeline; the Hub
+  serves it at `GET /incidents/{id}/flow`. `source` is `config` (full policy
+  loaded, ghosted rungs shown), `derived` (federated Hub with no
+  `escalation.yaml` — the ladder is reconstructed from the recorded
+  `escalation.page_sent` events, labeled as such, no ghost rungs knowable), or
+  `none` (no policy and no page events → the drawer falls back to the flat
+  timeline list). `policy_id` is read from `Incident.escalation_policy_id`,
+  falling back to the `incident.triggered` event's `policy_id` for legacy rows.
 
 ## Key entities
 
 - **TimelineEvent** — `{ event_type, at, detail }`, append-only.
+- **Flow view** — `{ expected_steps, actual_events, contacts, policy_id, source,
+  fallback }` from `build_flow`; the merged expected-ladder-vs-actual structure.
 - **Metrics rollup** — MTTR / time-to-ack / counts / `synthetic_total`.
 - **FleetTile** — per-deployment board cell + `Liveness` state.
 
@@ -48,28 +64,6 @@ lives on the §5 incident model). **Related domains:**
 - **Timeline is append-only and immutable** — never edit or reorder past events.
 - **Synthetic incidents count in metrics** deliberately (that's the verification);
   they're flagged, not hidden.
-
-## In flight / planned
-
-**[#20](https://github.com/Westport-Partners/relay/issues/20) — render expected vs. actual.**
-On the incident card, show the **expected escalation ladder** (primary →
-secondary → manager, each step's streams + timeout) as a spine, and slot the
-**actual events** onto it with timestamps: page sent → no ack → escalated →
-page sent → acknowledged by X → resolved by Y. Reached steps filled, unreached
-ghosted; fall back to the current flat list when no flow data exists.
-(orchestrator/Opus for spec+plan; see [ui spec](../ui/spec.md) for the visual.)
-
-**Read path for #20:** derive the expected ladder from the incident's routing
-rule → `escalation_policy_id` → policy steps. Likely add `escalation_policy_id`
-to `Incident` so historic incidents stay reconstructable. Either a new
-`GET /incidents/{id}/flow` (expected steps + actual timeline + contact-id→name map)
-or an enriched incident detail. For a federated Hub with no `escalation.yaml`,
-fall back to deriving the ladder from the recorded `escalation.page_sent` events.
-
-Note: **[#19](https://github.com/Westport-Partners/relay/issues/19) is complete** —
-the four escalation events described above are now emitted by `node/handler.py`
-(`_handle_alarm` + `_handle_timeout`, via `_record_escalation_event`).
-See [escalation spec](../escalation/spec.md) for the full event contract.
 
 ## Out of scope (non-goals)
 

@@ -1909,6 +1909,65 @@ class HubApp:
             return dumped
 
         # ----------------------------------------------------------------
+        # GET /incidents/{id}/flow — merged escalation-ladder + actual events.
+        # Read-only. Feeds the incident drawer's process-flow timeline (#20):
+        # the expected ladder (from the policy, or derived from page_sent events
+        # on a federated Hub with no escalation.yaml) with the actual escalation
+        # events slotted onto it. Sub-path, so no ordering conflict with
+        # /incidents/{correlation_id} (full-template match, like /brief, /aar).
+        # ----------------------------------------------------------------
+        @app.get("/incidents/{correlation_id}/flow")
+        def get_incident_flow(correlation_id: str) -> dict[str, Any]:
+            from relay.core.flow import build_flow
+
+            incident = _incident_or_404(correlation_id)
+
+            # Resolve policy_id: the model field if stamped at classification,
+            # else fall back to the policy_id recorded in the incident.triggered
+            # timeline event (covers legacy rows that predate the field).
+            policy_id = incident.escalation_policy_id
+            if policy_id is None:
+                for ev in incident.timeline:
+                    if ev.event_type == "incident.triggered":
+                        raw_pid = ev.detail.get("policy_id")
+                        if raw_pid is not None:
+                            policy_id = str(raw_pid)
+                        break
+
+            # Load the full policy (with its steps) from config when available.
+            # A federated Hub has no escalation.yaml → policy is None and the
+            # builder derives the ladder from the recorded page_sent events.
+            policy = None
+            if (
+                policy_id is not None
+                and hub_config is not None
+                and getattr(hub_config, "escalation", None) is not None
+            ):
+                try:
+                    policy = next(
+                        (
+                            p
+                            for p in hub_config.escalation.policies
+                            if p.policy_id == policy_id
+                        ),
+                        None,
+                    )
+                except Exception:
+                    logger.warning(
+                        "escalation policy lookup failed for %s", policy_id, exc_info=True
+                    )
+
+            # Contact-id → name map for resolving who was paged (best-effort).
+            contacts: dict[str, str] = {}
+            if contact_store is not None:
+                try:
+                    contacts = {c.contact_id: c.name for c in contact_store.list_contacts()}
+                except Exception:
+                    logger.warning("contact map build failed for /flow", exc_info=True)
+
+            return build_flow(incident, policy, contacts)
+
+        # ----------------------------------------------------------------
         # GET /incidents/{id}/brief and /aar — AI-augmented drafts (read-only).
         # Both degrade gracefully: deterministic output when no model wired.
         # ----------------------------------------------------------------

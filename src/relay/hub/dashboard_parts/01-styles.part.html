@@ -491,6 +491,39 @@
   }
   .tl-type { font-weight: 700; color: var(--text); font-size: 12px; }
   .tl-meta { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+
+  /* Escalation flow ladder (#20): expected steps as a spine, reached rungs
+     filled, unreached ghosted, a red now-line between. Industrial palette —
+     no rounded/pastel/shadow; teal is chrome only, status reds/ambers/greens
+     carry meaning. */
+  .flow { border-left: 1px solid var(--border-strong); margin-left: 5px; padding-left: 16px; }
+  .flow-step { position: relative; padding: 6px 0; }
+  .flow-step::before {
+    content: ''; position: absolute; left: -21px; top: 9px;
+    width: 9px; height: 9px;
+    border: 2px solid var(--surface-1);
+    box-sizing: border-box;
+  }
+  .flow-step.reached::before { background: var(--teal-light); }
+  .flow-step.ghost::before { background: var(--surface-3); border-color: var(--border-strong); }
+  .flow-step.ghost { opacity: 0.55; }
+  .flow-step-head { font-weight: 700; color: var(--text); font-size: 12px; }
+  .flow-step.ghost .flow-step-head { color: var(--text-dim); }
+  .flow-step-meta { font-size: 11px; color: var(--text-dim); font-family: var(--mono); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+  .flow-stream-chip {
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-dim); background: var(--surface-3);
+    border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 0 5px;
+  }
+  .flow-timeout { color: var(--text-faint); }
+  .flow-when { color: var(--text); }
+  .flow-when.ghost { color: var(--text-faint); }
+  .flow-now-line {
+    position: relative; height: 0;
+    border-top: 1px solid var(--red);
+    margin: 4px 0 4px -16px;
+  }
+  .flow-note { font-size: 11px; color: var(--text-faint); font-style: italic; margin-top: 8px; }
   .section-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); margin: 18px 0 8px; font-weight: 700; }
 
   /* Tile-detail drawer: AWS tag chips + on-call source marker. Squared,

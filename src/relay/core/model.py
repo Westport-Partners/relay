@@ -227,6 +227,11 @@ class Incident(BaseModel):
     # human-readable explanation.
     routing_rule_id: str | None = None
     routing_reason: str = ""
+    # Which escalation policy drove this incident — captured at classification
+    # so a historic incident's ladder is reconstructable even if the policy is
+    # later edited. None on legacy rows (predate this field); the flow view then
+    # falls back to the policy_id recorded in the incident.triggered timeline event.
+    escalation_policy_id: str | None = None
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
     acknowledged_by: str | None = None

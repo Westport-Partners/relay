@@ -34,10 +34,69 @@ export async function openIncident(correlationId) {
     drawer.querySelector('.close').addEventListener('click', closeDrawer);
     return;
   }
-  renderIncident(inc);
+  renderIncident(inc, await fetchFlow(correlationId));
 }
 
-export function renderIncident(inc) {
+// Best-effort fetch of the process-flow view (#20). Returns null on any failure
+// so the drawer falls back to the flat timeline list.
+async function fetchFlow(correlationId) {
+  try {
+    const r = await fetch('/incidents/' + encodeURIComponent(correlationId) + '/flow');
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (_) {
+    return null;
+  }
+}
+
+// Render one paging target (roles + explicit contacts) as a human label, with
+// contact ids resolved to names via the flow's contacts map.
+function flowTargetLabel(step, contacts) {
+  const parts = [];
+  (step.roles || []).forEach(r => parts.push(esc(r)));
+  (step.contact_ids || []).forEach(cid => parts.push(esc(contacts[cid] || cid)));
+  return parts.length ? parts.join(', ') : '—';
+}
+
+// Build the escalation-ladder HTML: one rung per expected step, reached rungs
+// filled with their page timestamp, unreached rungs ghosted, a red "now-line"
+// between the two (config source only), plus a derived-source caveat note.
+function buildFlowHtml(inc, flow) {
+  const contacts = flow.contacts || {};
+  const steps = flow.expected_steps || [];
+  const terminal = inc.state === 'RESOLVED' || inc.state === 'CLOSED';
+
+  // The now-line sits before the first unreached rung — only meaningful for a
+  // config-backed ladder that still has ghosted steps and isn't terminal.
+  const firstGhostIdx = steps.findIndex(s => !s.reached);
+  const showNowLine = flow.source === 'config' && firstGhostIdx >= 0 && !terminal;
+
+  const rows = steps.map((s, i) => {
+    const cls = s.reached ? 'flow-step reached' : 'flow-step ghost';
+    const streams = (s.notify_streams || []).map(st =>
+      `<span class="flow-stream-chip">${esc(st)}</span>`).join('');
+    const timeoutLabel = (s.timeout_minutes != null)
+      ? `<span class="flow-timeout">${esc(String(s.timeout_minutes))}m timeout</span>` : '';
+    const when = s.reached && s.reached_at
+      ? `<span class="flow-when">${esc(fmtTime(s.reached_at))}</span>`
+      : '<span class="flow-when ghost">not reached</span>';
+    const nowLine = (showNowLine && i === firstGhostIdx) ? '<div class="flow-now-line"></div>' : '';
+    return `
+      ${nowLine}
+      <div class="${cls}">
+        <div class="flow-step-head">Step ${esc(String(s.step_index))} · ${flowTargetLabel(s, contacts)}</div>
+        <div class="flow-step-meta">${streams}${timeoutLabel}${when}</div>
+      </div>`;
+  }).join('');
+
+  const note = flow.source === 'derived'
+    ? '<div class="flow-note">Reconstructed from page events — full policy unavailable.</div>'
+    : '';
+
+  return `<div class="flow">${rows}${note}</div>`;
+}
+
+export function renderIncident(inc, flow = null) {
   const tl = Array.isArray(inc.timeline) ? inc.timeline.slice() : [];
   tl.sort((a, b) => new Date(a.occurred_at) - new Date(b.occurred_at));
   const tlHtml = tl.length ? tl.map(ev => `
@@ -45,6 +104,13 @@ export function renderIncident(inc) {
       <div class="tl-type">${esc(ev.event_type || 'event')}${ev.stream ? ' · ' + esc(ev.stream) : ''}</div>
       <div class="tl-meta">${esc(fmtTime(ev.occurred_at))}${ev.actor ? ' · ' + esc(ev.actor) : ''}${fmtDetail(ev.detail)}</div>
     </div>`).join('') : '<div style="color:var(--text-dim);">No timeline events recorded.</div>';
+
+  // Process-flow ladder (#20): expected escalation steps as a spine with the
+  // actual events slotted on. Falls back to the flat timeline list above when
+  // there's no flow data (source 'none', fetch failed, or no expected steps).
+  const hasFlow = flow && flow.source && flow.source !== 'none'
+    && Array.isArray(flow.expected_steps) && flow.expected_steps.length > 0;
+  const flowHtml = hasFlow ? buildFlowHtml(inc, flow) : '';
 
   const path = Array.isArray(inc.service_path) && inc.service_path.length
     ? inc.service_path.join(' › ') : (inc.deployment_id || '—');
@@ -110,6 +176,7 @@ export function renderIncident(inc) {
       return (dmRows.length ? `<div class="section-title">Resolved metadata</div><div class="kv">${dmRows.join('')}</div>` : '')
         + (rtChips ? `<div class="section-title">Resource tags</div><div class="tag-grid">${rtChips}</div>` : '');
     })()}
+    ${hasFlow ? `<div class="section-title">Escalation flow</div>${flowHtml}` : ''}
     <div class="section-title">Timeline</div>
     <div class="timeline">${tlHtml}</div>`;
   drawer.querySelector('.close').addEventListener('click', closeDrawer);
@@ -124,9 +191,10 @@ export function renderIncident(inc) {
       try {
         const r = await fetch('/incidents/' + encodeURIComponent(inc.correlation_id) + '/acknowledge', { method: 'POST' });
         if (r.ok) {
-          // Re-fetch and re-render; also refresh incidents list if visible.
+          // Re-fetch and re-render (incl. the flow ladder so the ack marker
+          // appears live); also refresh incidents list if visible.
           const updated = await fetch('/incidents/' + encodeURIComponent(inc.correlation_id));
-          if (updated.ok) renderIncident(await updated.json());
+          if (updated.ok) renderIncident(await updated.json(), await fetchFlow(inc.correlation_id));
           if (activeView === 'incidents') loadIncidents();
         } else {
           const body = await r.json().catch(() => ({}));
@@ -154,7 +222,7 @@ export function renderIncident(inc) {
         const r = await fetch('/incidents/' + encodeURIComponent(inc.correlation_id) + '/resolve', { method: 'POST' });
         if (r.ok) {
           const updated = await fetch('/incidents/' + encodeURIComponent(inc.correlation_id));
-          if (updated.ok) renderIncident(await updated.json());
+          if (updated.ok) renderIncident(await updated.json(), await fetchFlow(inc.correlation_id));
           if (activeView === 'incidents') loadIncidents();
         } else {
           const body = await r.json().catch(() => ({}));

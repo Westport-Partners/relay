@@ -1135,3 +1135,275 @@ class TestDashboardAssembly:
                     if s not in exports[target]:
                         problems.append(f"{name}: imports {{{s}}} from {target}, which does not export it")
         assert not problems, "broken ES-module imports:\n" + "\n".join(problems)
+
+
+# ===========================================================================
+# GET /incidents/{id}/flow  — process-flow endpoint (issue #20)
+# ===========================================================================
+#
+# These tests use the same HubApp.__new__ + build_fastapi_app() pattern
+# established by the other endpoint-test modules in this suite.
+# They exercise the four behaviours: config-backed, derived, none/fallback,
+# 404, and policy_id from the triggered event.
+# ===========================================================================
+
+import threading as _threading  # noqa: E402  (already at module top but kept explicit)
+from types import SimpleNamespace  # noqa: E402
+
+from relay.core.model import (  # noqa: E402
+    EscalationPolicy,
+    EscalationStep,
+    Stream,
+    TimelineEvent,
+)
+
+try:
+    from fastapi.testclient import TestClient as _TestClient  # noqa: E402
+except ImportError:
+    _TestClient = None  # type: ignore[assignment,misc]
+
+from relay.hub.app import HubApp  # noqa: E402 (HubState/SSEPublisher already imported)
+
+# --------------------------------------------------------------------------
+# Shared helpers (flow-only scope)
+# --------------------------------------------------------------------------
+
+_FLOW_T0 = datetime(2026, 6, 2, 8, 0, 0, tzinfo=UTC)
+
+
+def _fev(
+    cid: str,
+    step_index: int,
+    occurred_at: datetime,
+    contact_ids: list | None = None,
+    event_id: str | None = None,
+) -> TimelineEvent:
+    """Build an escalation.page_sent TimelineEvent."""
+    return TimelineEvent(
+        event_id=event_id or f"fev-{step_index}",
+        incident_id=cid,
+        stream=Stream.TEAM,
+        occurred_at=occurred_at,
+        actor="system",
+        event_type="escalation.page_sent",
+        detail={
+            "step_index": step_index,
+            "contact_ids": contact_ids or [],
+            "roles": [],
+            "streams": ["TEAM"],
+            "timeout_minutes": 5,
+        },
+    )
+
+
+def _flow_incident(
+    cid: str = "flow-inc-001",
+    timeline: list | None = None,
+    escalation_policy_id: str | None = None,
+) -> Incident:
+    return Incident(
+        correlation_id=cid,
+        account_id="123456789012",
+        region="us-east-1",
+        app_name="svc",
+        severity=Severity.SEV2,
+        signal_source=SignalSource.CLOUDWATCH_ALARM,
+        alarm_name="test-alarm",
+        state=IncidentState.TRIGGERED,
+        timeline=timeline or [],
+        escalation_policy_id=escalation_policy_id,
+    )
+
+
+class _FlowFakeIncidentStore:
+    def __init__(self, incidents: list[Incident]) -> None:
+        self._db = {i.correlation_id: i for i in incidents}
+
+    def get_incident(self, cid: str) -> Incident | None:
+        return self._db.get(cid)
+
+    def list_open_incidents(self, account_id: str | None = None) -> list[Incident]:
+        return list(self._db.values())
+
+    def list_incidents(self) -> list[Incident]:
+        return list(self._db.values())
+
+    def put_incident(self, inc: Incident) -> None:
+        self._db[inc.correlation_id] = inc
+
+
+class _FlowFakeContactStore:
+    def __init__(self, contacts: dict[str, str]) -> None:
+        # contacts is contact_id -> name
+        from relay.core.model import Contact
+        self._db = [
+            Contact(contact_id=cid, name=name, email=f"{cid}@example.com")
+            for cid, name in contacts.items()
+        ]
+
+    def list_contacts(self) -> list:
+        return list(self._db)
+
+
+def _flow_policy(policy_id: str = "flow-pol-1") -> EscalationPolicy:
+    return EscalationPolicy(
+        policy_id=policy_id,
+        name="Flow Policy",
+        team="team-flow",
+        steps=[
+            EscalationStep(
+                step_index=0,
+                contact_ids=["fc1"],
+                timeout_minutes=5,
+                notify_streams=[Stream.TEAM],
+            ),
+            EscalationStep(
+                step_index=1,
+                contact_ids=["fc2"],
+                timeout_minutes=10,
+                notify_streams=[Stream.TEAM],
+            ),
+        ],
+    )
+
+
+def _flow_client(
+    incident: Incident | None = None,
+    hub_config: object | None = None,
+    contact_store: object | None = None,
+) -> _TestClient:
+    """Build a minimal HubApp TestClient wired for /incidents/{id}/flow tests."""
+    if _TestClient is None:
+        pytest.skip("fastapi/httpx not installed")
+
+    store = _FlowFakeIncidentStore([incident] if incident is not None else [])
+
+    app_obj = HubApp.__new__(HubApp)
+    app_obj._incident_store = store
+    app_obj._contact_store = contact_store
+    app_obj._config = hub_config
+    app_obj._schedule_store = None
+    app_obj._settings_store = None
+    app_obj._notifier = None
+    app_obj._paging_topic_arn = None
+
+    hs = HubState.__new__(HubState)
+    hs._tiles = {}
+    hs.lock = _threading.Lock()
+    hs._store = None
+    hs._cadence = 60
+    hs._clock = lambda: datetime.now(UTC)
+    app_obj._hub_state = hs
+    app_obj._sse_publisher = SSEPublisher()
+
+    return _TestClient(app_obj.build_fastapi_app())
+
+
+# --------------------------------------------------------------------------
+# Tests
+# --------------------------------------------------------------------------
+
+
+class TestFlowEndpoint:
+    """GET /incidents/{id}/flow — process-flow endpoint."""
+
+    def test_404_for_unknown_incident(self):
+        c = _flow_client()
+        r = c.get("/incidents/no-such-id/flow")
+        assert r.status_code == 404
+
+    def test_config_backed_source(self):
+        """Config has a matching policy → source=='config', expected_steps from policy."""
+        policy = _flow_policy("flow-pol-1")
+        # Fake hub config with escalation.policies
+        hub_config = SimpleNamespace(
+            escalation=SimpleNamespace(policies=[policy]),
+            routing=None,
+        )
+        timeline = [_fev("fci-config", 0, _FLOW_T0, contact_ids=["fc1"])]
+        inc = _flow_incident(
+            "fci-config",
+            timeline=timeline,
+            escalation_policy_id="flow-pol-1",
+        )
+        c = _flow_client(
+            incident=inc,
+            hub_config=hub_config,
+            contact_store=_FlowFakeContactStore({"fc1": "Alice", "fc2": "Bob"}),
+        )
+        r = c.get("/incidents/fci-config/flow")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["source"] == "config"
+        assert len(body["expected_steps"]) == 2
+        assert body["expected_steps"][0]["reached"] is True
+        assert body["expected_steps"][1]["reached"] is False
+        assert body["fallback"] is False
+
+    def test_derived_when_no_config_escalation(self):
+        """No policy in config → source=='derived' (ladder inferred from page_sent events)."""
+        timeline = [
+            _fev("fci-derived", 0, _FLOW_T0, contact_ids=["fc1"]),
+            _fev("fci-derived", 1, _FLOW_T0 + timedelta(seconds=60), contact_ids=["fc2"]),
+        ]
+        inc = _flow_incident("fci-derived", timeline=timeline)
+        # Config with no escalation attr → policy lookup is skipped
+        c = _flow_client(
+            incident=inc,
+            hub_config=None,
+            contact_store=_FlowFakeContactStore({"fc1": "Alice", "fc2": "Bob"}),
+        )
+        r = c.get("/incidents/fci-derived/flow")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["source"] == "derived"
+        assert len(body["expected_steps"]) == 2
+        assert all(s["reached"] for s in body["expected_steps"])
+        assert body["fallback"] is False
+
+    def test_none_fallback_no_policy_no_page_sent(self):
+        """No policy + no page_sent events → source=='none', fallback True."""
+        inc = _flow_incident("fci-none")
+        c = _flow_client(incident=inc, hub_config=None)
+        r = c.get("/incidents/fci-none/flow")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["source"] == "none"
+        assert body["expected_steps"] == []
+        assert body["fallback"] is True
+
+    def test_policy_id_from_triggered_event(self):
+        """incident.escalation_policy_id is None but triggered event carries policy_id."""
+        policy = _flow_policy("flow-pol-trig")
+        hub_config = SimpleNamespace(
+            escalation=SimpleNamespace(policies=[policy]),
+            routing=None,
+        )
+        timeline = [
+            TimelineEvent(
+                event_id="trig-1",
+                incident_id="fci-trig",
+                stream=Stream.TEAM,
+                occurred_at=_FLOW_T0,
+                actor="system",
+                event_type="incident.triggered",
+                detail={"policy_id": "flow-pol-trig", "alarm_name": "alarm"},
+            ),
+            _fev("fci-trig", 0, _FLOW_T0 + timedelta(seconds=5), contact_ids=["fc1"]),
+        ]
+        inc = _flow_incident(
+            "fci-trig",
+            timeline=timeline,
+            escalation_policy_id=None,  # the field is None
+        )
+        c = _flow_client(
+            incident=inc,
+            hub_config=hub_config,
+            contact_store=_FlowFakeContactStore({"fc1": "Alice", "fc2": "Bob"}),
+        )
+        r = c.get("/incidents/fci-trig/flow")
+        assert r.status_code == 200
+        body = r.json()
+        # Route resolved the policy from the triggered event → config source
+        assert body["source"] == "config"
+        assert body["policy_id"] == "flow-pol-trig"
