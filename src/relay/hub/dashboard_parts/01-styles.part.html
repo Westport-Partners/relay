@@ -307,11 +307,73 @@
   .view.active { display: block; }
 
   /* ------------------------------------------------------------------ */
-  /* Fleet — the Big Board: rigid identical cells, 1px gridlines         */
+  /* Fleet — the Big Board: grouped sections, 1px dividers               */
   /* ------------------------------------------------------------------ */
-  #grid {
+
+  /* Outer scroll container — vertical stack of group sections */
+  #fleet-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    overflow-y: auto;
+  }
+
+  /* One section per product-line group */
+  .fleet-group {
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .fleet-group:last-child {
+    border-bottom: none;
+  }
+
+  /* Compact group header row */
+  .fleet-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* LED status dot */
+  .fleet-group-led {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--grey);
+  }
+  .fleet-group-led.red      { background: var(--red); }
+  .fleet-group-led.degraded { background: var(--amber); }
+  .fleet-group-led.green    { background: var(--green); }
+  .fleet-group-led.grey     { background: var(--grey); }
+
+  /* Group label — uppercase tracking-wider, design-language table-header idiom */
+  .fleet-group-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  /* Count summary — monospace, dim, pushed to the right */
+  .fleet-group-counts {
+    font-size: 10px;
+    font-family: var(--mono);
+    color: var(--text-faint);
+    margin-left: auto;
+  }
+
+  /* Tile grid inside each group. auto-fit collapses empty tracks (no phantom
+     columns); --tile-min is set per group by fleet.js sizeGroupGrids() from the
+     group's tile count + width, so few tiles grow and many tiles pack dense. */
+  .fleet-group-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(var(--tile-min), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(var(--tile-min, 200px), 100%), 1fr));
     gap: 1px;
     padding: 1px;
     background: var(--border);
@@ -323,7 +385,7 @@
     display: flex;
     flex-direction: column;
     gap: 3px;
-    min-height: 76px;
+    min-height: 100px;
     position: relative;
     background: var(--surface-1);
     border-left: 3px solid var(--grey);
@@ -355,10 +417,14 @@
     font-size: 12px;
     font-weight: 700;
     color: #fff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     max-width: calc(100% - 22px);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+    line-height: 1.3;
   }
   .tile-account {
     font-size: 10px;
@@ -377,11 +443,12 @@
   .tile.red      .tile-status-text { color: var(--red); }
   .tile.grey     .tile-status-text { color: var(--grey); }
 
-  .tile-meta {
+  .tile-indicators {
     display: flex;
-    gap: 6px;
-    align-items: center;
+    flex-direction: row;
     flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
     margin-top: auto;
     padding-top: 3px;
   }
@@ -399,11 +466,54 @@
   .tile.green    .tile-badge { background: rgba(22,198,12,0.18); color: var(--green); }
   .tile.grey     .tile-badge { background: var(--surface-3); color: var(--text-dim); }
 
+  .tile-oncall-gap {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: var(--radius);
+    font-family: var(--mono);
+    background: rgba(255,176,0,0.18);
+    color: var(--amber);
+    border: 1px solid var(--amber);
+  }
+
+  .tile-env {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 1px 4px;
+    border-radius: var(--radius);
+    font-family: var(--mono);
+    color: var(--text-faint);
+    background: var(--surface-3);
+  }
+  /* Non-prod stands out via a brighter neutral chip with a 1px border — never
+     a status/teal color (teal is chrome/identity only; status colors are
+     reserved for health). Keeps prod the quiet default. */
+  .tile-env-nonprod {
+    color: var(--text);
+    background: var(--surface-3);
+    border: 1px solid var(--text-dim);
+  }
+
+  .tile-owner {
+    font-size: 9px;
+    color: var(--text-faint);
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+  }
+
   .tile-last-seen {
     font-size: 10px;
     color: var(--text-faint);
-    margin-left: auto;
     font-family: var(--mono);
+    margin-top: 2px;
   }
   .tile-last-seen.stale { color: var(--amber); font-weight: 700; }
   .tile-last-seen.lost  { color: var(--red);   font-weight: 700; }
