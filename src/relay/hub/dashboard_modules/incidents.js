@@ -5,6 +5,7 @@
 import { esc, fmtAge, abbrAccount, metaValueHtml } from './helpers.js';
 import { openIncident } from './incident-drawer.js';
 import { refresh, getOpen, getHistory, subscribe } from './incident-store.js';
+import { matchesEnv } from './env-filter.js';
 
 // Module-local tab state (single writer, never read across modules).
 let incidentsTab = 'open'; // 'open' | 'history'
@@ -19,7 +20,8 @@ function _renderFromStore() {
   const empty = document.getElementById('incidents-empty');
   if (!list || !empty) return;   // view not mounted yet
 
-  const data = incidentsTab === 'history' ? getHistory() : getOpen();
+  const data = (incidentsTab === 'history' ? getHistory() : getOpen())
+    .filter(i => matchesEnv(i));
 
   if (!data.length) {
     list.innerHTML = '';
@@ -52,6 +54,10 @@ function _renderFromStore() {
     list.appendChild(row);
   }
 }
+
+// Re-render the visible Incidents tab from the store (e.g. when the env lens
+// changes) without re-fetching.
+export function renderIncidentsFromStore() { _renderFromStore(); }
 
 export async function loadIncidents() {
   // Wire tab buttons if not already wired (they get recreated each nav-switch)

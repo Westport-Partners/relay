@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relay — Env-Container Fleet Board (mockup)</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  :root{
+    --bg:#0c0d0e; --surface-1:#141517; --surface-2:#1b1d20; --surface-3:#242629;
+    --border:#2a2d31; --border-strong:#3a3e44;
+    --text:#e6e8eb; --text-dim:#9aa0a6; --text-faint:#6b7177;
+    --green:#16c60c; --amber:#ffb000; --red:#ff3b30; --grey:#6b7177;
+    --teal:#007489; --teal-deep:#005b6d; --teal-light:#218993;
+    --radius:2px;
+    --mono:"SF Mono","JetBrains Mono","IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,sans-serif;
+  }
+  html,body{height:100%;}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;line-height:1.4;-webkit-font-smoothing:antialiased;}
+
+  /* ---- mockup chrome ---- */
+  #bar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:8px 14px;background:#000;border-bottom:1px solid var(--border-strong);}
+  #bar .brand{font-weight:800;letter-spacing:.06em;}
+  #bar .brand .mk{color:var(--teal-light);}
+  .grp{display:flex;align-items:center;gap:2px;}
+  .grp .gl{font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-faint);margin-right:6px;}
+  .btn{background:var(--surface-2);color:var(--text-dim);border:1px solid var(--border);
+    padding:5px 11px;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;
+    text-transform:uppercase;letter-spacing:.05em;border-radius:var(--radius);}
+  .btn:hover{background:var(--surface-3);color:var(--text);}
+  .btn.active{background:var(--teal-deep);color:#fff;border-color:var(--teal-light);}
+  .btn.env.active{background:var(--teal-deep);}
+  #desc{padding:7px 14px;background:var(--surface-1);border-bottom:1px solid var(--border);font-size:12px;color:var(--text-dim);}
+  #desc b{color:var(--text);}
+  #scope-note{margin-left:auto;font-size:11px;color:var(--text-faint);font-family:var(--mono);}
+
+  #stage{padding:14px;}
+
+  /* ===== environment container ===== */
+  /* COLUMNS layout: envs are side-by-side columns */
+  #stage.cols #board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(340px,1fr);gap:14px;align-items:start;overflow-x:auto;}
+  /* ROWS layout: envs stack vertically full-width */
+  #stage.rows #board{display:flex;flex-direction:column;gap:14px;}
+
+  .env-block{border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--surface-1);overflow:hidden;}
+  .env-head{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface-2);border-bottom:1px solid var(--border-strong);position:sticky;top:0;}
+  .env-head .ename{font-weight:800;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#fff;}
+  .env-head .led{width:10px;height:10px;border-radius:50%;}
+  .env-head .ecount{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--text-faint);}
+  .env-prod .env-head{border-bottom-color:var(--teal-light);}
+  /* Top-level boxes (product lines) stack full-width so their nested content has
+     room to pack horizontally inside. */
+  .env-body{padding:10px;display:flex;flex-direction:column;gap:8px;}
+
+  /* ===== recursive bounded org box; children laid out HORIZONTALLY ===== */
+  .org{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-1);}
+  .org.lvl0{border-color:var(--border-strong);}
+  .org-head{display:flex;align-items:center;gap:7px;padding:4px 9px;background:var(--surface-2);cursor:pointer;}
+  .org-head:hover{background:var(--surface-3);}
+  .org-head .led{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  .org-head .olbl{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .org-head .ocount{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--text-faint);flex-shrink:0;}
+  .org.lvl1 > .org-head .olbl{color:var(--text-dim);}
+  .org.lvl2 > .org-head .olbl{color:var(--text-faint);}
+
+  /* The key: at EVERY level children flow side-by-side into a wrapping grid,
+     filling the row left-to-right and wrapping only when full. So two products
+     sit side by side; inside each, two components sit side by side; inside each,
+     the project tiles sit side by side. */
+  /* auto-FIT (not auto-fill): empty tracks collapse and real items stretch to
+     fill the width, so 2 products expand to fill the row instead of being
+     squeezed into one 240px track with phantom empty columns beside them. That
+     phantom-column squeeze was forcing components to stack vertically. */
+  .org-children{padding:6px;display:grid;gap:6px;align-items:start;
+    grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
+  /* Leaf boxes (components) hold deployment tiles, packed across too. */
+  .org-tiles{padding:6px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:6px;}
+
+  /* ===== tile ===== */
+  .tile{background:var(--surface-1);border:1px solid var(--border);border-left:3px solid var(--grey);border-radius:var(--radius);padding:7px 9px;cursor:pointer;display:flex;flex-direction:column;gap:2px;}
+  .tile:hover{background:var(--surface-2);}
+  .tile.green{border-left-color:var(--green);} .tile.degraded{border-left-color:var(--amber);}
+  .tile.red{border-left-color:var(--red);} .tile.grey{border-left-color:var(--grey);}
+  .tile .tn{font-weight:700;color:#fff;font-size:11px;word-break:break-word;line-height:1.25;}
+  .tile .tr{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:var(--text-faint);margin-top:2px;}
+  .tile .st{font-weight:700;text-transform:uppercase;}
+  .tile.green .st{color:var(--green);} .tile.degraded .st{color:var(--amber);}
+  .tile.red .st{color:var(--red);} .tile.grey .st{color:var(--grey);}
+  .tile .inc{color:var(--red);font-weight:700;}
+
+  .led.red{background:var(--red);} .led.degraded{background:var(--amber);}
+  .led.green{background:var(--green);} .led.grey{background:var(--grey);}
+
+  /* team-scope: drop redundant top org levels, surface service grouping */
+  .team-hint{font-size:11px;color:var(--text-faint);font-family:var(--mono);padding:0 2px 8px;}
+
+  /* ================================================================== */
+  /* HEADER COMPRESSION MODES (body class set by the Headers toggle)     */
+  /* ================================================================== */
+
+  /* --- SLIM: drop the filled bar; label becomes a tight single text line, no
+     background fill, minimal padding. ~half the height of the bar. --- */
+  body.hdr-slim .org{border:none;background:transparent;}
+  body.hdr-slim .org-head{background:transparent;padding:1px 2px 1px 0;}
+  body.hdr-slim .org-head:hover{background:transparent;}
+  body.hdr-slim .org-head .led{width:6px;height:6px;}
+  body.hdr-slim .org-head .olbl{font-size:9px;letter-spacing:.05em;}
+  body.hdr-slim .org-children{padding:2px 0 2px 10px;border-left:1px solid var(--border);margin-left:3px;}
+  body.hdr-slim .org.leaf{border:1px solid var(--border);background:var(--surface-1);}
+  body.hdr-slim .org.leaf > .org-head{padding:4px 9px;}
+  body.hdr-slim .org-tiles{padding:4px 0;}
+
+  /* --- SPINE: rotate each container label onto a thin vertical bar on the LEFT
+     edge, reclaiming the whole header ROW height. Costs ~22px of left width per
+     level (we have horizontal room). Leaf component boxes keep their top bar. --- */
+  body.hdr-spine .org:not(.leaf){display:flex;align-items:stretch;border-color:var(--border-strong);}
+  body.hdr-spine .org:not(.leaf) > .org-head{
+    flex-direction:column;justify-content:flex-start;align-items:center;gap:6px;
+    padding:6px 3px;background:var(--surface-2);border-right:1px solid var(--border);
+    writing-mode:vertical-rl;transform:rotate(180deg);width:24px;flex-shrink:0;cursor:default;}
+  body.hdr-spine .org:not(.leaf) > .org-head .olbl{font-size:9px;letter-spacing:.08em;}
+  body.hdr-spine .org:not(.leaf) > .org-head .led{writing-mode:horizontal-tb;}
+  body.hdr-spine .org:not(.leaf) > .org-head .ocount{margin-left:0;margin-top:auto;writing-mode:horizontal-tb;}
+  /* children sit to the RIGHT of the spine, still packing horizontally */
+  body.hdr-spine .org:not(.leaf) > .org-children{flex:1;}
+</style>
+</head>
+<body>
+
+<div id="bar">
+  <span class="brand"><span class="mk">&#9650;</span> Relay</span>
+  <div class="grp"><span class="gl">Scope</span>
+    <button class="btn scope active" data-scope="central">Central</button>
+    <button class="btn scope" data-scope="team">Team</button>
+  </div>
+  <div class="grp"><span class="gl">Env layout</span>
+    <button class="btn layout active" data-layout="rows">Rows</button>
+    <button class="btn layout" data-layout="cols">Columns</button>
+  </div>
+  <div class="grp"><span class="gl">Headers</span>
+    <button class="btn hdr" data-hdr="bar">Bars</button>
+    <button class="btn hdr" data-hdr="slim">Slim</button>
+    <button class="btn hdr" data-hdr="spine">Spine</button>
+    <button class="btn hdr active" data-hdr="collapse">Collapse 1-child</button>
+  </div>
+  <div class="grp" id="env-filter"><span class="gl">Env</span></div>
+  <span id="scope-note"></span>
+</div>
+<div id="desc"></div>
+
+<div id="stage" class="rows">
+  <div id="board"></div>
+</div>
+
+<script type="module">
+const ORD={red:0,degraded:1,grey:2,green:3};
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const fmtAge=iso=>{if(!iso)return'—';const s=Math.round((Date.now()-new Date(iso))/1000);if(s<60)return s+'s';const m=(s/60)|0;if(m<60)return m+'m';return((m/60)|0)+'h';};
+const worst=ts=>{let b=9;for(const t of ts){const o=ORD[t.status]??9;if(o<b)b=o;}return Object.keys(ORD).find(k=>ORD[k]===b)||'grey';};
+const tally=ts=>{const c={red:0,degraded:0,grey:0,green:0};for(const t of ts){const s=t.status||'grey';if(s in c)c[s]++;}return c;};
+
+// HDR default = 'collapse' — the LOCKED header decision (see docs/fleet-team-mockup.md).
+let TILES=[], SCOPE='central', LAYOUT='rows', ENV='all', HDR='collapse';
+// Scope ONLY changes how much data arrives (a team node receives just its own
+// account's deployments). The render path is IDENTICAL — same env-container →
+// dynamic org tree. A real team owns ONE component (same line › product ›
+// component), so we simulate the feed by pinning to a single component. That
+// makes line→product→component a single-child chain — exactly what the
+// "Collapse 1-child" header mode is meant to fold into one breadcrumb.
+function teamFeed(tiles){
+  const comp=(tiles[0]?.org_path||[])[2];
+  if(!comp) return tiles;
+  return tiles.filter(t=>(t.org_path||[])[2]?.id===comp.id);
+}
+
+async function load(){ TILES=await (await fetch('/fleet')).json(); buildEnvFilter(); render(); }
+
+function envsPresent(tiles){
+  const s=new Set(tiles.map(t=>t.environment).filter(Boolean));
+  // canonical promotion-ish order if present, else alpha
+  const order=['dev','test','int','qa','stage','staging','pre-prod','preprod','prod','production'];
+  return [...s].sort((a,b)=>{const ia=order.indexOf(a.toLowerCase()),ib=order.indexOf(b.toLowerCase());
+    return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b);});
+}
+
+function buildEnvFilter(){
+  const wrap=document.getElementById('env-filter');
+  [...wrap.querySelectorAll('.btn')].forEach(b=>b.remove());
+  const mk=(val,label)=>{const b=document.createElement('button');b.className='btn env'+(ENV===val?' active':'');
+    b.textContent=label;b.onclick=()=>{ENV=val;buildEnvFilter();render();};wrap.appendChild(b);};
+  mk('all','ALL');
+  for(const e of envsPresent(TILES)) mk(e.toLowerCase(),e);
+}
+
+/* Recursive org grouping, dynamic depth. Groups by org_path[depth], recursing
+   to the deepest structural level; deployment leaves (tiles) attach at the
+   component. The nesting is KEPT — env › product line › product › component —
+   but every level lays its children out horizontally (see CSS), so siblings sit
+   side by side and only wrap when the row is full. */
+function buildOrg(tiles,depth){
+  const buckets=new Map();
+  const direct=[];
+  for(const t of tiles){
+    const p=t.org_path||[];
+    const struct=p.slice(0,Math.max(0,p.length-1)); // structural levels (no leaf)
+    if(depth>=struct.length){ direct.push(t); continue; }
+    const node=struct[depth];
+    const k=node.id||node.name;
+    if(!buckets.has(k)) buckets.set(k,{node,tiles:[]});
+    buckets.get(k).tiles.push(t);
+  }
+  const nodes=[];
+  for(const {node,tiles:bt} of buckets.values()){
+    const deeper=buildOrg(bt,depth+1);
+    nodes.push({label:node.name||node.id,level:depth,status:worst(bt),counts:tally(bt),
+      tiles:deeper.direct, children:deeper.nodes});
+  }
+  nodes.sort((a,b)=>(ORD[a.status]??9)-(ORD[b.status]??9));
+  return {nodes, direct};
+}
+
+function tileEl(t){
+  const d=document.createElement('div');d.className='tile '+(t.status||'grey');
+  d.title=t.app_name;
+  d.innerHTML=`<div class="tn">${esc(t.app_name)}</div>
+    <div class="tr"><span class="st">${esc(t.status)}</span>
+    ${t.open_incidents>0?`<span class="inc">● ${t.open_incidents}${t.worst_severity?' '+esc(t.worst_severity):''}</span>`:''}
+    <span style="margin-left:auto">${fmtAge(t.last_heartbeat_at)}</span></div>`;
+  return d;
+}
+
+// "Collapse 1-child" header mode: when a node has exactly one child and no tiles
+// of its own, fold the child up into it, joining labels with ' › '. Repeats down
+// the chain so a run of single-child levels becomes one breadcrumb header.
+function collapseChain(node){
+  let n=node;
+  let label=n.label;
+  while(HDR==='collapse' && n.children && n.children.length===1 && (!n.tiles||!n.tiles.length)){
+    n=n.children[0];
+    label+=' › '+n.label;
+  }
+  return {...n, label, level:node.level};
+}
+
+// Recursive bounded org box. Keeps the nesting (line › product › component) but
+// lays its children out in a horizontal wrapping grid so siblings sit side by
+// side. A leaf box (component) holds its deployment tiles, also packed across.
+function orgEl(node){
+  node=collapseChain(node);
+  const isLeaf = !node.children || !node.children.length;
+  const div=document.createElement('div');div.className='org lvl'+Math.min(node.level,3)+(isLeaf?' leaf':'');
+  const c=node.counts;
+  const head=document.createElement('div');head.className='org-head';
+  head.innerHTML=`<span class="led ${node.status}"></span><span class="olbl">${esc(node.label)}</span>
+    <span class="ocount">${c.red?c.red+'R ':''}${c.degraded?c.degraded+'D ':''}${c.grey?c.grey+'? ':''}${c.green}G</span>`;
+  div.appendChild(head);
+  if(node.children&&node.children.length){
+    const kids=document.createElement('div');kids.className='org-children';
+    for(const ch of node.children) kids.appendChild(orgEl(ch));
+    div.appendChild(kids);
+  }
+  if(node.tiles&&node.tiles.length){
+    const tg=document.createElement('div');tg.className='org-tiles';
+    for(const t of [...node.tiles].sort((a,b)=>(ORD[a.status]??9)-(ORD[b.status]??9))) tg.appendChild(tileEl(t));
+    div.appendChild(tg);
+  }
+  return div;
+}
+
+function render(){
+  const board=document.getElementById('board');board.innerHTML='';
+  document.getElementById('stage').className=LAYOUT;
+
+  // scope ONLY changes data volume — a team node simply gets fewer tiles.
+  // Same render path either way.
+  const scoped = SCOPE==='team' ? teamFeed(TILES) : TILES;
+
+  // env filter
+  const inEnv = t => ENV==='all' || (t.environment||'').toLowerCase()===ENV;
+  const visible = scoped.filter(inEnv);
+
+  // env grouping: one block per environment present (or just the selected one)
+  const envList = ENV==='all' ? envsPresent(visible) : [ENV];
+
+  document.getElementById('scope-note').textContent =
+    SCOPE==='team' ? `Team node · receives only its account's data · ${visible.length} deployments · ${envList.length} envs`
+                   : `Central hub · all accounts · ${visible.length} deployments · ${envList.length} envs`;
+
+  for(const env of envList){
+    const et=visible.filter(t=>(t.environment||'').toLowerCase()===env.toLowerCase());
+    if(!et.length) continue;
+    const block=document.createElement('div');
+    block.className='env-block'+(/prod/i.test(env)&&!/pre/i.test(env)?' env-prod':'');
+    const c=tally(et);
+    block.innerHTML=`<div class="env-head"><span class="led ${worst(et)}"></span>
+      <span class="ename">${esc(env)}</span>
+      <span class="ecount">${et.length} apps · ${c.red}R · ${c.degraded}D · ${c.green}G</span></div>`;
+    // Nested org tree, every level packed horizontally. Identical for team +
+    // central — a team just has fewer branches.
+    const body=document.createElement('div');body.className='env-body';
+    const tree=buildOrg(et,0);
+    for(const n of tree.nodes) body.appendChild(orgEl(n));
+    if(tree.direct.length){
+      const tg=document.createElement('div');tg.className='org-tiles';
+      for(const t of [...tree.direct].sort((a,b)=>(ORD[a.status]??9)-(ORD[b.status]??9))) tg.appendChild(tileEl(t));
+      body.appendChild(tg);
+    }
+    block.appendChild(body);
+    board.appendChild(block);
+  }
+}
+
+const DESC={
+  central:'<b>Central hub.</b> Receives every account\'s data. Environment is the outer container; the full dynamic org tree (product line › product › component) nests inside each env block as bounded rows. AWS accounts never appear. Toggle Rows vs Columns to compare how the env containers wrap.',
+  team:'<b>Team node.</b> SAME board, SAME render path — it just receives less data (only its own account\'s deployments come from Event Hub). The org tree is naturally shallower because fewer levels branch. No special "team layout": the env-container model scales down on its own.',
+};
+function setDesc(){document.getElementById('desc').innerHTML=DESC[SCOPE];}
+
+document.querySelectorAll('.btn.scope').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.btn.scope').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+  SCOPE=b.dataset.scope;setDesc();render();});
+document.querySelectorAll('.btn.layout').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.btn.layout').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+  LAYOUT=b.dataset.layout;render();});
+document.querySelectorAll('.btn.hdr').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.btn.hdr').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+  HDR=b.dataset.hdr;document.body.className='hdr-'+HDR;render();});
+
+document.body.className='hdr-'+HDR;
+setDesc();
+load();
+setInterval(load,10000);
+</script>
+</body>
+</html>

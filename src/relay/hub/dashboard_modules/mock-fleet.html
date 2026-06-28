@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relay — Fleet Board Directions (mockup)</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  :root{
+    --bg:#0c0d0e; --surface-1:#141517; --surface-2:#1b1d20; --surface-3:#242629;
+    --border:#2a2d31; --border-strong:#3a3e44;
+    --text:#e6e8eb; --text-dim:#9aa0a6; --text-faint:#6b7177; --text-inv:#0c0d0e;
+    --green:#16c60c; --green-bg:#0a2208; --amber:#ffb000; --amber-bg:#2a1d00;
+    --red:#ff3b30; --red-bg:#2a0e0c; --grey:#6b7177; --grey-bg:#17191c;
+    --teal:#007489; --teal-deep:#005b6d; --teal-light:#218993;
+    --radius:2px;
+    --mono:"SF Mono","JetBrains Mono","IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,sans-serif;
+  }
+  html,body{height:100%;}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;line-height:1.4;-webkit-font-smoothing:antialiased;}
+  .mono{font-family:var(--mono);}
+
+  /* ---- mockup chrome ---- */
+  #mock-bar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:2px;
+    padding:8px 14px;background:#000;border-bottom:1px solid var(--border-strong);}
+  #mock-bar .brand{font-weight:800;letter-spacing:.06em;margin-right:16px;}
+  #mock-bar .brand .mk{color:var(--teal-light);}
+  #mock-bar .tag{font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.1em;margin-right:auto;}
+  .mock-tab{background:var(--surface-2);color:var(--text-dim);border:1px solid var(--border);
+    padding:6px 14px;font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;
+    text-transform:uppercase;letter-spacing:.06em;border-radius:var(--radius);}
+  .mock-tab:hover{background:var(--surface-3);color:var(--text);}
+  .mock-tab.active{background:var(--teal-deep);color:#fff;border-color:var(--teal-light);}
+  #mock-desc{padding:7px 14px;background:var(--surface-1);border-bottom:1px solid var(--border);
+    font-size:12px;color:var(--text-dim);}
+  #mock-desc b{color:var(--text);}
+  #mock-stage{padding:0;}
+  .panel{display:none;}
+  .panel.active{display:block;}
+
+  /* shared status atoms */
+  .led{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--grey);}
+  .led.red{background:var(--red);} .led.degraded{background:var(--amber);}
+  .led.green{background:var(--green);} .led.grey{background:var(--grey);}
+
+  /* =====================================================================
+     A — DENSE STATUS MATRIX (heatmap). Maximize apps/screen; one square
+     per deployment, color = health, hover/scan. Group rows w/ sticky label.
+  ===================================================================== */
+  #pА{padding:0;}
+  .mx-group{border-bottom:1px solid var(--border);}
+  .mx-head{display:flex;align-items:center;gap:8px;padding:5px 12px;background:var(--surface-2);
+    position:sticky;top:0;}
+  .mx-head .lbl{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);}
+  .mx-head .ct{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--text-faint);}
+  .mx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(14px,1fr));gap:2px;padding:8px 12px;}
+  .mx-cell{aspect-ratio:1;border-radius:1px;background:var(--surface-3);cursor:pointer;position:relative;}
+  .mx-cell.green{background:var(--green);} .mx-cell.degraded{background:var(--amber);}
+  .mx-cell.red{background:var(--red);} .mx-cell.grey{background:#33373c;}
+  .mx-cell:hover{outline:2px solid #fff;z-index:2;}
+  .mx-cell .inc{position:absolute;top:-2px;right:-2px;width:6px;height:6px;border-radius:50%;background:#fff;border:1px solid #000;}
+
+  /* =====================================================================
+     B — TRIAGE FIRST. Broken floats up as rich rows; healthy collapses to
+     a single quiet summary strip. Answers "what needs me right now."
+  ===================================================================== */
+  #pБ{padding:14px;max-width:1100px;}
+  .tr-section-h{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--text-faint);margin:18px 4px 8px;}
+  .tr-section-h:first-child{margin-top:4px;}
+  .tr-row{display:flex;align-items:center;gap:14px;padding:12px 14px;background:var(--surface-1);
+    border:1px solid var(--border);border-left-width:4px;border-radius:var(--radius);margin-bottom:6px;cursor:pointer;}
+  .tr-row:hover{background:var(--surface-2);}
+  .tr-row.red{border-left-color:var(--red);} .tr-row.degraded{border-left-color:var(--amber);}
+  .tr-row .nm{font-weight:700;color:#fff;font-size:14px;}
+  .tr-row .crumb{font-size:11px;color:var(--text-faint);font-family:var(--mono);}
+  .tr-row .spacer{margin-left:auto;}
+  .tr-row .sev{font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;border-radius:var(--radius);}
+  .tr-row.red .sev{background:var(--red);color:#fff;} .tr-row.degraded .sev{background:var(--amber);color:#1a1200;}
+  .tr-row .meta{font-size:11px;color:var(--text-dim);font-family:var(--mono);}
+  .tr-env{font-size:9px;font-weight:700;text-transform:uppercase;padding:1px 5px;border-radius:var(--radius);
+    font-family:var(--mono);color:var(--text-faint);background:var(--surface-3);}
+  .tr-healthy{display:flex;align-items:center;gap:10px;padding:14px;background:var(--surface-1);
+    border:1px solid var(--border);border-radius:var(--radius);margin-top:6px;}
+  .tr-healthy .big{font-size:26px;font-weight:800;color:var(--green);font-family:var(--mono);}
+  .tr-healthy .txt{color:var(--text-dim);}
+  .tr-healthy .chips{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;max-width:60%;justify-content:flex-end;}
+  .tr-chip{font-size:10px;font-family:var(--mono);color:var(--text-faint);background:var(--surface-3);
+    padding:2px 7px;border-radius:var(--radius);}
+
+  /* =====================================================================
+     C — ORG EXPLORER (two-pane). Left collapsible tree w/ rollup status;
+     right shows tiles for the selected node. Navigation by drill, not scroll.
+  ===================================================================== */
+  #pВ{display:flex;height:calc(100vh - 84px);}
+  .ex-tree{width:320px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;background:var(--surface-1);}
+  .ex-node{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px;}
+  .ex-node:hover{background:var(--surface-2);}
+  .ex-node.sel{background:var(--teal-deep);color:#fff;}
+  .ex-node .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ex-node .ct{font-family:var(--mono);font-size:10px;color:var(--text-faint);}
+  .ex-node.sel .ct{color:#cfe;}
+  .ex-l1{font-weight:700;} .ex-l2{padding-left:24px;color:var(--text-dim);} .ex-l3{padding-left:42px;color:var(--text-faint);}
+  .ex-pane{flex:1;overflow-y:auto;padding:14px;}
+  .ex-pane h2{font-size:13px;font-weight:700;color:#fff;margin-bottom:2px;}
+  .ex-pane .sub{font-size:11px;color:var(--text-faint);font-family:var(--mono);margin-bottom:14px;}
+  .ex-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;}
+  .ex-tile{background:var(--surface-1);border:1px solid var(--border);border-left:3px solid var(--grey);
+    border-radius:var(--radius);padding:10px 12px;cursor:pointer;}
+  .ex-tile:hover{background:var(--surface-2);}
+  .ex-tile.green{border-left-color:var(--green);} .ex-tile.degraded{border-left-color:var(--amber);}
+  .ex-tile.red{border-left-color:var(--red);} .ex-tile.grey{border-left-color:var(--grey);}
+  .ex-tile .nm{font-weight:700;color:#fff;font-size:12px;word-break:break-word;}
+  .ex-tile .row{display:flex;align-items:center;gap:6px;margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--text-faint);}
+
+  /* =====================================================================
+     D — DATA GRID (sortable NOC table). One row per app, dense, scannable.
+  ===================================================================== */
+  #pГ{padding:0;}
+  table.dg{width:100%;border-collapse:collapse;font-size:12px;}
+  table.dg thead th{position:sticky;top:0;background:var(--surface-2);text-align:left;
+    padding:7px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim);
+    border-bottom:1px solid var(--border-strong);font-weight:700;}
+  table.dg tbody tr{border-bottom:1px solid var(--border);cursor:pointer;}
+  table.dg tbody tr:hover{background:var(--surface-2);}
+  table.dg td{padding:8px 12px;vertical-align:middle;}
+  .dg-st{font-family:var(--mono);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;}
+  .dg-st.red{color:var(--red);} .dg-st.degraded{color:var(--amber);}
+  .dg-st.green{color:var(--green);} .dg-st.grey{color:var(--grey);}
+  .dg-nm{font-weight:700;color:#fff;}
+  .dg-crumb{font-size:10px;color:var(--text-faint);font-family:var(--mono);}
+  .dg-grp td{background:var(--surface-3);font-size:10px;font-weight:800;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--text-dim);padding:5px 12px;}
+  .dg-inc{font-family:var(--mono);font-weight:700;}
+  .dg-inc.has{color:var(--red);}
+  .dg-mono{font-family:var(--mono);font-size:11px;color:var(--text-faint);}
+</style>
+</head>
+<body>
+
+<div id="mock-bar">
+  <span class="brand"><span class="mk">&#9650;</span> Relay</span>
+  <span class="tag">Fleet Board — direction mockups · live demo data</span>
+  <button class="mock-tab active" data-p="А">A · Matrix</button>
+  <button class="mock-tab" data-p="Б">B · Triage</button>
+  <button class="mock-tab" data-p="В">C · Explorer</button>
+  <button class="mock-tab" data-p="Г">D · Data grid</button>
+</div>
+<div id="mock-desc"></div>
+
+<div id="mock-stage">
+  <div class="panel active" id="pА"></div>
+  <div class="panel" id="pБ"></div>
+  <div class="panel" id="pВ"></div>
+  <div class="panel" id="pГ"></div>
+</div>
+
+<script type="module">
+const DESC = {
+  'А': '<b>A · Status Matrix.</b> One small square per deployment, color = health. Goal: fit the whole ~200-app fleet on one screen with no scroll. Hierarchy comes from grouped rows + sticky labels; a white dot flags open incidents. Densest possible scan.',
+  'Б': '<b>B · Triage First.</b> Inverts the board — anything red/degraded floats to the top as rich, actionable rows; the healthy majority collapses into one quiet summary strip. Answers "what needs me right now" instead of showing everything equally.',
+  'В': '<b>C · Org Explorer.</b> Two panes: a collapsible org tree (product line › product › component) with rollup status on the left, tiles for the selected node on the right. Navigation by drilling, not scrolling — scales to hundreds of apps.',
+  'Г': '<b>D · Data Grid.</b> One dense row per app in a sortable NOC table: status, name, env, open incidents, last-seen. Click a column header to sort. Familiar, information-dense, and great for scanning a specific attribute across the whole fleet.',
+};
+const ORD = {red:0,degraded:1,grey:2,green:3};
+const MARK = {red:'●',degraded:'▲',green:'●',grey:'?'};
+const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const fmtAge = iso => { if(!iso) return '—'; const s=Math.round((Date.now()-new Date(iso))/1000);
+  if(s<60) return s+'s'; const m=(s/60)|0; if(m<60) return m+'m'; return ((m/60)|0)+'h'; };
+const acct = id => id&&id.length>4 ? '…'+id.slice(-4):id;
+
+// Group at deepest non-leaf node (same rule as production fleet-groups.js)
+function gi(p){ return p.length>=2 ? p.length-2 : 0; }
+function crumb(p,i){ return p.slice(0,i+1).map(n=>n.name||n.id).join(' › '); }
+function worst(ts){ let b=9; for(const t of ts){const o=ORD[t.status]??9; if(o<b)b=o;} return Object.keys(ORD).find(k=>ORD[k]===b)||'grey'; }
+function tally(ts){ const c={red:0,degraded:0,grey:0,green:0}; for(const t of ts){const s=t.status||'grey'; if(s in c)c[s]++;} return c; }
+
+function groupTiles(arr){
+  const b=new Map();
+  for(const t of arr){
+    const p=t.org_path; if(!p||!p.length){ const k='__u'; if(!b.has(k))b.set(k,{label:'Ungrouped',tiles:[]}); b.get(k).tiles.push(t); continue; }
+    const i=gi(p), node=p[i], k=node.id;
+    if(!b.has(k)) b.set(k,{label:crumb(p,i),tiles:[]});
+    b.get(k).tiles.push(t);
+  }
+  const g=[...b.entries()].map(([k,v])=>({key:k,label:v.label,status:worst(v.tiles),counts:tally(v.tiles),
+    tiles:v.tiles.sort((a,c)=>(ORD[a.status]??9)-(ORD[c.status]??9))}));
+  g.sort((a,c)=>(ORD[a.status]??9)-(ORD[c.status]??9));
+  return g;
+}
+
+let TILES=[];
+async function load(){
+  const r=await fetch('/fleet'); TILES=await r.json();
+  render();
+}
+function render(){ const g=groupTiles(TILES); renderMatrix(g); renderTriage(g); renderExplorer(g); renderGrid(g); }
+
+/* A — MATRIX */
+function renderMatrix(groups){
+  const el=document.getElementById('pА'); el.innerHTML='';
+  for(const grp of groups){
+    const sec=document.createElement('div'); sec.className='mx-group';
+    const c=grp.counts;
+    sec.innerHTML=`<div class="mx-head"><span class="led ${grp.status}"></span>
+      <span class="lbl">${esc(grp.label)}</span>
+      <span class="ct">${c.red}R · ${c.degraded}D · ${c.grey}? · ${c.green}G</span></div>`;
+    const grid=document.createElement('div'); grid.className='mx-grid';
+    for(const t of grp.tiles){
+      const cell=document.createElement('div'); cell.className='mx-cell '+(t.status||'grey');
+      cell.title=`${t.app_name} — ${t.status}${t.open_incidents?` · ${t.open_incidents} open`:''}`;
+      if(t.open_incidents>0) cell.innerHTML='<span class="inc"></span>';
+      grid.appendChild(cell);
+    }
+    sec.appendChild(grid); el.appendChild(sec);
+  }
+}
+
+/* B — TRIAGE */
+function renderTriage(groups){
+  const el=document.getElementById('pБ'); el.innerHTML='';
+  const all=groups.flatMap(g=>g.tiles.map(t=>({...t,_crumb:g.label})));
+  const broken=all.filter(t=>t.status==='red'||t.status==='degraded')
+    .sort((a,b)=>(ORD[a.status]-ORD[b.status])||(b.open_incidents||0)-(a.open_incidents||0));
+  const healthy=all.filter(t=>t.status==='green'||t.status==='grey');
+  if(broken.length){
+    const h=document.createElement('div'); h.className='tr-section-h'; h.textContent=`Needs attention — ${broken.length}`; el.appendChild(h);
+    for(const t of broken){
+      const r=document.createElement('div'); r.className='tr-row '+t.status;
+      r.innerHTML=`<span class="led ${t.status}"></span>
+        <div><div class="nm">${esc(t.app_name)}</div><div class="crumb">${esc(t._crumb)}</div></div>
+        <span class="tr-env">${esc(t.environment||'')}</span>
+        <span class="spacer"></span>
+        ${t.open_incidents>0?`<span class="sev">${esc(t.worst_severity||'OPEN')} · ${t.open_incidents}</span>`:''}
+        <span class="meta">seen ${fmtAge(t.last_heartbeat_at)} ago</span>`;
+      el.appendChild(r);
+    }
+  }
+  const hh=document.createElement('div'); hh.className='tr-section-h'; hh.textContent='Healthy'; el.appendChild(hh);
+  const greens=healthy.filter(t=>t.status==='green').length;
+  const greys=healthy.filter(t=>t.status==='grey').length;
+  const box=document.createElement('div'); box.className='tr-healthy';
+  box.innerHTML=`<span class="big">${greens}</span><span class="txt">apps green${greys?` · ${greys} unknown`:''} — nothing to do here</span>
+    <span class="chips">${healthy.slice(0,18).map(t=>`<span class="tr-chip">${esc(t.app_name)}</span>`).join('')}${healthy.length>18?`<span class="tr-chip">+${healthy.length-18} more</span>`:''}</span>`;
+  el.appendChild(box);
+}
+
+/* C — EXPLORER */
+let exSel=null;
+function renderExplorer(groups){
+  const el=document.getElementById('pВ'); el.innerHTML='';
+  // Build product-line › product › component tree from org_path.
+  const lines=new Map();
+  for(const t of TILES){
+    const p=t.org_path||[]; if(p.length<1) continue;
+    const l1=p[0], l2=p[1]||l1, l3=p[2]||l2;
+    if(!lines.has(l1.id)) lines.set(l1.id,{node:l1,prods:new Map(),tiles:[]});
+    const L1=lines.get(l1.id); L1.tiles.push(t);
+    if(!L1.prods.has(l2.id)) L1.prods.set(l2.id,{node:l2,comps:new Map(),tiles:[]});
+    const L2=L1.prods.get(l2.id); L2.tiles.push(t);
+    if(!L2.comps.has(l3.id)) L2.comps.set(l3.id,{node:l3,tiles:[]});
+    L2.comps.get(l3.id).tiles.push(t);
+  }
+  const tree=document.createElement('div'); tree.className='ex-tree';
+  const pane=document.createElement('div'); pane.className='ex-pane';
+  const addNode=(label,tiles,lvl,sel)=>{
+    const n=document.createElement('div'); n.className=`ex-node ex-l${lvl}`+(sel?' sel':'');
+    n.innerHTML=`<span class="led ${worst(tiles)}"></span><span class="nm">${esc(label)}</span><span class="ct">${tiles.length}</span>`;
+    n.onclick=()=>{exSel={label,tiles};drawPane();[...tree.querySelectorAll('.ex-node')].forEach(x=>x.classList.remove('sel'));n.classList.add('sel');};
+    tree.appendChild(n); return n;
+  };
+  const drawPane=()=>{
+    pane.innerHTML='';
+    const sel=exSel||{label:'All fleet',tiles:TILES};
+    const c=tally(sel.tiles);
+    pane.innerHTML=`<h2>${esc(sel.label)}</h2><div class="sub">${sel.tiles.length} apps · ${c.red} red · ${c.degraded} degraded · ${c.green} green</div>`;
+    const grid=document.createElement('div'); grid.className='ex-tiles';
+    for(const t of [...sel.tiles].sort((a,b)=>(ORD[a.status]??9)-(ORD[b.status]??9))){
+      const d=document.createElement('div'); d.className='ex-tile '+(t.status||'grey');
+      d.innerHTML=`<div class="nm">${esc(t.app_name)}</div>
+        <div class="row"><span class="led ${t.status}"></span><span>${esc(t.environment||'')}</span>
+        ${t.open_incidents>0?`<span style="color:var(--red)">● ${t.open_incidents}</span>`:''}
+        <span style="margin-left:auto">${fmtAge(t.last_heartbeat_at)}</span></div>`;
+      grid.appendChild(d);
+    }
+    pane.appendChild(grid);
+  };
+  // root
+  addNode('All fleet',TILES,1,true);
+  for(const L1 of [...lines.values()].sort((a,b)=>(ORD[worst(a.tiles)])-(ORD[worst(b.tiles)]))){
+    addNode(L1.node.name,L1.tiles,1,false);
+    for(const L2 of L1.prods.values()){
+      addNode(L2.node.name,L2.tiles,2,false);
+      for(const L3 of L2.comps.values()) addNode(L3.node.name,L3.tiles,3,false);
+    }
+  }
+  el.appendChild(tree); el.appendChild(pane); drawPane();
+}
+
+/* D — DATA GRID */
+let dgSort={key:'status',dir:1};
+function renderGrid(groups){
+  const el=document.getElementById('pГ'); el.innerHTML='';
+  const rows=groups.flatMap(g=>g.tiles.map(t=>({...t,_crumb:g.label,_grp:g.label})));
+  const tbl=document.createElement('table'); tbl.className='dg';
+  const cols=[['status','Status'],['app_name','Application'],['environment','Env'],['open_incidents','Open'],['last_heartbeat_at','Last seen']];
+  tbl.innerHTML='<thead><tr>'+cols.map(([k,l])=>`<th data-k="${k}">${l}${dgSort.key===k?(dgSort.dir>0?' ▾':' ▴'):''}</th>`).join('')+'</tr></thead>';
+  const tb=document.createElement('tbody');
+  const sorted=[...rows].sort((a,b)=>{
+    let av=a[dgSort.key], bv=b[dgSort.key];
+    if(dgSort.key==='status'){av=ORD[av]??9;bv=ORD[bv]??9;}
+    if(dgSort.key==='last_heartbeat_at'){av=new Date(av||0).getTime();bv=new Date(bv||0).getTime();}
+    if(dgSort.key==='open_incidents'){av=av||0;bv=bv||0;}
+    return (av>bv?1:av<bv?-1:0)*dgSort.dir;
+  });
+  let curGrp=null;
+  for(const t of sorted){
+    if(dgSort.key==='status' && t._grp!==curGrp){ curGrp=t._grp;
+      const gr=document.createElement('tr'); gr.className='dg-grp'; gr.innerHTML=`<td colspan="5">${esc(t._grp)}</td>`; tb.appendChild(gr);
+    }
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><span class="dg-st ${t.status}">${MARK[t.status]||''} ${esc(t.status)}</span></td>
+      <td><span class="dg-nm">${esc(t.app_name)}</span> <span class="dg-crumb">${esc(t._crumb)}</span></td>
+      <td class="dg-mono">${esc(t.environment||'')}</td>
+      <td class="dg-inc ${t.open_incidents>0?'has':''}">${t.open_incidents>0?(t.open_incidents+(t.worst_severity?' · '+t.worst_severity:'')):'—'}</td>
+      <td class="dg-mono">${fmtAge(t.last_heartbeat_at)} ago</td>`;
+    tb.appendChild(tr);
+  }
+  tbl.appendChild(tb); el.appendChild(tbl);
+  tbl.querySelectorAll('th').forEach(th=>th.onclick=()=>{const k=th.dataset.k;
+    if(dgSort.key===k)dgSort.dir*=-1; else dgSort={key:k,dir:1}; renderGrid(groups);});
+}
+
+// tab switching
+document.querySelectorAll('.mock-tab').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.mock-tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); document.getElementById('p'+b.dataset.p).classList.add('active');
+  document.getElementById('mock-desc').innerHTML=DESC[b.dataset.p];
+});
+document.getElementById('mock-desc').innerHTML=DESC['А'];
+
+load();
+setInterval(load,10000); // pick up demo drip
+</script>
+</body>
+</html>

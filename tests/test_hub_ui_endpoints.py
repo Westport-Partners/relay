@@ -136,6 +136,45 @@ def test_history_returns_only_terminal_state_incidents():
     assert open_ids == {"open-1", "open-2", "open-3"}
 
 
+def test_list_incidents_carries_metrics_enrichment_fields():
+    """Open-incident payloads gain acknowledged_at/resolved_at/signal_source/
+    synthetic so the client can recompute env-scoped KPIs (issue #40)."""
+    now = datetime.now(UTC)
+    inc = _incident()
+    inc.acknowledged_at = now
+    c = _client(_FakeIncidentStore([inc]))
+    item = c.get("/incidents").json()[0]
+    # acknowledged_at is an ISO string; the open incident has no resolution yet.
+    assert item["acknowledged_at"] == now.isoformat()
+    assert item["resolved_at"] is None
+    assert item["signal_source"] == "CLOUDWATCH_ALARM"
+    assert item["synthetic"] is False
+
+
+def test_list_incidents_enrichment_null_when_unacked():
+    """An unacknowledged open incident reports null acknowledged_at/resolved_at."""
+    c = _client(_FakeIncidentStore([_incident()]))
+    item = c.get("/incidents").json()[0]
+    assert item["acknowledged_at"] is None
+    assert item["resolved_at"] is None
+
+
+def test_history_carries_metrics_enrichment_with_resolved_at():
+    """Terminal incidents serialize a derived resolved_at (from the timeline
+    event, falling back to updated_at) plus the other three new fields."""
+    inc = _incident("done-1", IncidentState.RESOLVED)
+    # No explicit resolved timeline event → derivation falls back to updated_at.
+    item = next(
+        i
+        for i in _client(_FakeIncidentStore([inc])).get("/incidents/history").json()
+        if i["correlation_id"] == "done-1"
+    )
+    assert item["resolved_at"] == inc.updated_at.isoformat()
+    assert item["signal_source"] == "CLOUDWATCH_ALARM"
+    assert item["synthetic"] is False
+    assert item["acknowledged_at"] is None
+
+
 def test_get_incident_returns_full_record_with_timeline():
     c = _client(_FakeIncidentStore([_incident()]))
     r = c.get("/incidents/c-123")
@@ -197,6 +236,15 @@ def test_dashboard_serves_incidents_view_and_footer():
     html = c.get("/").text
     assert "view-incidents" in html
     assert "Westport Partners" in html
+
+
+def test_dashboard_modules_served_with_no_cache():
+    """Dashboard ES modules are versionless URLs, so they must be served with
+    Cache-Control: no-cache or a browser serves a stale module after redeploy."""
+    c = _client(_FakeIncidentStore([]))
+    r = c.get("/static/dashboard/main.js")
+    assert r.status_code == 200
+    assert r.headers.get("cache-control") == "no-cache"
 
 
 # ---------------------------------------------------------------------------

@@ -266,12 +266,14 @@ try:
     import uvicorn
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import HTMLResponse, StreamingResponse
+    from fastapi.staticfiles import StaticFiles
 
     _HAS_FASTAPI = True
 except ImportError:
     _HAS_FASTAPI = False
     FastAPI = None  # type: ignore[assignment,misc]
     HTTPException = None  # type: ignore[assignment,misc]
+    StaticFiles = object  # type: ignore[assignment,misc]
 
 # The dashboard UI is authored as ordered fragments under dashboard_parts/
 # (the document open, the <style> sheet, and the body shell) assembled into a
@@ -305,6 +307,34 @@ def _render_dashboard_html() -> str:
             for name in names
         )
     return _DASHBOARD_HTML_PATH.read_text(encoding="utf-8")
+
+
+class _RevalidatingStaticFiles(StaticFiles):
+    """StaticFiles that forces the browser to revalidate every asset.
+
+    The dashboard ES modules are versionless URLs (no content hash), and
+    StaticFiles only sends ETag/Last-Modified — so a browser caches them
+    heuristically and can serve a stale module after a redeploy. Adding
+    ``Cache-Control: no-cache`` keeps caching (cheap 304s via the ETag) while
+    guaranteeing a rebuilt module is always picked up.
+    """
+
+    def file_response(self, *args: Any, **kwargs: Any) -> Any:
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+def _incident_resolved_at_iso(incident: Any) -> str | None:
+    """ISO-8601 resolution time for serialization, or None if still open.
+
+    Reuses the same rule as ``core/metrics._resolved_at`` so the client KPI
+    recompute matches the server. Serialization-only; never raises.
+    """
+    from relay.core.metrics import _resolved_at
+
+    resolved = _resolved_at(incident)
+    return resolved.isoformat() if resolved is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -1729,11 +1759,9 @@ class HubApp:
         # loads them directly via <script type="module"> — no build step, no
         # bundler, no CDN; the wheel ships them under dashboard_modules/.
         if _DASHBOARD_MODULES_DIR.is_dir():
-            from fastapi.staticfiles import StaticFiles
-
             app.mount(
                 "/static/dashboard",
-                StaticFiles(directory=str(_DASHBOARD_MODULES_DIR)),
+                _RevalidatingStaticFiles(directory=str(_DASHBOARD_MODULES_DIR)),
                 name="dashboard-modules",
             )
 
@@ -1881,6 +1909,9 @@ class HubApp:
                 return []
             incidents.sort(key=lambda i: i.created_at, reverse=True)
             # Compact summaries for the list view; full detail via /incidents/{id}.
+            # The acknowledged_at/resolved_at/signal_source/synthetic fields are
+            # additive — they let the dashboard recompute env-scoped KPIs client
+            # side (mirrors core/metrics.py); no schema or new endpoint.
             return [
                 {
                     "correlation_id": i.correlation_id,
@@ -1894,6 +1925,12 @@ class HubApp:
                     "created_at": i.created_at.isoformat() if i.created_at else None,
                     "updated_at": i.updated_at.isoformat() if i.updated_at else None,
                     "acknowledged_by": i.acknowledged_by,
+                    "acknowledged_at": (
+                        i.acknowledged_at.isoformat() if i.acknowledged_at else None
+                    ),
+                    "resolved_at": _incident_resolved_at_iso(i),
+                    "signal_source": i.signal_source,
+                    "synthetic": getattr(i, "synthetic", False),
                 }
                 for i in incidents
             ]
@@ -1916,6 +1953,8 @@ class HubApp:
             terminal = {IncidentState.RESOLVED, IncidentState.CLOSED}
             incidents = [i for i in incidents if i.state in terminal]
             incidents.sort(key=lambda i: i.created_at, reverse=True)
+            # Same four additive fields as /incidents so the client KPI recompute
+            # sees a uniform shape across open + terminal incidents.
             return [
                 {
                     "correlation_id": i.correlation_id,
@@ -1926,6 +1965,12 @@ class HubApp:
                     "alarm_name": i.alarm_name,
                     "created_at": i.created_at.isoformat() if i.created_at else None,
                     "acknowledged_by": i.acknowledged_by,
+                    "acknowledged_at": (
+                        i.acknowledged_at.isoformat() if i.acknowledged_at else None
+                    ),
+                    "resolved_at": _incident_resolved_at_iso(i),
+                    "signal_source": i.signal_source,
+                    "synthetic": getattr(i, "synthetic", False),
                 }
                 for i in incidents
             ]

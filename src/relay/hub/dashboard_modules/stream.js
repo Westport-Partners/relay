@@ -6,6 +6,7 @@
 
 import { tiles } from './state.js';
 import { renderAll } from './fleet.js';
+import { buildEnvFilter } from './env-filter.js';
 import { refresh as refreshIncidentStore } from './incident-store.js';
 
 // Trailing-edge 1 s debounce: incident-store refresh after a fleet delta.
@@ -47,6 +48,7 @@ export function connect() {
     const data = JSON.parse(e.data);
     tiles.clear();
     data.forEach(t => tiles.set(t.account_id + '/' + t.app_name, t));
+    buildEnvFilter();
     renderAll();
   });
 
@@ -54,6 +56,7 @@ export function connect() {
     lastPingAt = Date.now();
     const t = JSON.parse(e.data);
     tiles.set(t.account_id + '/' + t.app_name, t);
+    buildEnvFilter();
     renderAll();
     // A tile delta signals a possible incident state change — refresh the
     // incident store (trailing-edge debounced) so open/history lists converge

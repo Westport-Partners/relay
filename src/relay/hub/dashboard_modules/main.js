@@ -7,7 +7,13 @@ import { connect, checkPingAlive } from './stream.js';
 import { renderAll, wireTileActivation } from './fleet.js';
 import { wireNav, handleHash } from './router.js';
 import { closeDrawer } from './incident-drawer.js';
-import { setActiveFilter } from './state.js';
+import { setActiveFilter, setActiveEnv } from './state.js';
+import { readPersistedEnv, buildEnvFilter } from './env-filter.js';
+
+// 0. Restore the persisted environment lens BEFORE the first render so the
+// initial paint is already scoped. Buttons are built by buildEnvFilter() below
+// (and again after the SSE snapshot), so no static button reflect is needed.
+setActiveEnv(readPersistedEnv());
 
 // 1. Auth (async, fire-and-forget — same as the old inline call).
 initAuth();
@@ -27,12 +33,18 @@ wireTileActivation();
 // 5. Esc closes the drawer.
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
 
-// 6. Fleet filter buttons.
-document.querySelectorAll('.filter-btn').forEach(btn => {
+// 6. Fleet filter buttons (scoped to #filter-bar so the env control isn't caught).
+document.querySelectorAll('#filter-bar .filter-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#filter-bar .filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     setActiveFilter(btn.dataset.filter);
     renderAll();
   });
 });
+
+// 7. Global environment lens — build buttons from live data. Called once here
+// (renders just ALL before the SSE snapshot arrives) and again in stream.js
+// after each snapshot/delta so new environments appear automatically. Button
+// click handlers are wired inside buildEnvFilter() itself.
+buildEnvFilter();
