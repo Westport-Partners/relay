@@ -24,9 +24,11 @@ own spec; this spec + the design language own *look and behavior*.
 
 A full-bleed, dark, dense Industrial Command Center dashboard with these views:
 
-- **Big Board** — per-app tiles **grouped by org hierarchy** (product-line section
-  headers carrying a rollup status LED + `N red · N degraded · N unknown · N green`
-  counts, worst-group-first, org-less tiles under "Ungrouped"). Tiles wrap the full app
+- **Big Board** — per-app tiles **grouped by org hierarchy** at the component level
+  (the deployment leaves' parent), each section header carrying the full ancestry
+  breadcrumb (`Product Line › Product › Component`) plus a rollup status LED +
+  `N red · N degraded · N unknown · N green` counts, worst-group-first, org-less tiles
+  under "Ungrouped". Short org paths group at their deepest available node. Tiles wrap the full app
   name (no truncation) and carry at-a-glance indicators: open-incident count + worst
   severity, on-call-gap warning, environment chip (non-prod emphasized), owner. Each
   group's grid is **space-adaptive** — `auto-fit` + a count-aware per-group `--tile-min`
