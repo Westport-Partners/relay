@@ -72,6 +72,12 @@ and then walks the judgment items below against the actual diff.
 - [ ] **No secrets / account IDs / agency names** in the diff (say "government
       agencies", never a specific agency). Backstopped by the `secret-scan` CI job.
 - [ ] **Feature branch**, focused commits — not committed directly to `main`.
+- [ ] **Spec artifacts archived to the issue (if the feature has a `specs/_active/`
+      set):** the gitignored Spec Kit artifacts never enter git history, so when
+      the feature ships, attach them to the matching GitHub issue with
+      `scripts/relay-spec-publish.sh <issue> specs/_active/<NNNN-name>` (it
+      secret-scans, posts one collapsible comment, and is idempotent). N/A for
+      changes with no spec dir.
 
 **Advisory — report, don't block:**
 

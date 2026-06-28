@@ -77,6 +77,17 @@ one-line reason grounded in the actual diff:
    didn't fix? Flag it explicitly (file an issue / mention it) rather than
    silently absorbing or ignoring it.
 
+8. **Spec artifacts archived to the issue.** If this change ships a feature that
+   has a `specs/_active/<NNNN-name>/` working set (the gitignored Spec Kit
+   artifacts — spec, plan, research, contracts, tasks), those artifacts must be
+   attached to the matching GitHub issue #NNNN so the ticket carries the design
+   record (they never enter git history). Run
+   `scripts/relay-spec-publish.sh <issue> specs/_active/<NNNN-name>` — it
+   secret-scans, assembles one collapsible comment, and is idempotent (skips if
+   already posted). NEEDS-ACTION if a `specs/_active/` dir for this feature
+   exists and the issue has no spec-archive comment yet. N/A for changes with no
+   spec dir (small fixes, docs-only, etc.).
+
 ## Step 4 — Git hygiene
 
 - Confirm the work is on a **feature branch**, not committed directly to `main`
