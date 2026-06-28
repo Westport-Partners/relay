@@ -48,7 +48,13 @@ services:
 
   relay:
     image: ghcr.io/westport-partners/relay:latest
-    build: .
+    build:
+      context: .
+      args:
+        # Surface the local commit on the Settings screen so "is my branch
+        # running?" is a glance. Falls back to "unknown" when unset.
+        RELAY_BUILD_SHA: "${RELAY_BUILD_SHA:-unknown}"
+        RELAY_BUILD_TIME: "${RELAY_BUILD_TIME:-unknown}"
     depends_on:
       # Wait for the bootstrap container to FINISH (table + GSI created), not just
       # start — otherwise relay races it and the config-rule seed scan hits a
