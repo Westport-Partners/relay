@@ -334,3 +334,35 @@ def test_relay_environment_hint_marks_not_inferred():
     )
     assert incident.environment == "prod"
     assert incident.environment_inferred is False
+
+
+# ---------------------------------------------------------------------------
+# account_id provenance: the event's `account` field is the deployment's real
+# account and must win over the source's configured account, so the incident
+# lands on the same fleet-tile key the heartbeat registered (no orphan count).
+# ---------------------------------------------------------------------------
+
+
+def test_event_account_wins_over_source_account():
+    """The EventBridge `account` field is authoritative provenance."""
+    src = CloudWatchAlarmSource(account_id="", region="us-east-1")
+    ev = _minimal_alarm_event()
+    ev["account"] = "111111111111"
+    incident = src.parse_event(ev)
+    assert incident.account_id == "111111111111"
+
+
+def test_missing_event_account_falls_back_to_source():
+    """Absent an event `account`, the source's configured account is used."""
+    src = CloudWatchAlarmSource(account_id="123456789012", region="us-east-1")
+    incident = src.parse_event(_minimal_alarm_event())
+    assert incident.account_id == "123456789012"
+
+
+def test_empty_event_account_falls_back_to_source():
+    """An empty-string event `account` is ignored (falls back to source)."""
+    src = CloudWatchAlarmSource(account_id="123456789012", region="us-east-1")
+    ev = _minimal_alarm_event()
+    ev["account"] = ""
+    incident = src.parse_event(ev)
+    assert incident.account_id == "123456789012"

@@ -245,6 +245,17 @@ class CloudWatchAlarmSource:
         hint_app = detail.get("relay_app") or raw_event.get("relay_app")
         hint_env = detail.get("relay_environment") or raw_event.get("relay_environment")
         hint_dep = detail.get("relay_deployment_id") or raw_event.get("relay_deployment_id")
+        # The EventBridge envelope's `account` is the alarm's source account and
+        # is the correct provenance — prefer it over the source's configured
+        # account. Critically, the fleet tile is keyed on
+        # (account_id, app_name, environment, deployment_id); the heartbeat that
+        # registers the tile carries the deployment's real account, so an
+        # incident stamped with a different account_id (e.g. the Hub-ingest
+        # path's empty default) silently orphans the open-incident count against
+        # a non-matching key. Binding to the event account keeps incident and
+        # tile on the same key.
+        event_account = raw_event.get("account")
+        account_id = str(event_account) if event_account else self.account_id
         if hint_app:
             app_name = str(hint_app)
         if hint_env:
@@ -271,7 +282,7 @@ class CloudWatchAlarmSource:
             alarm_name=alarm_name,
             alarm_arn=alarm_arn,
             app_name=app_name,
-            account_id=self.account_id,
+            account_id=account_id,
             region=self.region,
             signal_source=signal_source,
             severity=Severity.SEV3,  # default; overridden by config enrichment step

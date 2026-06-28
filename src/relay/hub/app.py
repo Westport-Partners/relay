@@ -45,6 +45,7 @@ import signal
 import sys
 import threading
 import time
+from collections import defaultdict
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -707,6 +708,7 @@ class SweepTimer:
         sweep_interval: int = _SWEEP_INTERVAL_SECONDS,
         ping_interval: int = _PING_INTERVAL_SECONDS,
         deadline_sweeper: DeadlineSweeper | None = None,
+        incident_store: Any | None = None,
     ) -> None:
         self._hub_state = hub_state
         self._sse = sse_publisher
@@ -717,6 +719,8 @@ class SweepTimer:
         # single-container runtime — plan §3 / Step 2). None on a remote-Node
         # deployment where EventBridge Scheduler still owns the timers.
         self._deadline_sweeper = deadline_sweeper
+        # Optional: incident store for open-count reconciliation each sweep.
+        self._incident_store = incident_store
 
     def run(self) -> None:
         """Main loop — run as a daemon thread."""
@@ -754,6 +758,60 @@ class SweepTimer:
             if old is None or old.status != tile.status or old.liveness != tile.liveness:
                 self._hub_state.upsert_tile(tile)
                 self._sse.publish_delta(tile)
+
+        # Reconcile open_incident_count for all cached tiles.  UI/harness write
+        # paths (resolve/acknowledge/ignore) bypass the ingest-bus decrement and
+        # can leave counts drifted; this catches the remainder on each sweep.
+        if self._incident_store is None:
+            return
+        try:
+            open_incidents = self._incident_store.list_open_incidents()
+        except Exception:
+            logger.debug("SweepTimer: list_open_incidents failed; skipping reconcile", exc_info=True)
+            return
+        # Group open incidents by tile key tuple.
+        by_tile: dict[tuple[str, str, str, str | None], list[Any]] = defaultdict(list)
+        for inc in open_incidents:
+            key = (
+                inc.account_id,
+                inc.app_name,
+                inc.environment or "unrouted",
+                inc.deployment_id,
+            )
+            by_tile[key].append(inc)
+        # Compare each cached tile's stored count against the derived count.
+        for cached in self._hub_state.get_tiles():
+            tile_key = (
+                cached.account_id,
+                cached.app_name,
+                cached.environment or "unrouted",
+                cached.deployment_id,
+            )
+            actual_open = by_tile.get(tile_key, [])
+            if cached.open_incidents != len(actual_open):
+                try:
+                    repaired = self._hub_state.recompute_tile(
+                        cached.account_id,
+                        cached.app_name,
+                        actual_open,
+                        cached.environment or "unrouted",
+                        cached.deployment_id,
+                    )
+                    if repaired is not None:
+                        self._sse.publish_delta(repaired)
+                        logger.debug(
+                            "SweepTimer reconciled tile %s: %d -> %d open",
+                            cached.key,
+                            cached.open_incidents,
+                            len(actual_open),
+                        )
+                except Exception:
+                    logger.warning(
+                        "SweepTimer: tile recompute failed for %s/%s",
+                        cached.account_id,
+                        cached.app_name,
+                        exc_info=True,
+                    )
 
     def start(self) -> threading.Thread:
         t = threading.Thread(target=self.run, name="sweep-timer", daemon=True)
@@ -1608,6 +1666,7 @@ class HubApp:
             sse_publisher=self._sse_publisher,
             shutdown_event=self._shutdown,
             deadline_sweeper=deadline_sweeper,
+            incident_store=getattr(self, "_incident_store", None),
         )
 
         logger.info("HubApp initialised; queue=%s runtime=%s", queue_url, self._runtime)
@@ -2030,6 +2089,41 @@ class HubApp:
                 "hub_scope": HubScope.from_env().value,
             }
 
+        # Recompute a tile's open_incident_count from the surviving open
+        # incidents. The per-event decrement (FleetStore.apply_incident) only
+        # runs on the ingest-bus path; UI/harness writes (resolve/ack/ignore)
+        # bypass it, so without this the tile keeps a phantom count. Deriving
+        # from the live list means the counter can't drift. Failure-isolated.
+        def _recompute_incident_tile(incident: Incident) -> None:
+            try:
+                if incident_store is None:
+                    return
+                open_incidents = incident_store.list_open_incidents()
+                account_id = incident.account_id
+                app_name = incident.app_name
+                environment = incident.environment or "unrouted"
+                deployment_id = incident.deployment_id
+                tile_open = [
+                    i
+                    for i in open_incidents
+                    if i.account_id == account_id
+                    and i.app_name == app_name
+                    and (i.environment or "unrouted") == environment
+                    and i.deployment_id == deployment_id
+                ]
+                tile = hub_state.recompute_tile(
+                    account_id, app_name, tile_open, environment, deployment_id
+                )
+                if tile is not None:
+                    sse_publisher.publish_delta(tile)
+            except Exception:
+                logger.warning(
+                    "tile recompute failed for %s/%s",
+                    incident.account_id,
+                    incident.app_name,
+                    exc_info=True,
+                )
+
         # ----------------------------------------------------------------
         # POST /incidents/{id}/acknowledge — write (requires authenticated writer)
         # ----------------------------------------------------------------
@@ -2075,6 +2169,7 @@ class HubApp:
                         "ACKNOWLEDGED dispatch failed for %s", correlation_id, exc_info=True
                     )
             logger.info("Incident %s acknowledged by %s via UI", correlation_id, ident.subject)
+            _recompute_incident_tile(incident)
             return {"ok": True, "state": incident.state, "acknowledged_by": ident.subject}
 
         # ----------------------------------------------------------------
@@ -2132,6 +2227,7 @@ class HubApp:
         # ----------------------------------------------------------------
         # POST /incidents/{id}/resolve — write (writer-gated)
         # ----------------------------------------------------------------
+
         @app.post("/incidents/{correlation_id}/resolve")
         def resolve_incident(correlation_id: str, request: Request) -> dict[str, Any]:
             from fastapi import HTTPException
@@ -2169,6 +2265,7 @@ class HubApp:
                         "RESOLVED dispatch failed for %s", correlation_id, exc_info=True
                     )
             logger.info("Incident %s resolved by %s via UI", correlation_id, ident.subject)
+            _recompute_incident_tile(incident)
             return {"ok": True, "state": incident.state}
 
         # ----------------------------------------------------------------
@@ -2980,6 +3077,7 @@ class HubApp:
                 ident.subject,
                 rule_id,
             )
+            _recompute_incident_tile(incident)
             return {"ok": True, "rule_id": rule_id, "state": incident.state}
 
         # ----------------------------------------------------------------

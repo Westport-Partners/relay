@@ -32,7 +32,16 @@ lives on the §5 incident model). **Related domains:**
   `synthetic_total`; synthetic incidents are included on purpose (so a smoke
   test shows up end-to-end) and flagged in the Metrics view.
 - **Fleet big-board.** A dense grid of every app's tile; fed by the container
-  heartbeat. Net-new vs AWS Incident Manager.
+  heartbeat. Net-new vs AWS Incident Manager. A tile's `open_incident_count` is
+  **derived from the live open incidents, not a hand-maintained delta**: the
+  ingest path increments/decrements (`FleetStore.apply_incident`), but every
+  other write path (UI/harness resolve, acknowledge, ignore; purge) and the 30s
+  sweep **recompute** the count from `list_open_incidents` (`FleetStore.recompute`
+  → `HubState.recompute_tile`). The sweep reconciles every tile each cycle, so a
+  missed decrement self-heals rather than leaving the board stuck red. A tile is
+  keyed on `(account_id, app_name, environment, deployment_id)`; the incident and
+  its heartbeat-registered tile must agree on all four or the count orphans —
+  see the account-provenance invariant below.
 - **Liveness.** `hub/health.py` classifies tiles LIVE / STALE / LOST from the
   per-minute heartbeat, so a silent app goes red.
 - **Tile detail drawer.** Clicking a tile opens one data-driven drawer (on-call,
@@ -64,6 +73,16 @@ lives on the §5 incident model). **Related domains:**
 - **Timeline is append-only and immutable** — never edit or reorder past events.
 - **Synthetic incidents count in metrics** deliberately (that's the verification);
   they're flagged, not hidden.
+- **Tile open-count is derived, never a free-standing counter.** Any path that
+  changes an incident's state must leave the tile reconcilable against
+  `list_open_incidents`; the sweep is the backstop. Adding a new state-change
+  path without a recompute is the classic regression here.
+- **Account provenance comes from the event, not the source.** `parse_event`
+  stamps `account_id` from the EventBridge envelope's `account` field (falling
+  back to the source's configured account only when absent). The fleet tile is
+  registered by the heartbeat under the deployment's real account, so an incident
+  stamped with a different account silently orphans its open-incident count
+  against a non-matching tile key.
 
 ## Out of scope (non-goals)
 
