@@ -1035,6 +1035,9 @@ class NodeHandler:
         incident.signal_source = classification.signal_source
         incident.routing_rule_id = classification.matched_rule_id
         incident.routing_reason = classification.reasoning
+        # Capture which policy drove this incident so the flow view can rebuild
+        # the expected ladder later, even if the policy is edited afterwards.
+        incident.escalation_policy_id = classification.escalation_policy_id
 
         # Record DB routing-rule match count (best-effort: must never affect paging).
         # Only record when DB rules were actually used — avoids recording against

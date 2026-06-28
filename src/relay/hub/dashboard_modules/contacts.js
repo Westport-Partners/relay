@@ -9,6 +9,8 @@ import { SCHED_ROLES, SCHED_ROLE_LABELS, getThisMonday } from './schedule.js';
 // Module-local state (single writer, never read across modules).
 let editingContactId = null;
 let contactSort = { key: 'name', dir: 1 }; // dir: 1 asc, -1 desc
+// Client-side directory filters (applied over already-loaded data).
+let contactFilter = { text: '', role: '', availOnly: false };
 
 export async function loadContacts() {
   const view = document.getElementById('view-contacts');
@@ -41,44 +43,124 @@ export async function loadContacts() {
   renderContacts(contacts, avMap, shiftCounts);
 }
 
+// Roles a contact is eligible for, used for badges AND the role filter.
+// An availability record with an explicit empty roles list means "no roles"
+// (honored, not defaulted). A contact with no record at all has no roles.
+function eligibleRoles(av) {
+  if (av && Array.isArray(av.roles)) return av.roles;
+  return [];
+}
+
 export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Map()) {
   const view = document.getElementById('view-contacts');
   const addBtn = CAN_WRITE
     ? `<button class="btn-primary" id="btn-add-contact">+ Add contact</button>`
     : `<button class="btn-primary" disabled title="Read-only: authentication not configured" style="opacity:.45;cursor:not-allowed;">+ Add contact</button>`;
 
-  const DAYS = ['mon','tue','wed','thu','fri','sat','sun'];
-  const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-  const SHIFTS = ['night','day','evening'];
-  const SHIFT_LABELS = ['Night','Day','Eve'];
+  // Sortable header: clickable th with an arrow indicator on the active column.
+  const arrow = (key) => contactSort.key === key ? (contactSort.dir === 1 ? ' ▲' : ' ▼') : '';
+  const th = (key, label, extra = '') =>
+    `<th class="sortable" data-sort="${key}" style="cursor:pointer;user-select:none;${extra}">${label}${arrow(key)}</th>`;
 
-  // Sort a copy by the active column; on-call/shifts derive from avMap/shiftCounts.
-  const sortVal = (c, key) => {
-    const av = avMap.get(c.contact_id) || {};
-    switch (key) {
-      case 'name': return (c.name || '').toLowerCase();
-      case 'email': return (c.email || '').toLowerCase();
-      case 'phone': return (c.phone || '').toLowerCase();
-      case 'oncall': return av.available === true ? 1 : 0;
-      case 'shifts': return shiftCounts.get(c.contact_id) || 0;
-      default: return '';
+  const roleOpts = SCHED_ROLES.map(r =>
+    `<option value="${esc(r)}"${contactFilter.role === r ? ' selected' : ''}>${esc(SCHED_ROLE_LABELS[r] || r)}</option>`
+  ).join('');
+
+  view.innerHTML = `
+    <div class="info-banner">&#128274; Contacts (name, email, phone) are stored only in this account&#39;s DynamoDB — never in Git.</div>
+    <div class="view-toolbar">
+      <h2>Contacts</h2>
+      ${addBtn}
+    </div>
+    <div class="contacts-filterbar">
+      <input type="search" id="contact-filter-text" class="contacts-filter-input"
+        placeholder="Search name / email / phone" value="${esc(contactFilter.text)}">
+      <label class="contacts-filter-label">Role
+        <select id="contact-filter-role" class="contacts-filter-select">
+          <option value="">Any</option>
+          ${roleOpts}
+        </select>
+      </label>
+      <label class="contacts-filter-check">
+        <input type="checkbox" id="contact-filter-avail" ${contactFilter.availOnly ? 'checked' : ''}>
+        Available only
+      </label>
+      <span id="contact-filter-count" class="contacts-filter-count"></span>
+    </div>
+    <div id="contact-form-area"></div>
+    <div id="contacts-err" class="form-err" style="margin-bottom:8px;"></div>
+    <table class="contacts-table">
+      <thead><tr>
+        ${th('name', 'Name')}
+        ${th('email', 'Email')}
+        ${th('phone', 'Phone')}
+        <th>Roles</th>
+        ${th('oncall', 'Available', 'text-align:center;')}
+        ${th('shifts', 'Shifts (wk)', 'text-align:center;')}
+        <th>Test</th><th></th>
+      </tr></thead>
+      <tbody id="contacts-tbody"></tbody>
+    </table>`;
+
+  // --- rows are (re)rendered on every sort/filter change; the shell + toolbar
+  //     above persist so the search box never loses focus. ---
+  renderRows();
+
+  function renderRows() {
+    const DAYS = ['mon','tue','wed','thu','fri','sat','sun'];
+    const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const SHIFTS = ['night','day','evening'];
+    const SHIFT_LABELS = ['Night','Day','Eve'];
+
+    const sortVal = (c, key) => {
+      const av = avMap.get(c.contact_id) || {};
+      switch (key) {
+        case 'name': return (c.name || '').toLowerCase();
+        case 'email': return (c.email || '').toLowerCase();
+        case 'phone': return (c.phone || '').toLowerCase();
+        case 'oncall': return av.available === true ? 1 : 0;
+        case 'shifts': return shiftCounts.get(c.contact_id) || 0;
+        default: return '';
+      }
+    };
+
+    // Apply client-side filters over the loaded data.
+    const q = contactFilter.text.trim().toLowerCase();
+    const filtered = contacts.filter(c => {
+      const av = avMap.get(c.contact_id);
+      if (q) {
+        const hay = `${c.name || ''} ${c.email || ''} ${c.phone || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (contactFilter.role && !eligibleRoles(av).includes(contactFilter.role)) return false;
+      if (contactFilter.availOnly && !(av && av.available === true)) return false;
+      return true;
+    });
+
+    const sorted = filtered.slice().sort((a, b) => {
+      const va = sortVal(a, contactSort.key), vb = sortVal(b, contactSort.key);
+      if (va < vb) return -1 * contactSort.dir;
+      if (va > vb) return 1 * contactSort.dir;
+      return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+    });
+
+    const countEl = document.getElementById('contact-filter-count');
+    if (countEl) {
+      countEl.textContent = sorted.length === contacts.length
+        ? `${contacts.length} contacts`
+        : `${sorted.length} of ${contacts.length}`;
     }
-  };
-  const sorted = contacts.slice().sort((a, b) => {
-    const va = sortVal(a, contactSort.key), vb = sortVal(b, contactSort.key);
-    if (va < vb) return -1 * contactSort.dir;
-    if (va > vb) return 1 * contactSort.dir;
-    // Stable tiebreak by name.
-    return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
-  });
 
   const rows = sorted.length ? sorted.map(c => {
-    const av = avMap.get(c.contact_id) || { available: false, slots: {}, ooo: null, roles: [] };
+    const avRecord = avMap.get(c.contact_id);
+    const av = avRecord || { available: false, slots: {}, ooo: null, roles: [] };
     const isAvail = av.available === true;
     const slots = av.slots || {};
     const ooo = av.ooo || null;
-    // Roles this person is eligible for (default primary+secondary if unset).
-    const avRoles = Array.isArray(av.roles) && av.roles.length ? av.roles : ['primary', 'secondary'];
+    // Badges reflect actual eligibility (empty = none). The expander checkboxes
+    // below default to primary+secondary only when there's no record yet.
+    const badgeRoles = eligibleRoles(avRecord);
+    const editRoles = avRecord && Array.isArray(avRecord.roles) ? avRecord.roles : ['primary', 'secondary'];
     const nShifts = shiftCounts.get(c.contact_id) || 0;
     const onCallCell = isAvail
       ? '<span style="color:var(--green);">&#9679; Yes</span>'
@@ -86,6 +168,9 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
     const shiftsCell = nShifts > 0
       ? `<span style="color:var(--text);">${nShifts}</span>`
       : '<span style="color:var(--text-dim);">0</span>';
+    const rolesCell = badgeRoles.length
+      ? badgeRoles.map(r => `<span class="role-badge">${esc(SCHED_ROLE_LABELS[r] || r)}</span>`).join(' ')
+      : '<span style="color:var(--text-faint);">—</span>';
 
     // Build grid cells HTML
     const gridCells = DAYS.map((day, di) => {
@@ -109,6 +194,7 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
       <td>${esc(c.name || '—')}</td>
       <td>${copyableCell(c.email)}</td>
       <td>${copyableCell(c.phone)}</td>
+      <td>${rolesCell}</td>
       <td style="text-align:center;">${onCallCell}</td>
       <td style="text-align:center;">${shiftsCell}</td>
       <td>
@@ -127,8 +213,12 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
       </td>
     </tr>
     <tr class="avail-expander-row" id="avail-row-${esc(c.contact_id)}">
-      <td colspan="7">
+      <td colspan="8">
         <div class="avail-panel">
+          <div class="avail-panel-header">
+            <span class="avail-panel-title">On-call availability — ${esc(c.name || c.contact_id)}</span>
+            <button class="avail-close-btn" data-cid="${esc(c.contact_id)}" title="Close" aria-label="Close">&times;</button>
+          </div>
           <div class="avail-toggle-row">
             <input type="checkbox" id="avail-master-${esc(c.contact_id)}" class="avail-master-chk" data-cid="${esc(c.contact_id)}"
               ${isAvail ? 'checked' : ''} ${!CAN_WRITE ? 'disabled' : ''}>
@@ -146,7 +236,7 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
             ${SCHED_ROLES.map(role => `
               <label class="avail-role-chip">
                 <input type="checkbox" class="avail-role-chk" value="${esc(role)}"
-                  ${avRoles.includes(role) ? 'checked' : ''} ${!CAN_WRITE ? 'disabled' : ''}>
+                  ${editRoles.includes(role) ? 'checked' : ''} ${!CAN_WRITE ? 'disabled' : ''}>
                 ${esc(SCHED_ROLE_LABELS[role] || role)}
               </label>`).join('')}
           </div>
@@ -165,42 +255,42 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
         </div>
       </td>
     </tr>`;
-  }).join('') : `<tr><td colspan="7" style="color:var(--text-dim);padding:20px 10px;">No contacts yet.</td></tr>`;
+  }).join('') : `<tr><td colspan="8" style="color:var(--text-dim);padding:20px 10px;">${contacts.length ? 'No contacts match the filters.' : 'No contacts yet.'}</td></tr>`;
 
-  // Sortable header: clickable th with an arrow indicator on the active column.
-  const arrow = (key) => contactSort.key === key ? (contactSort.dir === 1 ? ' ▲' : ' ▼') : '';
-  const th = (key, label, extra = '') =>
-    `<th class="sortable" data-sort="${key}" style="cursor:pointer;user-select:none;${extra}">${label}${arrow(key)}</th>`;
+    const tbody = document.getElementById('contacts-tbody');
+    if (tbody) tbody.innerHTML = rows;
+    wireRowHandlers();
+  } // end renderRows
 
-  view.innerHTML = `
-    <div class="info-banner">&#128274; Contacts (name, email, phone) are stored only in this account&#39;s DynamoDB — never in Git.</div>
-    <div class="view-toolbar">
-      <h2>Contacts</h2>
-      ${addBtn}
-    </div>
-    <div id="contact-form-area"></div>
-    <div id="contacts-err" class="form-err" style="margin-bottom:8px;"></div>
-    <table class="contacts-table">
-      <thead><tr>
-        ${th('name', 'Name')}
-        ${th('email', 'Email')}
-        ${th('phone', 'Phone')}
-        ${th('oncall', 'On-call', 'text-align:center;')}
-        ${th('shifts', 'Shifts (wk)', 'text-align:center;')}
-        <th>Test</th><th></th>
-      </tr></thead>
-      <tbody id="contacts-tbody">${rows}</tbody>
-    </table>`;
-
-  // Wire sortable headers — toggle direction if same column, else asc.
+  // Wire sortable headers — toggle direction if same column, else asc. Only
+  // the rows re-render (renderRows), so the filter inputs keep focus.
   view.querySelectorAll('th.sortable').forEach(h => {
     h.addEventListener('click', () => {
       const key = h.dataset.sort;
       if (contactSort.key === key) contactSort.dir *= -1;
       else contactSort = { key, dir: 1 };
-      renderContacts(contacts, avMap, shiftCounts);
+      renderRows();
     });
   });
+
+  // Wire filter toolbar — each input updates contactFilter then re-renders rows.
+  const textInp = document.getElementById('contact-filter-text');
+  if (textInp) {
+    textInp.addEventListener('input', () => { contactFilter.text = textInp.value; renderRows(); });
+  }
+  const roleSel = document.getElementById('contact-filter-role');
+  if (roleSel) {
+    roleSel.addEventListener('change', () => { contactFilter.role = roleSel.value; renderRows(); });
+  }
+  const availChk = document.getElementById('contact-filter-avail');
+  if (availChk) {
+    availChk.addEventListener('change', () => { contactFilter.availOnly = availChk.checked; renderRows(); });
+  }
+
+  const addBtnEl = document.getElementById('btn-add-contact');
+  if (addBtnEl) addBtnEl.addEventListener('click', () => showContactForm(null, null));
+
+  function wireRowHandlers() {
 
   // Wire copy buttons (email / phone) — clipboard with brief inline confirm.
   view.querySelectorAll('.copy-btn').forEach(btn => {
@@ -218,9 +308,6 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
       }
     });
   });
-
-  const addBtnEl = document.getElementById('btn-add-contact');
-  if (addBtnEl) addBtnEl.addEventListener('click', () => showContactForm(null, null));
 
   document.querySelectorAll('.btn-edit-contact').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -275,6 +362,17 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
       if (!row) return;
       const isOpen = row.classList.toggle('open');
       btn.textContent = 'On-call ' + (isOpen ? '▾' : '▸');
+    });
+  });
+
+  // Wire explicit close button on each availability expander panel.
+  document.querySelectorAll('.avail-close-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cid = btn.dataset.cid;
+      const row = document.getElementById('avail-row-' + cid);
+      if (row) row.classList.remove('open');
+      const toggle = document.querySelector(`.btn-avail-toggle[data-cid="${CSS.escape(cid)}"]`);
+      if (toggle) toggle.textContent = 'On-call ▸';
     });
   });
 
@@ -371,7 +469,8 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
       btn.textContent = 'Save';
     });
   });
-}
+  } // end wireRowHandlers
+} // end renderContacts
 
 export function showContactForm(contact, allContacts) {
   const area = document.getElementById('contact-form-area');
@@ -388,6 +487,17 @@ export function showContactForm(contact, allContacts) {
       <label>Phone
         <input name="phone" type="tel" value="${isEdit ? esc(contact.phone || '') : ''}" placeholder="+1-555-0100">
       </label>
+      ${isEdit ? '' : `
+      <div class="contact-form-roles">
+        <span class="contact-form-roles-label">Eligible roles <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(optional)</span></span>
+        <div class="contact-form-roles-chips">
+          ${SCHED_ROLES.map(role => `
+            <label class="avail-role-chip">
+              <input type="checkbox" class="new-contact-role-chk" value="${esc(role)}">
+              ${esc(SCHED_ROLE_LABELS[role] || role)}
+            </label>`).join('')}
+        </div>
+      </div>`}
       <div id="contact-form-err" class="form-err"></div>
       <div class="form-actions">
         <button type="submit" class="btn-primary">${isEdit ? 'Save' : 'Create'}</button>
@@ -400,8 +510,9 @@ export function showContactForm(contact, allContacts) {
   document.getElementById('contact-form').addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const contactId = isEdit ? contact.contact_id : ('cnt-' + Math.random().toString(36).slice(2, 9));
     const payload = {
-      contact_id: isEdit ? contact.contact_id : ('cnt-' + Math.random().toString(36).slice(2, 9)),
+      contact_id: contactId,
       name: fd.get('name') || '',
       email: fd.get('email') || '',
       phone: fd.get('phone') || '',
@@ -415,6 +526,21 @@ export function showContactForm(contact, allContacts) {
         body: JSON.stringify(payload),
       });
       if (r.ok) {
+        // On create, seed an availability record carrying the chosen eligible
+        // roles (two-call flow). An explicit empty selection is honored as
+        // "no roles" — the contact is still created. Failure here is non-fatal:
+        // the contact exists; roles can be set later in the expander.
+        if (!isEdit) {
+          const roles = Array.from(document.querySelectorAll('.new-contact-role-chk'))
+            .filter(chk => chk.checked).map(chk => chk.value);
+          try {
+            await fetch('/availability/' + encodeURIComponent(contactId), {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ available: false, slots: {}, ooo: null, roles }),
+            });
+          } catch (_) { /* non-fatal: contact created; roles set later */ }
+        }
         area.innerHTML = '';
         loadContacts();
       } else {

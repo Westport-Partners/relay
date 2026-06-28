@@ -491,6 +491,39 @@
   }
   .tl-type { font-weight: 700; color: var(--text); font-size: 12px; }
   .tl-meta { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+
+  /* Escalation flow ladder (#20): expected steps as a spine, reached rungs
+     filled, unreached ghosted, a red now-line between. Industrial palette —
+     no rounded/pastel/shadow; teal is chrome only, status reds/ambers/greens
+     carry meaning. */
+  .flow { border-left: 1px solid var(--border-strong); margin-left: 5px; padding-left: 16px; }
+  .flow-step { position: relative; padding: 6px 0; }
+  .flow-step::before {
+    content: ''; position: absolute; left: -21px; top: 9px;
+    width: 9px; height: 9px;
+    border: 2px solid var(--surface-1);
+    box-sizing: border-box;
+  }
+  .flow-step.reached::before { background: var(--teal-light); }
+  .flow-step.ghost::before { background: var(--surface-3); border-color: var(--border-strong); }
+  .flow-step.ghost { opacity: 0.55; }
+  .flow-step-head { font-weight: 700; color: var(--text); font-size: 12px; }
+  .flow-step.ghost .flow-step-head { color: var(--text-dim); }
+  .flow-step-meta { font-size: 11px; color: var(--text-dim); font-family: var(--mono); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+  .flow-stream-chip {
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-dim); background: var(--surface-3);
+    border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 0 5px;
+  }
+  .flow-timeout { color: var(--text-faint); }
+  .flow-when { color: var(--text); }
+  .flow-when.ghost { color: var(--text-faint); }
+  .flow-now-line {
+    position: relative; height: 0;
+    border-top: 1px solid var(--red);
+    margin: 4px 0 4px -16px;
+  }
+  .flow-note { font-size: 11px; color: var(--text-faint); font-style: italic; margin-top: 8px; }
   .section-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); margin: 18px 0 8px; font-weight: 700; }
 
   /* Tile-detail drawer: AWS tag chips + on-call source marker. Squared,
@@ -688,6 +721,67 @@
   }
   .copy-btn:hover { background: var(--surface-3); color: var(--text); }
 
+  /* Contacts filter toolbar — squared industrial inputs. */
+  .contacts-filterbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .contacts-filter-input {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 5px 9px;
+    font-size: 12px;
+    font-family: var(--mono);
+    min-width: 240px;
+  }
+  .contacts-filter-input:focus { outline: none; border-color: var(--teal); }
+  .contacts-filter-label,
+  .contacts-filter-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+  }
+  .contacts-filter-select {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: var(--mono);
+  }
+  .contacts-filter-select:focus { outline: none; border-color: var(--teal); }
+  .contacts-filter-count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+
+  /* Role eligibility badges — neutral squared chips, NOT status colors. */
+  .role-badge {
+    display: inline-block;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    padding: 1px 5px;
+    margin-right: 3px;
+    white-space: nowrap;
+  }
+
   .contact-form {
     background: var(--surface-1);
     border: 1px solid var(--border);
@@ -711,6 +805,14 @@
   }
   .contact-form input:focus { outline: none; border-color: var(--teal); }
   .form-actions { display: flex; gap: 8px; }
+  .contact-form-roles { display: flex; flex-direction: column; gap: 6px; }
+  .contact-form-roles-label {
+    font-size: 10px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .contact-form-roles-chips { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; }
 
   /* ------------------------------------------------------------------ */
   /* Availability panel                                                  */
@@ -727,6 +829,31 @@
     flex-direction: column;
     gap: 10px;
   }
+  .avail-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+    margin-bottom: 2px;
+  }
+  .avail-panel-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+  }
+  .avail-close-btn {
+    border: 1px solid var(--border-strong);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 7px;
+    border-radius: var(--radius);
+  }
+  .avail-close-btn:hover { background: var(--surface-3); color: #fff; }
   .avail-toggle-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
   .avail-grid { display: grid; grid-template-columns: 48px repeat(3, 1fr); gap: 2px; font-size: 11px; }
   .avail-grid-header { text-align: center; color: var(--text-faint); font-weight: 700; text-transform: uppercase; padding: 2px 0; font-size: 10px; }

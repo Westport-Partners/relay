@@ -140,6 +140,25 @@ def _incident_kwargs(**overrides) -> dict:
     return base
 
 
+# ---------------------------------------------------------------------------
+# Incident.escalation_policy_id — default None + round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_escalation_policy_id_defaults_none():
+    inc = Incident(**_incident_kwargs())
+    assert inc.escalation_policy_id is None
+
+
+def test_escalation_policy_id_round_trips():
+    inc = Incident(**_incident_kwargs(escalation_policy_id="pol-42"))
+    assert inc.escalation_policy_id == "pol-42"
+    dumped = inc.model_dump(mode="json")
+    assert dumped["escalation_policy_id"] == "pol-42"
+    reloaded = Incident.model_validate(dumped)
+    assert reloaded.escalation_policy_id == "pol-42"
+
+
 def test_external_tickets_get_set_helpers():
     incident = Incident(**_incident_kwargs())
     assert incident.get_ticket("gitlab_iid") is None

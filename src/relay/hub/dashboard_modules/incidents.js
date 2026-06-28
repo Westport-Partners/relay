@@ -1,43 +1,26 @@
-// Incidents list view — loads open or history tab from /incidents.
+// Incidents list view — open and history tabs rendered as filtered views of
+// the shared incident store (incident-store.js).  No direct fetching here.
 // Ported from dashboard_parts/23-view-incidents.js.part (#33).
 
 import { esc, fmtAge, abbrAccount, metaValueHtml } from './helpers.js';
 import { openIncident } from './incident-drawer.js';
+import { refresh, getOpen, getHistory, subscribe } from './incident-store.js';
 
 // Module-local tab state (single writer, never read across modules).
 let incidentsTab = 'open'; // 'open' | 'history'
 
-export async function loadIncidents() {
-  // Wire tab buttons if not already wired (they get recreated each nav-switch)
-  const tabOpen = document.getElementById('inc-tab-open');
-  const tabHist = document.getElementById('inc-tab-history');
-  if (tabOpen && !tabOpen.dataset.wired) {
-    tabOpen.dataset.wired = '1';
-    tabOpen.addEventListener('click', () => {
-      incidentsTab = 'open';
-      tabOpen.classList.add('active'); tabHist.classList.remove('active');
-      loadIncidents();
-    });
-    tabHist.addEventListener('click', () => {
-      incidentsTab = 'history';
-      tabHist.classList.add('active'); tabOpen.classList.remove('active');
-      loadIncidents();
-    });
-  }
+// Unsubscribe handle — replaced each time loadIncidents() sets up the
+// subscription so we never stack duplicate listeners across nav round-trips.
+let _unsubscribe = null;
 
-  const list = document.getElementById('incidents-list');
+/** Render the currently-active tab from store data (no fetch). */
+function _renderFromStore() {
+  const list  = document.getElementById('incidents-list');
   const empty = document.getElementById('incidents-empty');
-  list.innerHTML = '<div style="color:var(--text-dim);padding:20px;">Loading…</div>';
-  empty.style.display = 'none';
-  const url = incidentsTab === 'history' ? '/incidents/history' : '/incidents';
-  let data = [];
-  try {
-    const r = await fetch(url);
-    data = await r.json();
-  } catch (e) {
-    list.innerHTML = '<div style="color:var(--red);padding:20px;">Failed to load incidents.</div>';
-    return;
-  }
+  if (!list || !empty) return;   // view not mounted yet
+
+  const data = incidentsTab === 'history' ? getHistory() : getOpen();
+
   if (!data.length) {
     list.innerHTML = '';
     empty.style.display = 'block';
@@ -68,4 +51,38 @@ export async function loadIncidents() {
       <span class="inc-when">${esc(fmtAge(i.created_at) || '')}</span>`;
     list.appendChild(row);
   }
+}
+
+export async function loadIncidents() {
+  // Wire tab buttons if not already wired (they get recreated each nav-switch)
+  const tabOpen = document.getElementById('inc-tab-open');
+  const tabHist = document.getElementById('inc-tab-history');
+  if (tabOpen && !tabOpen.dataset.wired) {
+    tabOpen.dataset.wired = '1';
+    tabOpen.addEventListener('click', () => {
+      incidentsTab = 'open';
+      tabOpen.classList.add('active'); tabHist.classList.remove('active');
+      _renderFromStore();
+    });
+    tabHist.addEventListener('click', () => {
+      incidentsTab = 'history';
+      tabHist.classList.add('active'); tabOpen.classList.remove('active');
+      _renderFromStore();
+    });
+  }
+
+  const list  = document.getElementById('incidents-list');
+  const empty = document.getElementById('incidents-empty');
+  list.innerHTML = '<div style="color:var(--text-dim);padding:20px;">Loading…</div>';
+  empty.style.display = 'none';
+
+  // Subscribe to future store updates so the visible tab stays in sync when
+  // the store is refreshed by SSE deltas or action callbacks elsewhere.
+  // Replace any previous subscription to avoid stacking listeners.
+  if (_unsubscribe) _unsubscribe();
+  _unsubscribe = subscribe(_renderFromStore);
+
+  // Populate the store, then render.
+  await refresh();
+  _renderFromStore();
 }

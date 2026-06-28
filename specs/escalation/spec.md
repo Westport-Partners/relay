@@ -32,9 +32,14 @@ timed sequence of pages to primary → secondary → manager, stopping on ack.
   routing rule.
 - **EscalationStep** — `{ roles, contact_ids, streams, timeout }`. Validator
   requires ≥1 of roles/contacts.
-- **escalation_policy_id** — which policy drove a given incident. *(Planned on
-  `Incident` so a historic incident's ladder is reconstructable even if the
-  policy later changes — see [issue #20](https://github.com/Westport-Partners/relay/issues/20).)*
+- **escalation_policy_id** — which policy drove a given incident. Stamped on the
+  `Incident` at classification (`node/handler.py`, from
+  `Classification.escalation_policy_id`) so a historic incident's ladder stays
+  reconstructable even if the policy is later edited. Legacy rows that predate the
+  field read `None`; the flow view then falls back to the `policy_id` recorded in
+  the immutable `incident.triggered` timeline event. Consumed by the process-flow
+  view (`core/flow.py`, `GET /incidents/{id}/flow` — see
+  [observability spec](../observability/spec.md)).
 
 ## Invariants
 

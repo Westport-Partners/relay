@@ -23,16 +23,19 @@ from fastapi.testclient import TestClient  # noqa: E402
 from relay.hub.app import HubApp, HubState, SSEPublisher  # noqa: E402
 
 
-def _incident() -> Incident:
+def _incident(
+    correlation_id: str = "c-123",
+    state: IncidentState = IncidentState.TRIGGERED,
+) -> Incident:
     now = datetime.now(UTC)
     return Incident(
-        correlation_id="c-123",
+        correlation_id=correlation_id,
         account_id="123456789012",
         region="us-east-1",
         app_name="checkout-api",
         severity=Severity.SEV2,
         signal_source=SignalSource.CLOUDWATCH_ALARM,
-        state=IncidentState.TRIGGERED,
+        state=state,
         alarm_name="prod-checkout-5xx",
         environment="prod",
         deployment_id="dep-1",
@@ -58,9 +61,18 @@ class _FakeIncidentStore:
         self._incidents = incidents
 
     def list_open_incidents(self, account_id: str | None = None) -> list[Incident]:
+        open_states = {
+            IncidentState.TRIGGERED,
+            IncidentState.ACKNOWLEDGED,
+            IncidentState.ESCALATED,
+        }
+        incidents = [i for i in self._incidents if i.state in open_states]
         if account_id is None:
-            return list(self._incidents)
-        return [i for i in self._incidents if i.account_id == account_id]
+            return incidents
+        return [i for i in incidents if i.account_id == account_id]
+
+    def list_incidents(self) -> list[Incident]:
+        return list(self._incidents)
 
     def get_incident(self, correlation_id: str) -> Incident | None:
         return next(
@@ -99,6 +111,29 @@ def test_list_incidents_returns_summaries():
     assert body[0]["app_name"] == "checkout-api"
     assert body[0]["severity"] == "SEV2"
     assert body[0]["state"] == "TRIGGERED"
+
+
+def test_history_returns_only_terminal_state_incidents():
+    store = _FakeIncidentStore(
+        [
+            _incident("open-1", IncidentState.TRIGGERED),
+            _incident("open-2", IncidentState.ACKNOWLEDGED),
+            _incident("open-3", IncidentState.ESCALATED),
+            _incident("done-1", IncidentState.RESOLVED),
+            _incident("done-2", IncidentState.CLOSED),
+        ]
+    )
+    c = _client(store)
+
+    hist = c.get("/incidents/history")
+    assert hist.status_code == 200
+    hist_ids = {i["correlation_id"] for i in hist.json()}
+    assert hist_ids == {"done-1", "done-2"}
+    assert all(i["state"] in {"RESOLVED", "CLOSED"} for i in hist.json())
+
+    # Open tab still returns only open incidents.
+    open_ids = {i["correlation_id"] for i in c.get("/incidents").json()}
+    assert open_ids == {"open-1", "open-2", "open-3"}
 
 
 def test_get_incident_returns_full_record_with_timeline():
@@ -469,11 +504,12 @@ def test_acknowledge_dispatches_lifecycle_event(monkeypatch):
     assert IncidentLifecycleEvent.ACKNOWLEDGED in seen
 
 
-def test_history_includes_all_incidents():
+def test_history_excludes_open_incidents():
+    # The seeded incident (c-123) is TRIGGERED, so it must NOT appear in history.
     c = _client_actions(None)
     r = c.get("/incidents/history")
     assert r.status_code == 200
-    assert any(i["correlation_id"] == "c-123" for i in r.json())
+    assert not any(i["correlation_id"] == "c-123" for i in r.json())
 
 
 def test_history_not_shadowed_by_id_route():
@@ -821,6 +857,41 @@ def test_availability_roundtrip_and_auto_schedule(monkeypatch):
     # stored + retrievable
     g = c.get("/schedule?week=2026-06-22").json()
     assert len(g["slots"]) == 63
+
+
+def test_put_availability_explicit_empty_roles_stays_empty(monkeypatch):
+    """An explicit empty roles list means 'eligible for no roles' and must be
+    honored (a contact can be created with none) — not defaulted."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    store = _FakeScheduleStore()
+    c = _client_sched(monkeypatch, store=store)
+    r = c.put("/availability/cnt-none",
+              json={"available": False, "slots": {}, "ooo": None, "roles": []})
+    assert r.status_code == 200
+    assert store.avail["cnt-none"]["roles"] == []
+
+
+def test_put_availability_omitted_roles_defaults(monkeypatch):
+    """A MISSING roles key falls back to the primary+secondary default."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    store = _FakeScheduleStore()
+    c = _client_sched(monkeypatch, store=store)
+    r = c.put("/availability/cnt-def",
+              json={"available": True, "slots": _ALL, "ooo": None})
+    assert r.status_code == 200
+    assert store.avail["cnt-def"]["roles"] == ["primary", "secondary"]
+
+
+def test_put_availability_explicit_roles_filtered_to_valid(monkeypatch):
+    """An explicit list keeps only valid roles (invalid values dropped)."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    store = _FakeScheduleStore()
+    c = _client_sched(monkeypatch, store=store)
+    r = c.put("/availability/cnt-mgr",
+              json={"available": True, "slots": _ALL, "ooo": None,
+                    "roles": ["manager", "bogus"]})
+    assert r.status_code == 200
+    assert store.avail["cnt-mgr"]["roles"] == ["manager"]
 
 
 def test_auto_schedule_requires_auth():

@@ -45,6 +45,7 @@ import signal
 import sys
 import threading
 import time
+from collections import defaultdict
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -473,6 +474,34 @@ class HubState:
         )
         return tile
 
+    def recompute_tile(
+        self,
+        account_id: str,
+        app_name: str,
+        open_incidents: list[Incident],
+        environment: str = "unrouted",
+        deployment_id: str | None = None,
+    ) -> FleetTile | None:
+        """Recompute one tile's aggregate from surviving open incidents + cache it.
+
+        Used after a purge deletes incident rows directly (bypassing the
+        per-event decrement). Delegates to ``FleetStore.recompute``; returns the
+        refreshed tile (and updates the in-memory cache), or ``None`` when the
+        tile is not registered.
+        """
+        tile = self._store.recompute(
+            account_id, app_name, open_incidents, environment, deployment_id
+        )
+        if tile is not None:
+            self.upsert_tile(tile)
+            logger.debug(
+                "HubState recomputed: key=%s status=%s open=%s",
+                tile.key,
+                tile.status,
+                tile.open_incidents,
+            )
+        return tile
+
     def record_heartbeat(
         self,
         account_id: str,
@@ -679,6 +708,7 @@ class SweepTimer:
         sweep_interval: int = _SWEEP_INTERVAL_SECONDS,
         ping_interval: int = _PING_INTERVAL_SECONDS,
         deadline_sweeper: DeadlineSweeper | None = None,
+        incident_store: Any | None = None,
     ) -> None:
         self._hub_state = hub_state
         self._sse = sse_publisher
@@ -689,6 +719,8 @@ class SweepTimer:
         # single-container runtime — plan §3 / Step 2). None on a remote-Node
         # deployment where EventBridge Scheduler still owns the timers.
         self._deadline_sweeper = deadline_sweeper
+        # Optional: incident store for open-count reconciliation each sweep.
+        self._incident_store = incident_store
 
     def run(self) -> None:
         """Main loop — run as a daemon thread."""
@@ -726,6 +758,60 @@ class SweepTimer:
             if old is None or old.status != tile.status or old.liveness != tile.liveness:
                 self._hub_state.upsert_tile(tile)
                 self._sse.publish_delta(tile)
+
+        # Reconcile open_incident_count for all cached tiles.  UI/harness write
+        # paths (resolve/acknowledge/ignore) bypass the ingest-bus decrement and
+        # can leave counts drifted; this catches the remainder on each sweep.
+        if self._incident_store is None:
+            return
+        try:
+            open_incidents = self._incident_store.list_open_incidents()
+        except Exception:
+            logger.debug("SweepTimer: list_open_incidents failed; skipping reconcile", exc_info=True)
+            return
+        # Group open incidents by tile key tuple.
+        by_tile: dict[tuple[str, str, str, str | None], list[Any]] = defaultdict(list)
+        for inc in open_incidents:
+            key = (
+                inc.account_id,
+                inc.app_name,
+                inc.environment or "unrouted",
+                inc.deployment_id,
+            )
+            by_tile[key].append(inc)
+        # Compare each cached tile's stored count against the derived count.
+        for cached in self._hub_state.get_tiles():
+            tile_key = (
+                cached.account_id,
+                cached.app_name,
+                cached.environment or "unrouted",
+                cached.deployment_id,
+            )
+            actual_open = by_tile.get(tile_key, [])
+            if cached.open_incidents != len(actual_open):
+                try:
+                    repaired = self._hub_state.recompute_tile(
+                        cached.account_id,
+                        cached.app_name,
+                        actual_open,
+                        cached.environment or "unrouted",
+                        cached.deployment_id,
+                    )
+                    if repaired is not None:
+                        self._sse.publish_delta(repaired)
+                        logger.debug(
+                            "SweepTimer reconciled tile %s: %d -> %d open",
+                            cached.key,
+                            cached.open_incidents,
+                            len(actual_open),
+                        )
+                except Exception:
+                    logger.warning(
+                        "SweepTimer: tile recompute failed for %s/%s",
+                        cached.account_id,
+                        cached.app_name,
+                        exc_info=True,
+                    )
 
     def start(self) -> threading.Thread:
         t = threading.Thread(target=self.run, name="sweep-timer", daemon=True)
@@ -1580,6 +1666,7 @@ class HubApp:
             sse_publisher=self._sse_publisher,
             shutdown_event=self._shutdown,
             deadline_sweeper=deadline_sweeper,
+            incident_store=getattr(self, "_incident_store", None),
         )
 
         logger.info("HubApp initialised; queue=%s runtime=%s", queue_url, self._runtime)
@@ -1812,9 +1899,10 @@ class HubApp:
             ]
 
         # ----------------------------------------------------------------
-        # GET /incidents/history — ALL incidents incl. resolved/closed (read-only)
-        # MUST be declared before /incidents/{correlation_id} so "history" isn't
-        # matched as a correlation_id.
+        # GET /incidents/history — terminal-state incidents only (RESOLVED,
+        # CLOSED). Open incidents (TRIGGERED/ACKNOWLEDGED/ESCALATED) live on the
+        # Open tab and are excluded here. MUST be declared before
+        # /incidents/{correlation_id} so "history" isn't matched as a correlation_id.
         # ----------------------------------------------------------------
         @app.get("/incidents/history")
         def incidents_history() -> list[dict[str, Any]]:
@@ -1825,6 +1913,8 @@ class HubApp:
             except Exception:
                 logger.warning("list_incidents failed", exc_info=True)
                 return []
+            terminal = {IncidentState.RESOLVED, IncidentState.CLOSED}
+            incidents = [i for i in incidents if i.state in terminal]
             incidents.sort(key=lambda i: i.created_at, reverse=True)
             return [
                 {
@@ -1876,6 +1966,65 @@ class HubApp:
                 )
             dumped: dict[str, Any] = incident.model_dump(mode="json")
             return dumped
+
+        # ----------------------------------------------------------------
+        # GET /incidents/{id}/flow — merged escalation-ladder + actual events.
+        # Read-only. Feeds the incident drawer's process-flow timeline (#20):
+        # the expected ladder (from the policy, or derived from page_sent events
+        # on a federated Hub with no escalation.yaml) with the actual escalation
+        # events slotted onto it. Sub-path, so no ordering conflict with
+        # /incidents/{correlation_id} (full-template match, like /brief, /aar).
+        # ----------------------------------------------------------------
+        @app.get("/incidents/{correlation_id}/flow")
+        def get_incident_flow(correlation_id: str) -> dict[str, Any]:
+            from relay.core.flow import build_flow
+
+            incident = _incident_or_404(correlation_id)
+
+            # Resolve policy_id: the model field if stamped at classification,
+            # else fall back to the policy_id recorded in the incident.triggered
+            # timeline event (covers legacy rows that predate the field).
+            policy_id = incident.escalation_policy_id
+            if policy_id is None:
+                for ev in incident.timeline:
+                    if ev.event_type == "incident.triggered":
+                        raw_pid = ev.detail.get("policy_id")
+                        if raw_pid is not None:
+                            policy_id = str(raw_pid)
+                        break
+
+            # Load the full policy (with its steps) from config when available.
+            # A federated Hub has no escalation.yaml → policy is None and the
+            # builder derives the ladder from the recorded page_sent events.
+            policy = None
+            if (
+                policy_id is not None
+                and hub_config is not None
+                and getattr(hub_config, "escalation", None) is not None
+            ):
+                try:
+                    policy = next(
+                        (
+                            p
+                            for p in hub_config.escalation.policies
+                            if p.policy_id == policy_id
+                        ),
+                        None,
+                    )
+                except Exception:
+                    logger.warning(
+                        "escalation policy lookup failed for %s", policy_id, exc_info=True
+                    )
+
+            # Contact-id → name map for resolving who was paged (best-effort).
+            contacts: dict[str, str] = {}
+            if contact_store is not None:
+                try:
+                    contacts = {c.contact_id: c.name for c in contact_store.list_contacts()}
+                except Exception:
+                    logger.warning("contact map build failed for /flow", exc_info=True)
+
+            return build_flow(incident, policy, contacts)
 
         # ----------------------------------------------------------------
         # GET /incidents/{id}/brief and /aar — AI-augmented drafts (read-only).
@@ -1940,6 +2089,41 @@ class HubApp:
                 "hub_scope": HubScope.from_env().value,
             }
 
+        # Recompute a tile's open_incident_count from the surviving open
+        # incidents. The per-event decrement (FleetStore.apply_incident) only
+        # runs on the ingest-bus path; UI/harness writes (resolve/ack/ignore)
+        # bypass it, so without this the tile keeps a phantom count. Deriving
+        # from the live list means the counter can't drift. Failure-isolated.
+        def _recompute_incident_tile(incident: Incident) -> None:
+            try:
+                if incident_store is None:
+                    return
+                open_incidents = incident_store.list_open_incidents()
+                account_id = incident.account_id
+                app_name = incident.app_name
+                environment = incident.environment or "unrouted"
+                deployment_id = incident.deployment_id
+                tile_open = [
+                    i
+                    for i in open_incidents
+                    if i.account_id == account_id
+                    and i.app_name == app_name
+                    and (i.environment or "unrouted") == environment
+                    and i.deployment_id == deployment_id
+                ]
+                tile = hub_state.recompute_tile(
+                    account_id, app_name, tile_open, environment, deployment_id
+                )
+                if tile is not None:
+                    sse_publisher.publish_delta(tile)
+            except Exception:
+                logger.warning(
+                    "tile recompute failed for %s/%s",
+                    incident.account_id,
+                    incident.app_name,
+                    exc_info=True,
+                )
+
         # ----------------------------------------------------------------
         # POST /incidents/{id}/acknowledge — write (requires authenticated writer)
         # ----------------------------------------------------------------
@@ -1985,6 +2169,7 @@ class HubApp:
                         "ACKNOWLEDGED dispatch failed for %s", correlation_id, exc_info=True
                     )
             logger.info("Incident %s acknowledged by %s via UI", correlation_id, ident.subject)
+            _recompute_incident_tile(incident)
             return {"ok": True, "state": incident.state, "acknowledged_by": ident.subject}
 
         # ----------------------------------------------------------------
@@ -2042,6 +2227,7 @@ class HubApp:
         # ----------------------------------------------------------------
         # POST /incidents/{id}/resolve — write (writer-gated)
         # ----------------------------------------------------------------
+
         @app.post("/incidents/{correlation_id}/resolve")
         def resolve_incident(correlation_id: str, request: Request) -> dict[str, Any]:
             from fastapi import HTTPException
@@ -2079,6 +2265,7 @@ class HubApp:
                         "RESOLVED dispatch failed for %s", correlation_id, exc_info=True
                     )
             logger.info("Incident %s resolved by %s via UI", correlation_id, ident.subject)
+            _recompute_incident_tile(incident)
             return {"ok": True, "state": incident.state}
 
         # ----------------------------------------------------------------
@@ -2393,7 +2580,11 @@ class HubApp:
             from relay.core.scheduling import Role
             valid_roles = {r.value for r in Role}
             raw_roles = payload.get("roles")
-            if isinstance(raw_roles, list) and raw_roles:
+            if isinstance(raw_roles, list):
+                # An explicit list is authoritative — including an empty one,
+                # which means "eligible for no roles" (a contact can be created
+                # with none). Only a MISSING/non-list "roles" key falls back to
+                # the primary+secondary default.
                 roles = [r for r in raw_roles if r in valid_roles]
             else:
                 # Default: eligible for primary + secondary (manager is opt-in).
@@ -2492,7 +2683,10 @@ class HubApp:
                 }
                 valid_roles = {r.value for r in Role}
                 rec_roles = rec.get("roles")
-                if isinstance(rec_roles, list) and rec_roles:
+                # Mirror PUT /availability: an explicit list (incl. empty) is
+                # authoritative — a contact eligible for no roles is scheduled
+                # for none. Only a MISSING/non-list key falls back to the default.
+                if isinstance(rec_roles, list):
                     roles_set = {Role(r) for r in rec_roles if r in valid_roles}
                 else:
                     roles_set = {Role.PRIMARY, Role.SECONDARY}
@@ -2883,6 +3077,7 @@ class HubApp:
                 ident.subject,
                 rule_id,
             )
+            _recompute_incident_tile(incident)
             return {"ok": True, "rule_id": rule_id, "state": incident.state}
 
         # ----------------------------------------------------------------
@@ -3425,6 +3620,67 @@ class HubApp:
                 synthetic_only=synthetic_only,
                 dry_run=dry_run,
             )
+
+            # Purge deletes incident rows directly, bypassing the per-event
+            # fleet decrement (FleetStore.apply_incident on RESOLVED/CLOSED), so
+            # affected FLEET# tiles keep stale open counts / worst_severity and
+            # the big board stays red until the next heartbeat or restart. Repair
+            # them now: recompute each touched tile from the surviving open
+            # incidents and push an SSE delta so connected boards clear live.
+            # Skipped on dry_run (nothing was deleted) and when the store can't
+            # list incidents to recompute from.
+            affected = purge_result.get("affected_tiles") or []
+            if (
+                not dry_run
+                and affected
+                and incident_store is not None
+                and hasattr(incident_store, "list_open_incidents")
+            ):
+                try:
+                    survivors = incident_store.list_open_incidents()
+                except Exception:
+                    logger.warning(
+                        "list_open_incidents failed during purge fleet recompute",
+                        exc_info=True,
+                    )
+                    survivors = []
+                repaired = 0
+                for tkey in affected:
+                    account_id = tkey.get("account_id")
+                    app_name = tkey.get("app_name")
+                    environment = tkey.get("environment") or "unrouted"
+                    deployment_id = tkey.get("deployment_id")
+                    if account_id is None or app_name is None:
+                        continue
+                    tile_open = [
+                        i
+                        for i in survivors
+                        if i.account_id == account_id
+                        and i.app_name == app_name
+                        and (i.environment or "unrouted") == environment
+                        and i.deployment_id == deployment_id
+                    ]
+                    try:
+                        tile = hub_state.recompute_tile(
+                            account_id,
+                            app_name,
+                            tile_open,
+                            environment,
+                            deployment_id,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "fleet tile recompute failed for %s/%s after purge",
+                            account_id,
+                            app_name,
+                            exc_info=True,
+                        )
+                        continue
+                    if tile is not None:
+                        sse_publisher.publish_delta(tile)
+                        repaired += 1
+                purge_result["tiles_recomputed"] = repaired
+
             return purge_result
 
         return app
