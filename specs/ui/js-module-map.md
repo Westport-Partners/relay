@@ -49,11 +49,12 @@ stay assembled. Only the 14 `.js.part` fragments become modules.
 | Module | From fragment(s) | Exports | Imports |
 |---|---|---|---|
 | `constants.js` | 20 (the maps) | `STATUS_ORDER`, `STATUS_LABEL`, `MARKER` | (none) |
-| `helpers.js` | 20 + `fmtTime`/`fmtDetail` (25) + `metaValueHtml` (23) | `esc`, `fmtAge`, `ageClass`, `abbrAccount`, `buildTile`, `fmtTime`, `fmtDetail`, `metaValueHtml` | `constants.js` (buildTile uses STATUS_LABEL/MARKER) |
+| `helpers.js` | 20 + `fmtTime`/`fmtDetail` (25) + `metaValueHtml` (23) | `esc`, `fmtAge`, `ageClass`, `abbrAccount`, `buildTile`, `hasOnCallGap`, `isNonProd`, `fmtTime`, `fmtDetail`, `metaValueHtml` | `constants.js` (buildTile uses STATUS_LABEL/MARKER) |
 | `state.js` | the mutable globals (10, 22, 23, 26, 31, 32) | accessors for `CAN_WRITE`, `AUTH_SUBJECT`, `TEAM_TZ`, `activeFilter`, `lastPingAt`, `activeView`, `incidentsTab`, `editingContactId`, `contactSort`, `rulesData`, `rulesFilterVal`, `routingRulesData`, `escalationPolicies`, `newRuleType`, `currentRole`, `currentWeekStart`; `tiles` (Map, never reassigned → export as-is) | (none) |
 | `auth.js` | 10 (auth half) | `initAuth`, `renderHubScope`, `gateWrite` | `helpers` (esc), `state` (CAN_WRITE/AUTH_SUBJECT/TEAM_TZ) |
 | `stream.js` | 10 (SSE/conn half) | `connect`, `checkPingAlive`, `setConnStatus` | `state` (tiles, lastPingAt), `fleet` (renderAll) |
-| `fleet.js` | 21 | `renderAll`, `wireTileActivation` | `helpers`, `constants`, `state`, `tile-drawer` (openTile) |
+| `fleet.js` | 21 | `renderAll`, `wireTileActivation` | `helpers`, `constants`, `state`, `tile-drawer` (openTile), `fleet-groups` (groupTiles) |
+| `fleet-groups.js` | 21 (#37) | `groupTiles` | `constants` (STATUS_ORDER) — pure leaf, no DOM/fetch |
 | `router.js` | 22 | `navTo`, `handleHash`, `wireNav` | `state` (activeView) + each view's `loadX` |
 | `incidents.js` | 23 | `loadIncidents`, `metaValueHtml`* | `helpers`, `state`, `incident-drawer` |
 | `incident-drawer.js` | 24 | `openIncident`, `renderIncident`, `closeDrawer`, `drawer`, `drawerOverlay` | `helpers`, `state`, `fleet` (renderAll), `incidents`, `rule-forms` |

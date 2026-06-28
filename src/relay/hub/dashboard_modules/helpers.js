@@ -59,6 +59,19 @@ export function metaValueHtml(k, v) {
   return esc(String(v));
 }
 
+// Returns true when t.on_call has at least one role with no assigned person.
+export function hasOnCallGap(t) {
+  if (!t.on_call || !t.on_call.roles) return false;
+  return Object.values(t.on_call.roles).some(v => !v || !v.name);
+}
+
+// Returns true when the environment is not a production environment.
+export function isNonProd(env) {
+  if (!env) return false;
+  const e = String(env).toLowerCase();
+  return e !== 'prod' && e !== 'production';
+}
+
 export function buildTile(t) {
   const status = t.status || 'grey';
   const div = document.createElement('div');
@@ -76,18 +89,37 @@ export function buildTile(t) {
   const label = (STATUS_LABEL[status] || (() => status))(t);
   const marker = MARKER[status] || '?';
 
+  // Indicators: rendered only when data is present.
+  const badgeHtml = t.open_incidents > 0
+    ? `<span class="tile-badge">&#9679; ${esc(String(t.open_incidents))}${t.worst_severity ? ' &middot; ' + esc(t.worst_severity) : ''}</span>`
+    : '';
+
+  const gapHtml = hasOnCallGap(t)
+    ? `<span class="tile-oncall-gap">ON-CALL GAP</span>`
+    : '';
+
+  const envHtml = t.environment
+    ? `<span class="tile-env${isNonProd(t.environment) ? ' tile-env-nonprod' : ''}">${esc(t.environment)}</span>`
+    : '';
+
+  const ownerHtml = (t.metadata && t.metadata.owner)
+    ? `<span class="tile-owner">${esc(t.metadata.owner)}</span>`
+    : '';
+
+  const indicatorsHtml = (badgeHtml || gapHtml || envHtml || ownerHtml)
+    ? `<div class="tile-indicators">${badgeHtml}${gapHtml}${envHtml}${ownerHtml}</div>`
+    : '';
+
+  const lastSeenHtml = ageStr
+    ? `<span class="tile-last-seen ${ageCls}">${esc(ageStr)}</span>`
+    : '<span class="tile-last-seen">never seen</span>';
+
   div.innerHTML = `
     <span class="tile-marker">${marker}</span>
     <div class="tile-app" title="${esc(t.app_name)}">${esc(t.app_name)}</div>
     <div class="tile-account">${esc(abbrAccount(t.account_id))}</div>
     <div class="tile-status-text">${esc(label)}</div>
-    <div class="tile-meta">
-      ${t.open_incidents > 0
-        ? `<span class="tile-badge">&#9679; ${t.open_incidents} open</span>`
-        : ''}
-      ${ageStr
-        ? `<span class="tile-last-seen ${ageCls}">${esc(ageStr)}</span>`
-        : '<span class="tile-last-seen">never seen</span>'}
-    </div>`;
+    ${indicatorsHtml}
+    ${lastSeenHtml}`;
   return div;
 }

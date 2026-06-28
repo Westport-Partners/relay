@@ -24,7 +24,15 @@ own spec; this spec + the design language own *look and behavior*.
 
 A full-bleed, dark, dense Industrial Command Center dashboard with these views:
 
-- **Big Board** — grid of per-app tiles (status LED + uptime), liveness-colored.
+- **Big Board** — per-app tiles **grouped by org hierarchy** (product-line section
+  headers carrying a rollup status LED + `N red · N degraded · N unknown · N green`
+  counts, worst-group-first, org-less tiles under "Ungrouped"). Tiles wrap the full app
+  name (no truncation) and carry at-a-glance indicators: open-incident count + worst
+  severity, on-call-gap warning, environment chip (non-prod emphasized), owner. Each
+  group's grid is **space-adaptive** — `auto-fit` + a count-aware per-group `--tile-min`
+  so few tiles grow to fill the row and many pack dense (no phantom empty columns),
+  reflowing on resize. Group status/counts prefer `GET /fleet/rollup`, falling back to
+  client-side compute. Click a tile → the detail drawer.
 - **Incidents** — austere full-width table; click a row → incident drawer
   (timeline, properties, actions: ack / resolve / route / ignore / add responder).
 - **Schedule** — role-aware grid with gap highlighting.
@@ -57,7 +65,10 @@ and a module **cannot** silently depend on another view's internals.
   `buildTile`, …), `state.js` (the few genuinely cross-module mutable globals as
   live-binding exports + setters — `CAN_WRITE`, `TEAM_TZ`, `tiles`, `activeFilter`,
   `activeView`, `escalationPolicies`).
-- **Structure:** `auth.js`, `stream.js` (SSE), `fleet.js` (big board), `router.js`
+- **Structure:** `auth.js`, `stream.js` (SSE), `fleet.js` (big board; org-grouped
+  section render + per-group adaptive sizing + `/fleet/rollup` fetch),
+  `fleet-groups.js` (pure leaf: `groupTiles(tiles, rollup)` → ordered org groups +
+  Ungrouped, rollup-or-client status/counts), `router.js`
   (view-switch + hash deep-links), `main.js` (the entry module that runs init in
   order — loaded via `<script type="module">`).
 - **Views / drawers / shared:** `incidents.js`, `incident-drawer.js`,

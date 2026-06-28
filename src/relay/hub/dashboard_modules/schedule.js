@@ -251,11 +251,16 @@ export function renderSchedule(view, schedData, contacts) {
 }
 
 // Clicking a fleet tile with open incidents jumps to that app's incidents.
-document.getElementById('grid').addEventListener('click', e => {
-  const tileEl = e.target.closest('.tile');
-  if (!tileEl) return;
-  const t = tiles.get(tileEl.dataset.key);
-  if (t && t.open_incidents > 0) {
-    document.querySelector('.nav-btn[data-view="incidents"]').click();
-  }
-});
+// Guarded: a load-time listener must not throw if the container is absent,
+// or it breaks the whole module graph.
+const fleetGroups = document.getElementById('fleet-groups');
+if (fleetGroups) {
+  fleetGroups.addEventListener('click', e => {
+    const tileEl = e.target.closest('.tile');
+    if (!tileEl) return;
+    const t = tiles.get(tileEl.dataset.key);
+    if (t && t.open_incidents > 0) {
+      document.querySelector('.nav-btn[data-view="incidents"]').click();
+    }
+  });
+}
