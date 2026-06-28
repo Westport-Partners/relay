@@ -1,6 +1,12 @@
 // Pure grouping logic for the Fleet big-board view — takes a flat array of
 // tile objects and a (possibly null) rollup tree, returns a Group[] sorted
 // worst-status-first, with any ungrouped tiles always last.
+//
+// Tiles are grouped at the deepest NON-leaf org node — the component that owns
+// the deployment leaves — so each section gathers a component's deployments
+// (typically the same app across prod/test/dev). The group label is the full
+// ancestry breadcrumb down to that node (e.g. "Primary Product Line › Billing ›
+// API"), so an operator reads the whole org path at a glance.
 // No DOM, no fetch, no side-effects. Imports only from ./constants.js.
 
 import { STATUS_ORDER } from './constants.js';
@@ -50,8 +56,26 @@ function sortTiles(tiles) {
   });
 }
 
+// The index of the org_path entry to group on: the deepest NON-leaf node, i.e.
+// the tile's parent (the leaf entry is the deployment = the tile itself). For a
+// single-entry path (the tile is its own root) we group on that sole entry so it
+// never lands in Ungrouped.
+function groupingIndex(orgPath) {
+  return orgPath.length >= 2 ? orgPath.length - 2 : 0;
+}
+
+// Breadcrumb label: names from the root down to (and including) the grouping
+// node, joined by ' › '.
+function breadcrumb(orgPath, gi) {
+  return orgPath
+    .slice(0, gi + 1)
+    .map(n => n.name || n.id)
+    .join(' › ');
+}
+
 /**
- * Group an array of tile objects by their product-line (root org_path node).
+ * Group an array of tile objects by their owning component (deepest non-leaf
+ * org_path node).
  *
  * @param {object[]} tilesArray  - Visible tile objects (already filtered).
  * @param {object[]|null} rollup - /fleet/rollup JSON (recursive tree), or null.
@@ -62,7 +86,7 @@ function sortTiles(tiles) {
 export function groupTiles(tilesArray, rollup) {
   const rollupIndex = rollup ? indexRollup(rollup) : new Map();
 
-  // Partition by grouping key = root org_path node id.
+  // Partition by grouping key = grouping-node org_path id.
   const buckets = new Map(); // key -> { label, level, nodeId, tiles[] }
 
   for (const t of tilesArray) {
@@ -74,14 +98,16 @@ export function groupTiles(tilesArray, rollup) {
       }
       buckets.get('__ungrouped__').tiles.push(t);
     } else {
-      const root = orgPath[0];
-      const key = root.id;
+      const gi = groupingIndex(orgPath);
+      const node = orgPath[gi];
+      const key = node.id;
       if (!buckets.has(key)) {
-        // label = node names from root down to grouping level joined by ' › '
-        // For root-level grouping that is just org_path[0].name.
-        const label = root.name || key;
-        const level = root.level || 0;
-        buckets.set(key, { label, level, nodeId: key, tiles: [] });
+        buckets.set(key, {
+          label: breadcrumb(orgPath, gi),
+          level: node.level || 0,
+          nodeId: key,
+          tiles: [],
+        });
       }
       buckets.get(key).tiles.push(t);
     }
