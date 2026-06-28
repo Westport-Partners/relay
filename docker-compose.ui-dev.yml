@@ -1,0 +1,17 @@
+# UI live-edit overlay — for rapid dashboard iteration only.
+#
+# The dashboard HTML is reassembled from dashboard_parts/ on every request, and
+# the JS modules are served read-only from disk. Bind-mounting the host source
+# over the container's installed copy turns every edit into a browser refresh —
+# no rebuild, no restart.
+#
+#   RELAY_DEMO=true docker compose -f docker-compose.yml -f docker-compose.ui-dev.yml up
+#   # edit src/relay/hub/dashboard_parts/*.html or dashboard_modules/*.js
+#   # refresh http://localhost:8080/  → change is live
+#
+# This file is NOT loaded by a bare `docker compose up`; you must name it with -f.
+services:
+  relay:
+    volumes:
+      - ./src/relay/hub/dashboard_parts:/usr/local/lib/python3.12/site-packages/relay/hub/dashboard_parts:ro
+      - ./src/relay/hub/dashboard_modules:/usr/local/lib/python3.12/site-packages/relay/hub/dashboard_modules:ro
