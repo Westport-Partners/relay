@@ -22,6 +22,12 @@ export const tiles = new Map();   // "account_id/app_name" -> tile data
 export let activeFilter = 'all';  // 'all' | 'incidents'
 export function setActiveFilter(v) { activeFilter = v; }
 
+// --- global environment lens (namespace ABOVE the org hierarchy) ---
+// A view filter, not a security boundary: scopes the already-loaded data on
+// one Hub. Lowercase canonical form. Persistence lives in env-filter.js.
+export let activeEnv = 'all';  // 'all' | 'prod' | 'test' | 'dev'
+export function setActiveEnv(v) { activeEnv = v; }
+
 // --- nav ---
 export let activeView = 'fleet';
 export function setActiveView(v) { activeView = v; }

@@ -24,6 +24,16 @@ own spec; this spec + the design language own *look and behavior*.
 
 A full-bleed, dark, dense Industrial Command Center dashboard with these views:
 
+A persistent header (`#topstrip`) carries a **global environment lens** — a sticky
+segmented control (`ALL / prod / test / dev`, default `ALL`) present on every view.
+Environment is the namespace **above** the org hierarchy, so the lens composes with —
+never replaces — the Fleet incidents-only filter and org grouping. It scopes Fleet,
+Incidents, and Metrics to the selected environment, persists in `localStorage` across
+navigation and reload, and applies to live-arriving data with no re-selection. It is a
+**view filter** over one Hub's already-scoped data, not a security boundary. Under a
+specific env, Metrics recomputes its KPIs client-side (`metrics-compute.js`, a
+parity-tested mirror of `core/metrics.py`); under `ALL` it uses the server `GET /metrics`.
+
 - **Big Board** — per-app tiles **grouped by org hierarchy** at the component level
   (the deployment leaves' parent), each section header carrying the full ancestry
   breadcrumb (`Product Line › Product › Component`) plus a rollup status LED +
@@ -42,7 +52,8 @@ A full-bleed, dark, dense Industrial Command Center dashboard with these views:
   filters, per-contact role-eligibility badges, optional eligible-roles at create,
   inline availability expander (with close button).
 - **Rules** — UI-managed routing + ignore rules (DB-backed, deviation banner).
-- **Metrics** — MTTR / time-to-ack / counts (flags synthetic data).
+- **Metrics** — MTTR / time-to-ack / counts (flags synthetic data); scopes to the
+  global environment lens (client-side recompute under a specific env).
 - **Settings** — GitLab token, ServiceNow creds, Teams webhook; Test buttons show raw responses.
 - **Maintenance** — synthetic incident trigger + temporal purge.
 
@@ -66,7 +77,11 @@ and a module **cannot** silently depend on another view's internals.
   presentation: `esc`, `fmtAge`, `fmtTime`, `fmtDetail`, `metaValueHtml`,
   `buildTile`, …), `state.js` (the few genuinely cross-module mutable globals as
   live-binding exports + setters — `CAN_WRITE`, `TEAM_TZ`, `tiles`, `activeFilter`,
-  `activeView`, `escalationPolicies`).
+  `activeEnv`, `activeView`, `escalationPolicies`), `env-filter.js` (the global
+  environment lens: `matchesEnv` predicate, `localStorage` persistence, and the
+  `applyEnvToAll` re-render fan-out), `metrics-compute.js` (a JS port of
+  `core/metrics.py::compute_metrics` so env-scoped Metrics agree with the server —
+  pinned by `tests/test_metrics_parity.py`).
 - **Structure:** `auth.js`, `stream.js` (SSE), `fleet.js` (big board; org-grouped
   section render + per-group adaptive sizing + `/fleet/rollup` fetch),
   `fleet-groups.js` (pure leaf: `groupTiles(tiles, rollup)` → ordered org groups +
