@@ -95,6 +95,36 @@
 
   /* team-scope: drop redundant top org levels, surface service grouping */
   .team-hint{font-size:11px;color:var(--text-faint);font-family:var(--mono);padding:0 2px 8px;}
+
+  /* ================================================================== */
+  /* HEADER COMPRESSION MODES (body class set by the Headers toggle)     */
+  /* ================================================================== */
+
+  /* --- SLIM: drop the filled bar; label becomes a tight single text line, no
+     background fill, minimal padding. ~half the height of the bar. --- */
+  body.hdr-slim .org{border:none;background:transparent;}
+  body.hdr-slim .org-head{background:transparent;padding:1px 2px 1px 0;}
+  body.hdr-slim .org-head:hover{background:transparent;}
+  body.hdr-slim .org-head .led{width:6px;height:6px;}
+  body.hdr-slim .org-head .olbl{font-size:9px;letter-spacing:.05em;}
+  body.hdr-slim .org-children{padding:2px 0 2px 10px;border-left:1px solid var(--border);margin-left:3px;}
+  body.hdr-slim .org.leaf{border:1px solid var(--border);background:var(--surface-1);}
+  body.hdr-slim .org.leaf > .org-head{padding:4px 9px;}
+  body.hdr-slim .org-tiles{padding:4px 0;}
+
+  /* --- SPINE: rotate each container label onto a thin vertical bar on the LEFT
+     edge, reclaiming the whole header ROW height. Costs ~22px of left width per
+     level (we have horizontal room). Leaf component boxes keep their top bar. --- */
+  body.hdr-spine .org:not(.leaf){display:flex;align-items:stretch;border-color:var(--border-strong);}
+  body.hdr-spine .org:not(.leaf) > .org-head{
+    flex-direction:column;justify-content:flex-start;align-items:center;gap:6px;
+    padding:6px 3px;background:var(--surface-2);border-right:1px solid var(--border);
+    writing-mode:vertical-rl;transform:rotate(180deg);width:24px;flex-shrink:0;cursor:default;}
+  body.hdr-spine .org:not(.leaf) > .org-head .olbl{font-size:9px;letter-spacing:.08em;}
+  body.hdr-spine .org:not(.leaf) > .org-head .led{writing-mode:horizontal-tb;}
+  body.hdr-spine .org:not(.leaf) > .org-head .ocount{margin-left:0;margin-top:auto;writing-mode:horizontal-tb;}
+  /* children sit to the RIGHT of the spine, still packing horizontally */
+  body.hdr-spine .org:not(.leaf) > .org-children{flex:1;}
 </style>
 </head>
 <body>
@@ -108,6 +138,12 @@
   <div class="grp"><span class="gl">Env layout</span>
     <button class="btn layout active" data-layout="rows">Rows</button>
     <button class="btn layout" data-layout="cols">Columns</button>
+  </div>
+  <div class="grp"><span class="gl">Headers</span>
+    <button class="btn hdr" data-hdr="bar">Bars</button>
+    <button class="btn hdr" data-hdr="slim">Slim</button>
+    <button class="btn hdr" data-hdr="spine">Spine</button>
+    <button class="btn hdr active" data-hdr="collapse">Collapse 1-child</button>
   </div>
   <div class="grp" id="env-filter"><span class="gl">Env</span></div>
   <span id="scope-note"></span>
@@ -125,15 +161,18 @@ const fmtAge=iso=>{if(!iso)return'—';const s=Math.round((Date.now()-new Date(i
 const worst=ts=>{let b=9;for(const t of ts){const o=ORD[t.status]??9;if(o<b)b=o;}return Object.keys(ORD).find(k=>ORD[k]===b)||'grey';};
 const tally=ts=>{const c={red:0,degraded:0,grey:0,green:0};for(const t of ts){const s=t.status||'grey';if(s in c)c[s]++;}return c;};
 
-let TILES=[], SCOPE='central', LAYOUT='rows', ENV='all';
+// HDR default = 'collapse' — the LOCKED header decision (see docs/fleet-team-mockup.md).
+let TILES=[], SCOPE='central', LAYOUT='rows', ENV='all', HDR='collapse';
 // Scope ONLY changes how much data arrives (a team node receives just its own
 // account's deployments). The render path is IDENTICAL — same env-container →
-// dynamic org tree. We simulate a team's smaller feed by sampling one product
-// line's worth of tiles; nothing about the layout changes.
+// dynamic org tree. A real team owns ONE component (same line › product ›
+// component), so we simulate the feed by pinning to a single component. That
+// makes line→product→component a single-child chain — exactly what the
+// "Collapse 1-child" header mode is meant to fold into one breadcrumb.
 function teamFeed(tiles){
-  const line=(tiles[0]?.org_path||[])[0];
-  if(!line) return tiles;
-  return tiles.filter(t=>(t.org_path||[])[0]?.id===line.id);
+  const comp=(tiles[0]?.org_path||[])[2];
+  if(!comp) return tiles;
+  return tiles.filter(t=>(t.org_path||[])[2]?.id===comp.id);
 }
 
 async function load(){ TILES=await (await fetch('/fleet')).json(); buildEnvFilter(); render(); }
@@ -192,10 +231,24 @@ function tileEl(t){
   return d;
 }
 
+// "Collapse 1-child" header mode: when a node has exactly one child and no tiles
+// of its own, fold the child up into it, joining labels with ' › '. Repeats down
+// the chain so a run of single-child levels becomes one breadcrumb header.
+function collapseChain(node){
+  let n=node;
+  let label=n.label;
+  while(HDR==='collapse' && n.children && n.children.length===1 && (!n.tiles||!n.tiles.length)){
+    n=n.children[0];
+    label+=' › '+n.label;
+  }
+  return {...n, label, level:node.level};
+}
+
 // Recursive bounded org box. Keeps the nesting (line › product › component) but
 // lays its children out in a horizontal wrapping grid so siblings sit side by
 // side. A leaf box (component) holds its deployment tiles, also packed across.
 function orgEl(node){
+  node=collapseChain(node);
   const isLeaf = !node.children || !node.children.length;
   const div=document.createElement('div');div.className='org lvl'+Math.min(node.level,3)+(isLeaf?' leaf':'');
   const c=node.counts;
@@ -271,7 +324,11 @@ document.querySelectorAll('.btn.scope').forEach(b=>b.onclick=()=>{
 document.querySelectorAll('.btn.layout').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.btn.layout').forEach(x=>x.classList.remove('active'));b.classList.add('active');
   LAYOUT=b.dataset.layout;render();});
+document.querySelectorAll('.btn.hdr').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.btn.hdr').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+  HDR=b.dataset.hdr;document.body.className='hdr-'+HDR;render();});
 
+document.body.className='hdr-'+HDR;
 setDesc();
 load();
 setInterval(load,10000);
