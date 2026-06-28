@@ -3,6 +3,10 @@
 
 import { esc } from './helpers.js';
 import { navTo } from './router.js';
+import { activeEnv } from './state.js';
+import { matchesEnv } from './env-filter.js';
+import { computeMetrics } from './metrics-compute.js';
+import { refresh as refreshIncidentStore, getOpen, getHistory } from './incident-store.js';
 
 // Module-local helper — only used inside this file.
 function fmtDuration(seconds) {
@@ -18,13 +22,26 @@ export async function loadMetrics() {
   const view = document.getElementById('view-metrics');
   view.innerHTML = '<div style="color:var(--text-dim);padding:20px;">Loading…</div>';
   let m;
-  try {
-    const r = await fetch('/metrics');
-    if (!r.ok) throw new Error('fetch failed');
-    m = await r.json();
-  } catch (_) {
-    view.innerHTML = '<div style="color:var(--red);padding:20px;">Failed to load metrics.</div>';
-    return;
+  if (activeEnv === 'all') {
+    // No env lens → trust the server's whole-fleet KPI computation.
+    try {
+      const r = await fetch('/metrics');
+      if (!r.ok) throw new Error('fetch failed');
+      m = await r.json();
+    } catch (_) {
+      view.innerHTML = '<div style="color:var(--red);padding:20px;">Failed to load metrics.</div>';
+      return;
+    }
+  } else {
+    // Env lens → recompute client-side from the incident store, scoped to the
+    // selected env. metrics-compute.js mirrors core/metrics.py (parity test).
+    try {
+      await refreshIncidentStore();
+    } catch (_) {
+      // keep last-known store data; recompute over whatever we have
+    }
+    const scoped = [...getOpen(), ...getHistory()].filter(i => matchesEnv(i));
+    m = computeMetrics(scoped);
   }
 
   const tta = m.time_to_ack_seconds || {};
@@ -76,7 +93,7 @@ export async function loadMetrics() {
 
   view.innerHTML = `
     <div class="view-toolbar"><h2>Metrics</h2>
-      <span style="font-size:11px;color:var(--text-dim);margin-left:auto;">All incidents in this scope</span>
+      <span style="font-size:11px;color:var(--text-dim);margin-left:auto;">${activeEnv === 'all' ? 'All environments' : esc(activeEnv) + ' environment only'}</span>
     </div>
     ${synthBanner}
     <div class="metric-cards">

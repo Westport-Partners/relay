@@ -40,6 +40,14 @@ Apps emit periodic heartbeats. Relay tracks each app's last-seen time:
 
 A truly dead app is visible on the board, not invisible. This is a key difference from systems that only show apps when an alarm fires.
 
+### Environment filter
+
+The top strip carries a global **environment lens** — a sticky control offering `ALL / prod / test / dev` (default `ALL`). It scopes the Fleet board, the Incidents list, and the Metrics view to a single environment at once. Environment sits *above* the org hierarchy, so the lens composes with the Fleet "Incidents only" filter and the org grouping rather than replacing them.
+
+The selection is remembered in your browser and stays applied as you move between views and across a full reload. Newly arriving incidents and tile updates honor the active environment without re-selecting. Under a specific environment the Metrics view recomputes its KPIs from the in-scope incidents; under `ALL` it shows the whole-fleet figures.
+
+This is a view lens over the data one hub already holds — it does not change which environments a hub is responsible for, and it is not a security boundary.
+
 ---
 
 ## The Tile Detail Drawer

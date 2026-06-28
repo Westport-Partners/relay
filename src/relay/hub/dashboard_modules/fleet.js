@@ -9,6 +9,7 @@ import { STATUS_ORDER } from './constants.js';
 import { tiles, activeFilter } from './state.js';
 import { openTile } from './tile-drawer.js';
 import { groupTiles } from './fleet-groups.js';
+import { matchesEnv } from './env-filter.js';
 
 // Cached rollup tree from /fleet/rollup — refreshed best-effort every 10s.
 let cachedRollup = null;
@@ -71,16 +72,20 @@ export function renderAll() {
   const emptyState = document.getElementById('empty-state');
   const summary = document.getElementById('fleet-summary');
 
-  // Counts for summary bar — always from the FULL tiles Map.
+  // Environment lens first — everything below (summary, group rollups, the
+  // incidents-only filter) operates on the in-env set so counts stay coherent.
+  const inEnv = Array.from(tiles.values()).filter(t => matchesEnv(t));
+
+  // Counts for summary bar — over the in-env set.
   const counts = { red: 0, degraded: 0, grey: 0, green: 0 };
-  for (const t of tiles.values()) counts[t.status] = (counts[t.status] || 0) + 1;
+  for (const t of inEnv) counts[t.status] = (counts[t.status] || 0) + 1;
   summary.textContent =
-    `${tiles.size} apps — ` +
+    `${inEnv.length} apps — ` +
     `${counts.red || 0} red · ${counts.degraded || 0} degraded · ` +
     `${counts.grey || 0} unknown · ${counts.green || 0} green`;
 
   // Apply filter.
-  let visible = Array.from(tiles.values());
+  let visible = inEnv;
   if (activeFilter === 'incidents') {
     visible = visible.filter(t => t.open_incidents > 0 || t.status === 'red' || t.status === 'degraded');
   }

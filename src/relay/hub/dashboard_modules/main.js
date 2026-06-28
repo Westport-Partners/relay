@@ -7,7 +7,16 @@ import { connect, checkPingAlive } from './stream.js';
 import { renderAll, wireTileActivation } from './fleet.js';
 import { wireNav, handleHash } from './router.js';
 import { closeDrawer } from './incident-drawer.js';
-import { setActiveFilter } from './state.js';
+import { setActiveFilter, setActiveEnv } from './state.js';
+import { applyEnvToAll, readPersistedEnv, persistEnv } from './env-filter.js';
+
+// 0. Restore the persisted environment lens BEFORE the first render so the
+// initial paint is already scoped. Reflect it on the matching control button.
+const _restoredEnv = readPersistedEnv();
+setActiveEnv(_restoredEnv);
+document.querySelectorAll('#env-filter .filter-btn').forEach(b => {
+  b.classList.toggle('active', b.dataset.env === _restoredEnv);
+});
 
 // 1. Auth (async, fire-and-forget — same as the old inline call).
 initAuth();
@@ -27,12 +36,25 @@ wireTileActivation();
 // 5. Esc closes the drawer.
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
 
-// 6. Fleet filter buttons.
-document.querySelectorAll('.filter-btn').forEach(btn => {
+// 6. Fleet filter buttons (scoped to #filter-bar so the env control isn't caught).
+document.querySelectorAll('#filter-bar .filter-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#filter-bar .filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     setActiveFilter(btn.dataset.filter);
     renderAll();
+  });
+});
+
+// 7. Global environment lens — sticky across nav (it lives in #topstrip and is
+// never hidden) and persisted across reload. Re-renders the active view only.
+document.querySelectorAll('#env-filter .filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#env-filter .filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const env = btn.dataset.env;
+    setActiveEnv(env);
+    persistEnv(env);
+    applyEnvToAll();
   });
 });

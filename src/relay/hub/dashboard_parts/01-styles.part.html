@@ -236,6 +236,19 @@
     text-overflow: ellipsis;
   }
 
+  /* Global environment lens — segmented control, same idiom as #filter-bar,
+     but always visible. A leading label marks it as the env namespace. */
+  #env-filter { display: flex; gap: 0; align-items: center; }
+  #env-filter::before {
+    content: 'ENV';
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin-right: 8px;
+  }
+
   #filter-bar { display: flex; gap: 0; align-items: center; }
   .filter-btn {
     padding: 4px 12px;
