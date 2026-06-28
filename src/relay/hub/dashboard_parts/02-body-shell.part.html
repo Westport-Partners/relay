@@ -39,13 +39,9 @@
       <span id="view-title">Fleet Status</span>
       <div id="fleet-summary">Loading…</div>
       <!-- Global environment lens — present on EVERY view (unlike #filter-bar,
-           which router.js hides off Fleet). ALL = no env filtering. -->
-      <div id="env-filter" title="Environment">
-        <button class="filter-btn active" data-env="all">All</button>
-        <button class="filter-btn" data-env="prod">prod</button>
-        <button class="filter-btn" data-env="test">test</button>
-        <button class="filter-btn" data-env="dev">dev</button>
-      </div>
+           which router.js hides off Fleet). ALL = no env filtering. Buttons
+           are injected dynamically by buildEnvFilter() in env-filter.js. -->
+      <div id="env-filter" title="Environment"></div>
       <div id="filter-bar">
         <button class="filter-btn active" data-filter="all">All</button>
         <button class="filter-btn" data-filter="incidents">Incidents only</button>

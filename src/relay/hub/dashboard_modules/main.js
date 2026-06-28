@@ -8,15 +8,12 @@ import { renderAll, wireTileActivation } from './fleet.js';
 import { wireNav, handleHash } from './router.js';
 import { closeDrawer } from './incident-drawer.js';
 import { setActiveFilter, setActiveEnv } from './state.js';
-import { applyEnvToAll, readPersistedEnv, persistEnv } from './env-filter.js';
+import { readPersistedEnv, buildEnvFilter } from './env-filter.js';
 
 // 0. Restore the persisted environment lens BEFORE the first render so the
-// initial paint is already scoped. Reflect it on the matching control button.
-const _restoredEnv = readPersistedEnv();
-setActiveEnv(_restoredEnv);
-document.querySelectorAll('#env-filter .filter-btn').forEach(b => {
-  b.classList.toggle('active', b.dataset.env === _restoredEnv);
-});
+// initial paint is already scoped. Buttons are built by buildEnvFilter() below
+// (and again after the SSE snapshot), so no static button reflect is needed.
+setActiveEnv(readPersistedEnv());
 
 // 1. Auth (async, fire-and-forget — same as the old inline call).
 initAuth();
@@ -46,15 +43,8 @@ document.querySelectorAll('#filter-bar .filter-btn').forEach(btn => {
   });
 });
 
-// 7. Global environment lens — sticky across nav (it lives in #topstrip and is
-// never hidden) and persisted across reload. Re-renders the active view only.
-document.querySelectorAll('#env-filter .filter-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('#env-filter .filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    const env = btn.dataset.env;
-    setActiveEnv(env);
-    persistEnv(env);
-    applyEnvToAll();
-  });
-});
+// 7. Global environment lens — build buttons from live data. Called once here
+// (renders just ALL before the SSE snapshot arrives) and again in stream.js
+// after each snapshot/delta so new environments appear automatically. Button
+// click handlers are wired inside buildEnvFilter() itself.
+buildEnvFilter();

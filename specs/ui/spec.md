@@ -25,26 +25,38 @@ own spec; this spec + the design language own *look and behavior*.
 A full-bleed, dark, dense Industrial Command Center dashboard with these views:
 
 A persistent header (`#topstrip`) carries a **global environment lens** — a sticky
-segmented control (`ALL / prod / test / dev`, default `ALL`) present on every view.
+segmented control present on every view, **whose choices are derived from the environments
+actually present in the fleet** (`ALL` plus each environment in canonical promotion order,
+e.g. `ALL / dev / test / prod`, including non-standard ones like `pre-prod`). Default `ALL`.
 Environment is the namespace **above** the org hierarchy, so the lens composes with —
 never replaces — the Fleet incidents-only filter and org grouping. It scopes Fleet,
 Incidents, and Metrics to the selected environment, persists in `localStorage` across
-navigation and reload, and applies to live-arriving data with no re-selection. It is a
-**view filter** over one Hub's already-scoped data, not a security boundary. Under a
-specific env, Metrics recomputes its KPIs client-side (`metrics-compute.js`, a
-parity-tested mirror of `core/metrics.py`); under `ALL` it uses the server `GET /metrics`.
+navigation and reload (reconciling to `ALL` if a persisted environment is no longer present),
+and applies to live-arriving data with no re-selection. It is a **view filter** over one
+Hub's already-scoped data, not a security boundary. Under a specific env, Metrics recomputes
+its KPIs client-side (`metrics-compute.js`, a parity-tested mirror of `core/metrics.py`);
+under `ALL` it uses the server `GET /metrics`.
 
-- **Big Board** — per-app tiles **grouped by org hierarchy** at the component level
-  (the deployment leaves' parent), each section header carrying the full ancestry
-  breadcrumb (`Product Line › Product › Component`) plus a rollup status LED +
-  `N red · N degraded · N unknown · N green` counts, worst-group-first, org-less tiles
-  under "Ungrouped". Short org paths group at their deepest available node. Tiles wrap the full app
-  name (no truncation) and carry at-a-glance indicators: open-incident count + worst
-  severity, on-call-gap warning, environment chip (non-prod emphasized), owner. Each
-  group's grid is **space-adaptive** — `auto-fit` + a count-aware per-group `--tile-min`
-  so few tiles grow to fill the row and many pack dense (no phantom empty columns),
-  reflowing on resize. Group status/counts prefer `GET /fleet/rollup`, falling back to
-  client-side compute. Click a tile → the detail drawer.
+- **Big Board** — an **environment-container** board: the outer grouping is one bounded
+  block per environment present (derived dynamically from the data; AWS account is **never**
+  a grouping axis). Inside each environment block the **org hierarchy nests to its actual
+  depth** — product line › product › component › deployment(=tile) — and **every level packs
+  its children horizontally** into a wrapping `auto-fit` grid (products side by side;
+  components side by side within a product; tiles side by side within a component), wrapping
+  to a new row only when the row is full. A run of **single-child, tile-less structural
+  levels collapses into one breadcrumb header** (labels joined by ` › `), so a focused team
+  that owns one component reads as a single breadcrumb instead of redundant stacked bars;
+  multi-child levels stay expanded as nested boxes. The **same render path** serves a Team
+  node (few apps → naturally shallow tree → collapse) and the Central hub (~200 apps across
+  many product lines → full nested tree); only the volume of data differs. Each org node
+  carries a status LED + `N red · degraded · unknown · green` counts (computed over the
+  visible in-env tiles); nodes and tiles sort worst-first. Org-less tiles fall into an
+  "Ungrouped" branch within their environment. Tiles wrap the full app name (no truncation)
+  and carry at-a-glance indicators: open-incident count + worst severity, on-call-gap
+  warning, environment chip (non-prod emphasized), owner. The leaf tile grid is
+  **space-adaptive** — `auto-fit` + a count-aware per-grid `--tile-min` so few tiles grow to
+  fill the row and many pack dense (no phantom empty columns), reflowing on resize. Click a
+  tile → the detail drawer.
 - **Incidents** — austere full-width table; click a row → incident drawer
   (timeline, properties, actions: ack / resolve / route / ignore / add responder).
 - **Schedule** — role-aware grid with gap highlighting.
@@ -82,10 +94,11 @@ and a module **cannot** silently depend on another view's internals.
   `applyEnvToAll` re-render fan-out), `metrics-compute.js` (a JS port of
   `core/metrics.py::compute_metrics` so env-scoped Metrics agree with the server —
   pinned by `tests/test_metrics_parity.py`).
-- **Structure:** `auth.js`, `stream.js` (SSE), `fleet.js` (big board; org-grouped
-  section render + per-group adaptive sizing + `/fleet/rollup` fetch),
-  `fleet-groups.js` (pure leaf: `groupTiles(tiles, rollup)` → ordered org groups +
-  Ungrouped, rollup-or-client status/counts), `router.js`
+- **Structure:** `auth.js`, `stream.js` (SSE), `fleet.js` (big board; env-container
+  render → recursive nested org boxes → leaf tile grids, single-child collapse, per-grid
+  adaptive tile sizing), `fleet-groups.js` (pure leaf: `buildOrg(tiles, depth)` →
+  recursive dynamic-depth org tree, `envsPresent(tiles)` → canonical-ordered env list,
+  `worstStatus`/`tallyTiles` helpers), `router.js`
   (view-switch + hash deep-links), `main.js` (the entry module that runs init in
   order — loaded via `<script type="module">`).
 - **Views / drawers / shared:** `incidents.js`, `incident-drawer.js`,

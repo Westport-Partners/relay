@@ -323,73 +323,12 @@
   /* Fleet — the Big Board: grouped sections, 1px dividers               */
   /* ------------------------------------------------------------------ */
 
-  /* Outer scroll container — vertical stack of group sections */
+  /* Outer scroll container — vertical stack of env-block sections */
   #fleet-groups {
     display: flex;
     flex-direction: column;
-    gap: 0;
+    gap: 12px;
     overflow-y: auto;
-  }
-
-  /* One section per product-line group */
-  .fleet-group {
-    border-bottom: 1px solid var(--border);
-    border-radius: var(--radius);
-  }
-  .fleet-group:last-child {
-    border-bottom: none;
-  }
-
-  /* Compact group header row */
-  .fleet-group-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 10px;
-    background: var(--surface-2);
-    border-bottom: 1px solid var(--border);
-  }
-
-  /* LED status dot */
-  .fleet-group-led {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    background: var(--grey);
-  }
-  .fleet-group-led.red      { background: var(--red); }
-  .fleet-group-led.degraded { background: var(--amber); }
-  .fleet-group-led.green    { background: var(--green); }
-  .fleet-group-led.grey     { background: var(--grey); }
-
-  /* Group label — uppercase tracking-wider, design-language table-header idiom */
-  .fleet-group-label {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-  }
-
-  /* Count summary — monospace, dim, pushed to the right */
-  .fleet-group-counts {
-    font-size: 10px;
-    font-family: var(--mono);
-    color: var(--text-faint);
-    margin-left: auto;
-  }
-
-  /* Tile grid inside each group. auto-fit collapses empty tracks (no phantom
-     columns); --tile-min is set per group by fleet.js sizeGroupGrids() from the
-     group's tile count + width, so few tiles grow and many tiles pack dense. */
-  .fleet-group-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(var(--tile-min, 200px), 100%), 1fr));
-    gap: 1px;
-    padding: 1px;
-    background: var(--border);
   }
 
   .tile {
@@ -1250,6 +1189,141 @@
   .maint-toggle-btn:last-child  { border-right: 1px solid var(--border-strong); border-top-right-radius: var(--radius); border-bottom-right-radius: var(--radius); }
   .maint-toggle-btn.active { background: var(--teal-deep); border-color: var(--teal); color: #fff; }
   .maint-toggle-btn:hover:not(.active) { background: var(--surface-2); color: var(--text); }
+
+  /* ===== Fleet env-container board (#43) ============================= */
+  /* Environment is the outer container; the org hierarchy nests inside  */
+  /* dynamically. Env blocks stack as rows (vertical flex). Children at  */
+  /* every org level pack horizontally via auto-fit wrapping grids.      */
+  /* Ported from dashboard_modules/mock-fleet2.html.                     */
+
+  /* One env block per environment. Stacks as a vertical flex column. */
+  .env-block {
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface-1);
+    overflow: hidden;
+  }
+  /* Accent the prod env block header bottom-border with teal to signal
+     the primary/live environment without using a status color. */
+  .env-prod .env-head {
+    border-bottom-color: var(--teal-light);
+  }
+
+  .env-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border-strong);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .env-head .led {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .env-head .ename {
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #fff;
+  }
+  .env-head .ecount {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+  }
+
+  /* Top-level org boxes (product lines) stack full-width so their
+     nested content has room to pack horizontally inside. */
+  .env-body {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* ── Recursive org box ── */
+  .org {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-1);
+  }
+  .org.lvl0 { border-color: var(--border-strong); }
+  /* lvl1/2/3 use the default --border, same as base .org */
+
+  .org-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 9px;
+    background: var(--surface-2);
+    cursor: pointer;
+  }
+  .org-head:hover { background: var(--surface-3); }
+  .org-head .led {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .org-head .olbl {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .org.lvl1 > .org-head .olbl { color: var(--text-dim); }
+  .org.lvl2 > .org-head .olbl { color: var(--text-faint); }
+  .org.lvl3 > .org-head .olbl { color: var(--text-faint); }
+  .org-head .ocount {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-faint);
+    flex-shrink: 0;
+  }
+
+  /* Children at every level pack horizontally, wrapping only when the
+     row is full. auto-FIT (not auto-fill) collapses empty tracks so
+     two children expand to fill the row instead of being squeezed into
+     one 240px track with a phantom empty column beside them.           */
+  .org-children {
+    padding: 6px;
+    display: grid;
+    gap: 6px;
+    align-items: start;
+    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  }
+
+  /* Leaf component box: holds deployment tiles, also packed across.
+     --tile-min is set per grid by fleet.js to tune packing density.
+     min(--tile-min, 100%) guards against overflow when a track would be
+     wider than the (possibly deeply-nested) container. */
+  .org-tiles {
+    padding: 6px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(var(--tile-min, 140px), 100%), 1fr));
+    gap: 6px;
+  }
+
+  /* Status LED colors — reused by both .env-head .led and .org-head .led */
+  .led.red      { background: var(--red); }
+  .led.degraded { background: var(--amber); }
+  .led.green    { background: var(--green); }
+  .led.grey     { background: var(--grey); }
+
+  /* ===== End Fleet env-container board (#43) ========================== */
 
   /* ------------------------------------------------------------------ */
   /* Responsive — collapse rail to icons on narrow screens               */
