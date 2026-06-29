@@ -36,6 +36,30 @@ preserve that separation — no `boto3` imports in `core/`.
    stacks.
 6. Open a PR with a clear description of the change and why. Link the issue.
 
+## Test organization
+
+The test suite is structured so a test's location and size stay predictable as
+the codebase grows. When adding or moving tests, keep to these conventions:
+
+- **Mirror the source layout.** `tests/` mirrors `src/relay/` package-for-package
+  (`tests/core/`, `tests/hub/`, `tests/node/`, `tests/adapters/`, `tests/config/`,
+  plus `tests/infra/` for `infra/`). A test belongs in the directory matching the
+  module it exercises — not where its incidental imports happen to point.
+- **One concern per file.** A test file should target one source module or one
+  cohesive behavior. If a file starts covering two distinct areas (e.g. two
+  adapters, or settings + scheduling endpoints), split it along that boundary.
+- **Split before it sprawls.** Treat ~600 lines as a smell and ~1000 as a hard
+  prompt to split. Long files hide redundancy and kill discoverability.
+- **Parametrize clones, don't copy them.** If several tests share the same
+  arrange-act-assert shape and differ only in input data, collapse them into one
+  `@pytest.mark.parametrize` with a descriptive `id` per case. Keep a test
+  separate only when it asserts something genuinely distinct.
+- **Shared fixtures go in `conftest.py`**, scoped to the narrowest directory that
+  needs them — not duplicated across files or hoisted to the root unnecessarily.
+
+These are review conventions, not automated gates; reviewers should hold new test
+files to them so the suite doesn't drift back into a flat pile of monoliths.
+
 ## Definition of Done
 
 A change is "done" only when the items below hold. Most of the automatable ones
