@@ -54,8 +54,16 @@ echo "Target table: ${TABLE}" >&2
 #    cannot be deleted without --force; removing the target keeps it explicit).
 # ----------------------------------------------------------------------------
 if aws events describe-rule --name "${ALARM_RULE}" >/dev/null 2>&1; then
-  aws events remove-targets --rule "${ALARM_RULE}" --ids relay-ingest >/dev/null 2>&1 || \
-    echo "  EventBridge ${ALARM_RULE}: no relay-ingest target (skipping)" >&2
+  # Remove ALL targets by listing them dynamically. The CLI path registers
+  # 'relay-ingest'; a CDK RelayComputeStack against the same rule registers
+  # 'relay-ingest-sqs'. A hardcoded id would orphan the other and then
+  # delete-rule fails ("Rule can't be deleted since it has targets").
+  _target_ids="$(aws events list-targets-by-rule --rule "${ALARM_RULE}" \
+    --query 'Targets[].Id' --output text 2>/dev/null | tr '\t' ' ')"
+  if [ -n "${_target_ids}" ]; then
+    # shellcheck disable=SC2086
+    aws events remove-targets --rule "${ALARM_RULE}" --ids ${_target_ids} >/dev/null 2>&1 || true
+  fi
   aws events delete-rule --name "${ALARM_RULE}" >/dev/null
   echo "  EventBridge ${ALARM_RULE}: deleted" >&2
 else
