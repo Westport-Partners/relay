@@ -157,7 +157,7 @@ class TestDynamoDeadlineTimer:
 def test_engine_with_deadline_timer_advances_on_sweep(dynamo_table):
     from relay.core.escalation import EscalationEngine, EscalationPhase
     from relay.core.model import EscalationPolicy, EscalationStep
-    from tests.test_dynamo_state import _minimal_incident  # reuse helper
+    from tests.adapters.test_dynamo_state import _minimal_incident  # reuse helper
 
     base = datetime(2026, 6, 23, 12, 0, 0, tzinfo=UTC)
     timer = _timer(dynamo_table, clock=lambda: base)

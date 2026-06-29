@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import threading
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from unittest.mock import MagicMock
 
 import boto3
@@ -139,35 +138,21 @@ class TestLivenessDerivation:
     def test_never_seen_is_unknown(self):
         assert liveness_from_heartbeat(None) == Liveness.UNKNOWN
 
-    def test_fresh_heartbeat_is_live(self, clock):
+    @pytest.mark.parametrize(
+        ("elapsed", "expected_liveness"),
+        [
+            pytest.param(60,   Liveness.LIVE,  id="fresh_heartbeat_is_live"),
+            pytest.param(120,  Liveness.LIVE,  id="at_2x_boundary_is_live"),
+            pytest.param(121,  Liveness.STALE, id="just_past_2x_is_stale"),
+            pytest.param(300,  Liveness.STALE, id="at_5x_boundary_is_stale"),
+            pytest.param(301,  Liveness.LOST,  id="just_past_5x_is_lost"),
+            pytest.param(3600, Liveness.LOST,  id="long_silence_is_lost"),
+        ],
+    )
+    def test_liveness_boundary(self, clock, elapsed, expected_liveness):
         hb = clock()
-        clock.advance(60)  # exactly 1× cadence — still live (≤2× = 120s)
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.LIVE
-
-    def test_at_2x_boundary_is_live(self, clock):
-        hb = clock()
-        clock.advance(120)  # exactly 2× cadence — boundary, still live
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.LIVE
-
-    def test_just_past_2x_is_stale(self, clock):
-        hb = clock()
-        clock.advance(121)  # 2×+1 → stale
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.STALE
-
-    def test_at_5x_boundary_is_stale(self, clock):
-        hb = clock()
-        clock.advance(300)  # exactly 5× cadence — boundary, still stale
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.STALE
-
-    def test_just_past_5x_is_lost(self, clock):
-        hb = clock()
-        clock.advance(301)  # >5× → lost
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.LOST
-
-    def test_long_silence_is_lost(self, clock):
-        hb = clock()
-        clock.advance(3600)  # 1 hour → lost
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.LOST
+        clock.advance(elapsed)
+        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == expected_liveness
 
     def test_liveness_progression_live_to_stale_to_lost(self, clock):
         hb = clock()
@@ -191,58 +176,92 @@ class TestLivenessDerivation:
 
 
 class TestWorstOf:
-    # --- red conditions ---
-    def test_lost_liveness_is_red(self):
-        assert worst_of(Liveness.LOST) == "red"
-
-    def test_lost_liveness_with_no_incidents_is_red(self):
-        assert worst_of(Liveness.LOST, open_incidents=0) == "red"
-
-    def test_live_sev1_is_red(self):
-        assert worst_of(Liveness.LIVE, open_incidents=1, worst_severity=Severity.SEV1) == "red"
-
-    def test_live_sev2_is_red(self):
-        assert worst_of(Liveness.LIVE, open_incidents=1, worst_severity=Severity.SEV2) == "red"
-
-    def test_stale_sev1_is_red(self):
-        # liveness==lost wins over stale, but we test that SEV1 independently forces red.
-        assert worst_of(Liveness.STALE, open_incidents=1, worst_severity=Severity.SEV1) == "red"
-
-    # --- degraded conditions ---
-    def test_stale_no_incidents_is_degraded(self):
-        assert worst_of(Liveness.STALE, open_incidents=0) == "degraded"
-
-    def test_live_sev3_is_degraded(self):
-        assert worst_of(Liveness.LIVE, open_incidents=1, worst_severity=Severity.SEV3) == "degraded"
-
-    def test_live_sev4_is_degraded(self):
-        assert worst_of(Liveness.LIVE, open_incidents=1, worst_severity=Severity.SEV4) == "degraded"
-
-    def test_live_acked_is_degraded(self):
-        assert worst_of(Liveness.LIVE, open_incidents=1, has_acked=True) == "degraded"
-
-    # --- grey condition ---
-    def test_unknown_no_incidents_is_grey(self):
-        assert worst_of(Liveness.UNKNOWN) == "grey"
-
-    def test_unknown_no_incidents_is_not_red(self):
-        assert worst_of(Liveness.UNKNOWN, open_incidents=0) == "grey"
-
-    # --- green condition ---
-    def test_live_no_incidents_is_green(self):
-        assert worst_of(Liveness.LIVE) == "green"
-
-    def test_live_no_incidents_explicit_is_green(self):
-        assert worst_of(Liveness.LIVE, open_incidents=0, worst_severity=None) == "green"
-
-    # --- unknown with incidents: SEV1 -> red (incident beats unknown liveness for red) ---
-    def test_unknown_sev1_is_red(self):
-        # SEV1/SEV2 → red regardless of liveness being unknown.
-        assert worst_of(Liveness.UNKNOWN, open_incidents=1, worst_severity=Severity.SEV1) == "red"
-
-    def test_unknown_sev3_is_degraded(self):
-        # SEV3 → degraded; unknown liveness → grey — but degraded check runs first.
-        assert worst_of(Liveness.UNKNOWN, open_incidents=1, worst_severity=Severity.SEV3) == "degraded"
+    @pytest.mark.parametrize(
+        ("kwargs", "expected_color"),
+        [
+            # --- red conditions ---
+            pytest.param(
+                {"liveness": Liveness.LOST},
+                "red",
+                id="lost_liveness_is_red",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LOST, "open_incidents": 0},
+                "red",
+                id="lost_liveness_with_no_incidents_is_red",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 1, "worst_severity": Severity.SEV1},
+                "red",
+                id="live_sev1_is_red",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 1, "worst_severity": Severity.SEV2},
+                "red",
+                id="live_sev2_is_red",
+            ),
+            pytest.param(
+                {"liveness": Liveness.STALE, "open_incidents": 1, "worst_severity": Severity.SEV1},
+                "red",
+                id="stale_sev1_is_red",
+            ),
+            pytest.param(
+                {"liveness": Liveness.UNKNOWN, "open_incidents": 1, "worst_severity": Severity.SEV1},
+                "red",
+                id="unknown_sev1_is_red",
+            ),
+            # --- degraded conditions ---
+            pytest.param(
+                {"liveness": Liveness.STALE, "open_incidents": 0},
+                "degraded",
+                id="stale_no_incidents_is_degraded",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 1, "worst_severity": Severity.SEV3},
+                "degraded",
+                id="live_sev3_is_degraded",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 1, "worst_severity": Severity.SEV4},
+                "degraded",
+                id="live_sev4_is_degraded",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 1, "has_acked": True},
+                "degraded",
+                id="live_acked_is_degraded",
+            ),
+            pytest.param(
+                {"liveness": Liveness.UNKNOWN, "open_incidents": 1, "worst_severity": Severity.SEV3},
+                "degraded",
+                id="unknown_sev3_is_degraded",
+            ),
+            # --- grey conditions ---
+            pytest.param(
+                {"liveness": Liveness.UNKNOWN},
+                "grey",
+                id="unknown_no_incidents_is_grey",
+            ),
+            pytest.param(
+                {"liveness": Liveness.UNKNOWN, "open_incidents": 0},
+                "grey",
+                id="unknown_no_incidents_explicit_is_grey",
+            ),
+            # --- green conditions ---
+            pytest.param(
+                {"liveness": Liveness.LIVE},
+                "green",
+                id="live_no_incidents_is_green",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 0, "worst_severity": None},
+                "green",
+                id="live_no_incidents_explicit_is_green",
+            ),
+        ],
+    )
+    def test_worst_of_color(self, kwargs, expected_color):
+        assert worst_of(**kwargs) == expected_color
 
 
 # ===========================================================================
@@ -1028,578 +1047,3 @@ class TestDynamicCatalog:
         assert tree.get("dep-auth-prod") is not None
 
 
-# ===========================================================================
-# Dashboard fragment assembly (#28 phase 2)
-# ===========================================================================
-
-
-class TestDashboardAssembly:
-    """The dashboard markup/CSS is authored as ordered fragments under
-    dashboard_parts/ and assembled at serve time; behavior is authored as native
-    ES modules under dashboard_modules/ and served read-only at /static/dashboard/.
-    These lock the contract: the manifest's fragments exist, the assembled shell
-    is a single well-formed HTML page with one <style> pair and one module-script
-    tag (no inline JS), the entry module exists, and every relative import between
-    modules resolves to a real exported symbol."""
-
-    def test_manifest_and_named_fragments_exist(self):
-        from relay.hub.app import _DASHBOARD_PARTS_DIR
-
-        manifest = _DASHBOARD_PARTS_DIR / "manifest.txt"
-        assert manifest.is_file(), "dashboard_parts/manifest.txt must exist"
-        names = [
-            ln.strip()
-            for ln in manifest.read_text(encoding="utf-8").splitlines()
-            if ln.strip() and not ln.lstrip().startswith("#")
-        ]
-        assert names, "manifest lists no fragments"
-        for name in names:
-            assert (_DASHBOARD_PARTS_DIR / name).is_file(), f"missing fragment: {name}"
-
-    def test_assembled_html_is_well_formed_single_document(self):
-        from relay.hub.app import _render_dashboard_html
-
-        html = _render_dashboard_html()
-        # The shell carries no inline JS — behavior loads as ES modules. There is
-        # exactly one <style> pair and exactly one module script tag pointing at
-        # the static entry module; no bare inline <script> remains.
-        assert html.count("<script>") == 0, "no inline <script> — JS is ES modules"
-        assert html.count('<script type="module"') == 1
-        assert html.count("</script>") == 1
-        assert '/static/dashboard/main.js' in html
-        assert html.count("<style>") == 1
-        assert html.count("</style>") == 1
-        assert html.lstrip().startswith("<!"), "must start with a doctype"
-        assert "</html>" in html
-        # Substantial — guards against a truncated/empty assembly (CSS-dominated
-        # now that the JS lives in modules).
-        assert len(html) > 30_000
-
-    def test_assembly_is_concatenation_in_manifest_order(self):
-        from relay.hub.app import _DASHBOARD_PARTS_DIR, _render_dashboard_html
-
-        names = [
-            ln.strip()
-            for ln in (_DASHBOARD_PARTS_DIR / "manifest.txt")
-            .read_text(encoding="utf-8")
-            .splitlines()
-            if ln.strip() and not ln.lstrip().startswith("#")
-        ]
-        expected = "".join(
-            (_DASHBOARD_PARTS_DIR / name).read_text(encoding="utf-8") for name in names
-        )
-        assert _render_dashboard_html() == expected
-
-    def test_module_dir_and_entry_exist(self):
-        from relay.hub.app import _DASHBOARD_MODULES_DIR
-
-        assert _DASHBOARD_MODULES_DIR.is_dir(), "dashboard_modules/ must ship in the package"
-        assert (_DASHBOARD_MODULES_DIR / "main.js").is_file(), "entry module main.js missing"
-
-    def test_module_imports_resolve_to_real_exports(self):
-        """Every `import { … } from './x.js'` must target a sibling module that
-        actually exports each named symbol — catches a broken refactor that would
-        only surface as a runtime error in the browser."""
-        import re
-
-        from relay.hub.app import _DASHBOARD_MODULES_DIR
-
-        mods = {p.name: p.read_text(encoding="utf-8") for p in _DASHBOARD_MODULES_DIR.glob("*.js")}
-        assert mods, "no ES modules found"
-
-        def exported_names(text: str) -> set[str]:
-            names: set[str] = set()
-            for m in re.finditer(
-                r"^export\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z0-9_]+)",
-                text,
-                re.M,
-            ):
-                names.add(m.group(1))
-            for m in re.finditer(r"^export\s*\{([^}]*)\}", text, re.M):
-                for part in m.group(1).split(","):
-                    nm = part.strip().split(" as ")[-1].strip()
-                    if nm:
-                        names.add(nm)
-            return names
-
-        exports = {name: exported_names(text) for name, text in mods.items()}
-
-        problems: list[str] = []
-        for name, text in mods.items():
-            for m in re.finditer(r"import\s*\{([^}]*)\}\s*from\s*'\./([^']+)'", text):
-                syms = [s.strip().split(" as ")[0].strip() for s in m.group(1).split(",") if s.strip()]
-                target = m.group(2)
-                if target not in mods:
-                    problems.append(f"{name}: imports from missing module {target}")
-                    continue
-                for s in syms:
-                    if s not in exports[target]:
-                        problems.append(f"{name}: imports {{{s}}} from {target}, which does not export it")
-        assert not problems, "broken ES-module imports:\n" + "\n".join(problems)
-
-
-# ===========================================================================
-# GET /incidents/{id}/flow  — process-flow endpoint (issue #20)
-# ===========================================================================
-#
-# These tests use the same HubApp.__new__ + build_fastapi_app() pattern
-# established by the other endpoint-test modules in this suite.
-# They exercise the four behaviours: config-backed, derived, none/fallback,
-# 404, and policy_id from the triggered event.
-# ===========================================================================
-
-import threading as _threading  # noqa: E402  (already at module top but kept explicit)
-from types import SimpleNamespace  # noqa: E402
-
-from relay.core.model import (  # noqa: E402
-    EscalationPolicy,
-    EscalationStep,
-    Stream,
-    TimelineEvent,
-)
-
-try:
-    from fastapi.testclient import TestClient as _TestClient  # noqa: E402
-except ImportError:
-    _TestClient = None  # type: ignore[assignment,misc]
-
-from relay.hub.app import HubApp  # noqa: E402 (HubState/SSEPublisher already imported)
-
-# --------------------------------------------------------------------------
-# Shared helpers (flow-only scope)
-# --------------------------------------------------------------------------
-
-_FLOW_T0 = datetime(2026, 6, 2, 8, 0, 0, tzinfo=UTC)
-
-
-def _fev(
-    cid: str,
-    step_index: int,
-    occurred_at: datetime,
-    contact_ids: list[str] | None = None,
-    event_id: str | None = None,
-) -> TimelineEvent:
-    """Build an escalation.page_sent TimelineEvent."""
-    return TimelineEvent(
-        event_id=event_id or f"fev-{step_index}",
-        incident_id=cid,
-        stream=Stream.TEAM,
-        occurred_at=occurred_at,
-        actor="system",
-        event_type="escalation.page_sent",
-        detail={
-            "step_index": step_index,
-            "contact_ids": contact_ids or [],
-            "roles": [],
-            "streams": ["TEAM"],
-            "timeout_minutes": 5,
-        },
-    )
-
-
-def _flow_incident(
-    cid: str = "flow-inc-001",
-    timeline: list[Any] | None = None,
-    escalation_policy_id: str | None = None,
-) -> Incident:
-    return Incident(
-        correlation_id=cid,
-        account_id="123456789012",
-        region="us-east-1",
-        app_name="svc",
-        severity=Severity.SEV2,
-        signal_source=SignalSource.CLOUDWATCH_ALARM,
-        alarm_name="test-alarm",
-        state=IncidentState.TRIGGERED,
-        timeline=timeline or [],
-        escalation_policy_id=escalation_policy_id,
-    )
-
-
-class _FlowFakeIncidentStore:
-    def __init__(self, incidents: list[Incident]) -> None:
-        self._db = {i.correlation_id: i for i in incidents}
-
-    def get_incident(self, cid: str) -> Incident | None:
-        return self._db.get(cid)
-
-    def list_open_incidents(self, account_id: str | None = None) -> list[Incident]:
-        # Mirror the real store: only non-terminal incidents are "open".
-        terminal = {IncidentState.RESOLVED, IncidentState.CLOSED}
-        return [i for i in self._db.values() if i.state not in terminal]
-
-    def list_incidents(self) -> list[Incident]:
-        return list(self._db.values())
-
-    def put_incident(self, inc: Incident) -> None:
-        self._db[inc.correlation_id] = inc
-
-
-class _FlowFakeContactStore:
-    def __init__(self, contacts: dict[str, str]) -> None:
-        # contacts is contact_id -> name
-        from relay.core.model import Contact
-        self._db = [
-            Contact(contact_id=cid, name=name, email=f"{cid}@example.com")
-            for cid, name in contacts.items()
-        ]
-
-    def list_contacts(self) -> list[Any]:
-        return list(self._db)
-
-
-def _flow_policy(policy_id: str = "flow-pol-1") -> EscalationPolicy:
-    return EscalationPolicy(
-        policy_id=policy_id,
-        name="Flow Policy",
-        team="team-flow",
-        steps=[
-            EscalationStep(
-                step_index=0,
-                contact_ids=["fc1"],
-                timeout_minutes=5,
-                notify_streams=[Stream.TEAM],
-            ),
-            EscalationStep(
-                step_index=1,
-                contact_ids=["fc2"],
-                timeout_minutes=10,
-                notify_streams=[Stream.TEAM],
-            ),
-        ],
-    )
-
-
-def _flow_client(
-    incident: Incident | None = None,
-    hub_config: object | None = None,
-    contact_store: object | None = None,
-) -> _TestClient:
-    """Build a minimal HubApp TestClient wired for /incidents/{id}/flow tests."""
-    if _TestClient is None:
-        pytest.skip("fastapi/httpx not installed")
-
-    store = _FlowFakeIncidentStore([incident] if incident is not None else [])
-
-    app_obj = HubApp.__new__(HubApp)
-    app_obj._incident_store = store
-    app_obj._contact_store = contact_store
-    app_obj._config = hub_config
-    app_obj._schedule_store = None
-    app_obj._settings_store = None
-    app_obj._notifier = None
-    app_obj._paging_topic_arn = None
-
-    hs = HubState.__new__(HubState)
-    hs._tiles = {}
-    hs.lock = _threading.Lock()
-    hs._store = None
-    hs._cadence = 60
-    hs._clock = lambda: datetime.now(UTC)
-    app_obj._hub_state = hs
-    app_obj._sse_publisher = SSEPublisher()
-
-    return _TestClient(app_obj.build_fastapi_app())
-
-
-# --------------------------------------------------------------------------
-# Tests
-# --------------------------------------------------------------------------
-
-
-class TestFlowEndpoint:
-    """GET /incidents/{id}/flow — process-flow endpoint."""
-
-    def test_404_for_unknown_incident(self):
-        c = _flow_client()
-        r = c.get("/incidents/no-such-id/flow")
-        assert r.status_code == 404
-
-    def test_config_backed_source(self):
-        """Config has a matching policy → source=='config', expected_steps from policy."""
-        policy = _flow_policy("flow-pol-1")
-        # Fake hub config with escalation.policies
-        hub_config = SimpleNamespace(
-            escalation=SimpleNamespace(policies=[policy]),
-            routing=None,
-        )
-        timeline = [_fev("fci-config", 0, _FLOW_T0, contact_ids=["fc1"])]
-        inc = _flow_incident(
-            "fci-config",
-            timeline=timeline,
-            escalation_policy_id="flow-pol-1",
-        )
-        c = _flow_client(
-            incident=inc,
-            hub_config=hub_config,
-            contact_store=_FlowFakeContactStore({"fc1": "Alice", "fc2": "Bob"}),
-        )
-        r = c.get("/incidents/fci-config/flow")
-        assert r.status_code == 200
-        body = r.json()
-        assert body["source"] == "config"
-        assert len(body["expected_steps"]) == 2
-        assert body["expected_steps"][0]["reached"] is True
-        assert body["expected_steps"][1]["reached"] is False
-        assert body["fallback"] is False
-
-    def test_derived_when_no_config_escalation(self):
-        """No policy in config → source=='derived' (ladder inferred from page_sent events)."""
-        timeline = [
-            _fev("fci-derived", 0, _FLOW_T0, contact_ids=["fc1"]),
-            _fev("fci-derived", 1, _FLOW_T0 + timedelta(seconds=60), contact_ids=["fc2"]),
-        ]
-        inc = _flow_incident("fci-derived", timeline=timeline)
-        # Config with no escalation attr → policy lookup is skipped
-        c = _flow_client(
-            incident=inc,
-            hub_config=None,
-            contact_store=_FlowFakeContactStore({"fc1": "Alice", "fc2": "Bob"}),
-        )
-        r = c.get("/incidents/fci-derived/flow")
-        assert r.status_code == 200
-        body = r.json()
-        assert body["source"] == "derived"
-        assert len(body["expected_steps"]) == 2
-        assert all(s["reached"] for s in body["expected_steps"])
-        assert body["fallback"] is False
-
-    def test_none_fallback_no_policy_no_page_sent(self):
-        """No policy + no page_sent events → source=='none', fallback True."""
-        inc = _flow_incident("fci-none")
-        c = _flow_client(incident=inc, hub_config=None)
-        r = c.get("/incidents/fci-none/flow")
-        assert r.status_code == 200
-        body = r.json()
-        assert body["source"] == "none"
-        assert body["expected_steps"] == []
-        assert body["fallback"] is True
-
-    def test_policy_id_from_triggered_event(self):
-        """incident.escalation_policy_id is None but triggered event carries policy_id."""
-        policy = _flow_policy("flow-pol-trig")
-        hub_config = SimpleNamespace(
-            escalation=SimpleNamespace(policies=[policy]),
-            routing=None,
-        )
-        timeline = [
-            TimelineEvent(
-                event_id="trig-1",
-                incident_id="fci-trig",
-                stream=Stream.TEAM,
-                occurred_at=_FLOW_T0,
-                actor="system",
-                event_type="incident.triggered",
-                detail={"policy_id": "flow-pol-trig", "alarm_name": "alarm"},
-            ),
-            _fev("fci-trig", 0, _FLOW_T0 + timedelta(seconds=5), contact_ids=["fc1"]),
-        ]
-        inc = _flow_incident(
-            "fci-trig",
-            timeline=timeline,
-            escalation_policy_id=None,  # the field is None
-        )
-        c = _flow_client(
-            incident=inc,
-            hub_config=hub_config,
-            contact_store=_FlowFakeContactStore({"fc1": "Alice", "fc2": "Bob"}),
-        )
-        r = c.get("/incidents/fci-trig/flow")
-        assert r.status_code == 200
-        body = r.json()
-        # Route resolved the policy from the triggered event → config source
-        assert body["source"] == "config"
-        assert body["policy_id"] == "flow-pol-trig"
-
-
-# ===========================================================================
-# 10. Tile open_incident_count drift: resolve endpoint + sweep reconciliation
-# ===========================================================================
-
-
-class TestTileDriftRepair:
-    """Derive-and-self-heal approach: resolve/ack/ignore endpoints and sweep
-    reconciliation must never leave open_incident_count drifted on a tile."""
-
-    def _make_open_incident(
-        self,
-        correlation_id: str = "drift-inc-001",
-        account_id: str = "123456789012",
-        app_name: str = "drift-app",
-        environment: str = "unrouted",
-        deployment_id: str = "drift-app",
-        state: IncidentState = IncidentState.TRIGGERED,
-    ) -> Incident:
-        now = datetime.now(UTC)
-        return Incident(
-            correlation_id=correlation_id,
-            account_id=account_id,
-            region="us-east-1",
-            app_name=app_name,
-            environment=environment,
-            deployment_id=deployment_id,
-            severity=Severity.SEV2,
-            signal_source=SignalSource.CLOUDWATCH_ALARM,
-            alarm_name="drift-alarm",
-            state=state,
-            created_at=now,
-            updated_at=now,
-        )
-
-    def _build_client_and_sse(
-        self,
-        incidents: list[Incident],
-        hub_state: HubState,
-    ) -> tuple[_TestClient, SSEPublisher]:
-        if _TestClient is None:
-            pytest.skip("fastapi/httpx not installed")
-
-        store = _FlowFakeIncidentStore(incidents)
-
-        app_obj = HubApp.__new__(HubApp)
-        app_obj._incident_store = store
-        app_obj._contact_store = None
-        app_obj._config = None
-        app_obj._schedule_store = None
-        app_obj._settings_store = None
-        app_obj._notifier = None
-        app_obj._paging_topic_arn = None
-        app_obj._hub_state = hub_state
-        pub = SSEPublisher()
-        app_obj._sse_publisher = pub
-
-        return _TestClient(app_obj.build_fastapi_app()), pub
-
-    def test_resolve_endpoint_recomputes_tile_count(
-        self, fleet_store, hub_state, clock, monkeypatch
-    ):
-        """Resolving an incident via /incidents/{id}/resolve must decrement the
-        tile's open_incident_count to the correct derived value and emit an SSE
-        delta — proving the tile never stays phantom-red after a UI resolve."""
-        # dev auth gives the endpoint a fixed writer identity so the write path
-        # actually runs (otherwise require_writer 403s and the recompute is
-        # never reached — a vacuous pass).
-        monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
-        monkeypatch.setenv("RELAY_DEV_USER", "tester")
-
-        # Prime fleet tile with one open incident via the ingest path.
-        inc = self._make_open_incident(state=IncidentState.TRIGGERED)
-        hub_state.update_app(inc)
-        tile_before = hub_state.get_tile(inc.account_id, inc.app_name)
-        assert tile_before is not None
-        assert tile_before.open_incidents == 1
-
-        # Transition incident to RESOLVED in the fake store (simulating what the
-        # endpoint will do via put_incident).
-        resolved = self._make_open_incident(state=IncidentState.RESOLVED)
-
-        # Build a fake store that starts with the resolved incident so that
-        # list_open_incidents() returns zero open after the resolve.
-        store = _FlowFakeIncidentStore([resolved])
-
-        app_obj = HubApp.__new__(HubApp)
-        app_obj._incident_store = store
-        app_obj._contact_store = None
-        app_obj._config = None
-        app_obj._schedule_store = None
-        app_obj._settings_store = None
-        app_obj._notifier = None
-        app_obj._paging_topic_arn = None
-        app_obj._hub_state = hub_state
-        pub = SSEPublisher()
-        app_obj._sse_publisher = pub
-
-        client = _TestClient(app_obj.build_fastapi_app())
-        q = pub.subscribe()
-
-        # Call the resolve endpoint — must succeed under dev auth.
-        r = client.post("/incidents/drift-inc-001/resolve")
-        assert r.status_code == 200, r.text
-
-        # Tile must now reflect zero open incidents.
-        tile_after = hub_state.get_tile(inc.account_id, inc.app_name)
-        assert tile_after is not None
-        assert tile_after.open_incidents == 0
-
-        # An SSE delta must have been emitted.
-        assert not q.empty()
-        msg = q.get_nowait()
-        assert "delta" in msg
-
-    def test_sweep_reconciles_drifted_tile_count(self, fleet_store, hub_state, clock):
-        """Sweep reconciliation must correct a tile whose open_incident_count is
-        artificially high (simulating drift from UI writes that bypassed the ingest
-        bus decrement)."""
-        # Register a heartbeat so the tile exists in DynamoDB.
-        hb_ts = clock()
-        fleet_store.record_heartbeat("drift-acct", "drift-svc", hb_ts)
-
-        # Apply one TRIGGERED incident to get the tile into the cache with count=1.
-        inc_open = Incident(
-            correlation_id="sweep-drift-001",
-            account_id="drift-acct",
-            region="us-east-1",
-            app_name="drift-svc",
-            severity=Severity.SEV2,
-            signal_source=SignalSource.CLOUDWATCH_ALARM,
-            alarm_name="sweep-alarm",
-            state=IncidentState.TRIGGERED,
-            created_at=clock(),
-            updated_at=clock(),
-        )
-        hub_state.update_app(inc_open)
-
-        # Artificially inflate the cached tile count to 5 (simulating drift).
-        with hub_state.lock:
-            key = list(hub_state._tiles.keys())[0]
-            original = hub_state._tiles[key]
-            drifted = FleetTile(
-                account_id=original.account_id,
-                app_name=original.app_name,
-                environment=original.environment,
-                deployment_id=original.deployment_id,
-                service_path=original.service_path,
-                org_path=original.org_path,
-                metadata=original.metadata,
-                on_call=original.on_call,
-                status="red",
-                liveness=original.liveness,
-                open_incidents=5,
-                worst_severity=Severity.SEV2,
-                last_heartbeat_at=original.last_heartbeat_at,
-                registered_at=original.registered_at,
-                last_updated=clock(),
-            )
-            hub_state._tiles[key] = drifted
-
-        # Verify the inflation is in place.
-        assert hub_state.cached_tile(key).open_incidents == 5
-
-        # Build a fake incident store that reports only the one real open incident.
-        incident_store_fake = _FlowFakeIncidentStore([inc_open])
-
-        pub = SSEPublisher()
-        q = pub.subscribe()
-        shutdown = threading.Event()
-
-        sweep = SweepTimer(
-            hub_state=hub_state,
-            sse_publisher=pub,
-            shutdown_event=shutdown,
-            sweep_interval=0,
-            ping_interval=9999,
-            incident_store=incident_store_fake,
-        )
-
-        # Run one sweep — reconciliation must fire.
-        sweep._do_sweep()
-
-        # After sweep the tile count must match the actual open incident count.
-        tile_after = hub_state.cached_tile(key)
-        assert tile_after is not None
-        assert tile_after.open_incidents == 1
-
-        # An SSE delta must have been emitted for the corrected tile.
-        assert not q.empty()
-        msg = q.get_nowait()
-        assert "delta" in msg
