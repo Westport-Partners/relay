@@ -79,6 +79,18 @@ Thumbs.db
 # AWS SAM (if used alongside CDK)
 .aws-sam/
 
+# Terraform / Terragrunt (local state, provider plugins, generated files —
+# never committed; the committed .tf/.hcl source is authoritative)
+.terraform/
+.terraform.lock.hcl
+.terragrunt-cache/
+*.tfstate
+*.tfstate.*
+*.tfplan
+# Terragrunt generates these from the root config at apply time:
+backend.tf
+provider.tf
+
 # Node.js (CDK CLI dependency)
 node_modules/
 package-lock.json

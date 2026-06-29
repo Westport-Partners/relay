@@ -308,6 +308,53 @@ creates them — see [byor.md](byor.md).
 
 ---
 
+## Terraform / Terragrunt path (native, no CDK)
+
+CDK is Relay's canonical IaC, but the same topology can be provisioned with
+**hand-written Terraform** for teams that standardize on it. The modules live in
+[`infra/terraform/`](../infra/terraform/) and are kept at parity with the CDK
+stacks by `tests/infra/test_terraform_parity.py`.
+
+| Module | Parity with | What it creates |
+|---|---|---|
+| `modules/data-plane` | `RelayDataStack` + `relay-provision-cli.sh` | DynamoDB (+GSIs/PITR/TTL/stream), 2 SNS topics, SQS ingest + DLQ, CloudWatch-alarm EventBridge rule |
+| `modules/compute` | `RelayComputeStack` | ECS cluster/service/task-def, ALB + listeners, DLQ-depth alarm, CPU autoscaling |
+| `modules/federation` | `RelayFederationStack` | (federated-hub) `relay-hub` EventBridge bus + policy + ingest rule |
+
+**Built for locked-down accounts:** unlike the CDK compute stack (which creates a
+VPC and IAM roles by default), the Terraform compute module **always imports**
+them — `vpc_id`, `private_subnet_ids`, `ecs_task_role_arn`, and
+`ecs_execution_role_arn` are **required** inputs (BYOV + BYOR are mandatory, since
+these accounts deny `ec2:CreateVpc` and `iam:CreateRole`). The module emits the
+inline-policy + trust JSON to paste onto the two pre-provisioned roles as the
+`byor_task_role_inline_policy` / `byor_execution_role_inline_policy` /
+`byor_ecs_role_trust` outputs.
+
+Use the modules directly, or via the **Terragrunt** wiring in
+[`infra/terraform/live/`](../infra/terraform/live/) — one stack per environment
+(env is the namespace above org), with `data-plane → compute` dependency ordering
+resolved automatically:
+
+```bash
+cd infra/terraform/live/dev   # or prod / test
+# edit env.hcl with this account's VPC/subnets/role ARNs + image URI,
+# and the root terragrunt.hcl with your state bucket + lock table, then:
+terragrunt run-all plan
+terragrunt run-all apply       # data plane applies first, compute imports it
+```
+
+To use a single module without Terragrunt:
+
+```bash
+cd infra/terraform/modules/data-plane
+terraform init && terraform apply -var team_name=<team>
+```
+
+See the [`infra/terraform/`](../infra/terraform/) README for the full input
+reference.
+
+---
+
 ## Deploy environment variables
 
 ### Required
