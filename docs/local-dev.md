@@ -186,7 +186,9 @@ RELAY_TEAM_NAME=<team> AWS_REGION=us-east-1 ./scripts/relay-provision-cli.sh
 
 On success it prints the exact `export` lines for the next step. (To provision via
 CDK instead in an account that denies `iam:PassRole`, see
-[deploy.md → Locked-down accounts](deploy.md#locked-down-accounts-iampassrole-denied).)
+[deploy.md → Locked-down accounts](deploy.md#locked-down-accounts-iampassrole-denied).
+For a native Terraform equivalent of this data plane, see
+[deploy.md → Terraform / Terragrunt path](deploy.md#terraform--terragrunt-path-native-no-cdk).)
 
 ### Phase 2, on-ramp A — run the released container (lowest friction)
 
