@@ -189,7 +189,7 @@ All endpoints are served by the container. The base URL is the same as the dashb
 |--------|------|---------|--------|
 | GET | `/fleet` | All fleet tiles | |
 | GET | `/fleet/rollup` | Org tree with rolled-up health | |
-| GET | `/fleet/{account_id}/{app_name}` | Single tile + live on-call | |
+| GET | `/fleet/tile?account_id=&app_name=` | Single tile + live on-call (query params: `app_name` may contain `/`) | |
 
 ### Incidents
 

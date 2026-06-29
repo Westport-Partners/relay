@@ -89,14 +89,32 @@ class RelayDataStack(Stack):
             time_to_live_attribute="ttl",  # resolved incidents expire automatically
             stream=dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,  # feeds dashboard live push
         )
-        # GSI — query incidents by status (OPEN / ACKED / RESOLVED) for the dashboard.
+        # Incident-listing GSIs. Two single-partition indices, each serving one
+        # read pattern with a single Query (no full-table scan):
+        #   incident-status-index — SPARSE open index. Incident items carry
+        #     gsi_open_pk="OPEN" only while open (TRIGGERED/ACKNOWLEDGED/ESCALATED);
+        #     a resolve rewrites the item without it, so DynamoDB drops it from the
+        #     index automatically. Sort by created_at (ISO-8601, lexical). Backs
+        #     list_open_incidents (the live "Open" board).
+        #   incident-all-index — every incident carries gsi_all_pk="INCIDENT".
+        #     Backs list_incidents (history + metrics).
+        # Both keys are derived from incident.state in DynamoIncidentStore._to_item.
         self.table.add_global_secondary_index(
             index_name="incident-status-index",
             partition_key=dynamodb.Attribute(
-                name="status", type=dynamodb.AttributeType.STRING
+                name="gsi_open_pk", type=dynamodb.AttributeType.STRING
             ),
             sort_key=dynamodb.Attribute(
-                name="opened_at", type=dynamodb.AttributeType.STRING
+                name="created_at", type=dynamodb.AttributeType.STRING
+            ),
+        )
+        self.table.add_global_secondary_index(
+            index_name="incident-all-index",
+            partition_key=dynamodb.Attribute(
+                name="gsi_all_pk", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="created_at", type=dynamodb.AttributeType.STRING
             ),
         )
         self.table_name = self.table.table_name

@@ -143,3 +143,32 @@ suppression:
       environment: [dev, test, preprod]
       window_seconds: 900
       max_per_window: 1
+
+# ---------------------------------------------------------------------------
+# IGNORE — permanently DROP matching incidents before they are persisted,
+# paged, or federated. Unlike suppression (which throttles noisy-but-real
+# alarms), ignore is for alarms that are never incidents at all.
+#
+# Seeded into DynamoDB on first boot, then runtime truth wins: edits made via
+# the dashboard Ignore action persist in the store and are not overwritten by
+# this file on later boots (a deviation banner flags drift from this baseline).
+#
+# Match fields (all optional, ANDed; first matching rule wins):
+#   account_id          exact AWS account ID
+#   app_name            exact app name
+#   alarm_name          exact alarm name
+#   alarm_name_prefix   alarm name starts with this string
+#   environment         a name (prod) or list ([dev, test, preprod])
+#   tags                all key/value pairs present in the incident's tags
+# ---------------------------------------------------------------------------
+ignore:
+  enabled: true
+  rules:
+    # AWS auto-creates target-tracking alarms (named "TargetTracking-*") to
+    # drive autoscaling. They flip to ALARM as normal scaling control-loop
+    # behavior — including Relay's OWN hub service scaling down when idle — and
+    # are never a real incident. Dropping them by default stops a fresh install
+    # from paging on its own (and the monitored account's) autoscaling activity.
+    - name: aws-autoscaling-target-tracking
+      alarm_name_prefix: "TargetTracking-"
+      note: "AWS autoscaling control-loop alarms, not incidents (incl. Relay's own hub)."

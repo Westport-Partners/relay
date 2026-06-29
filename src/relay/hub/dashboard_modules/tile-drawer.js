@@ -16,7 +16,7 @@ export async function openTile(accountId, appName) {
   drawerOverlay.classList.add('open');
   let t;
   try {
-    const r = await fetch('/fleet/' + encodeURIComponent(accountId) + '/' + encodeURIComponent(appName));
+    const r = await fetch('/fleet/tile?account_id=' + encodeURIComponent(accountId) + '&app_name=' + encodeURIComponent(appName));
     if (!r.ok) throw new Error('not found');
     t = await r.json();
   } catch (e) {

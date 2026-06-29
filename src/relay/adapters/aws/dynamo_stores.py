@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from relay.adapters.aws.endpoint import aws_resource_kwargs
@@ -44,6 +44,32 @@ _SENTINEL_SK_COUNTER = "COUNTER"
 _DEADLINE_PENDING = "PENDING"
 _DEADLINE_FIRED = "FIRED"
 _DEADLINE_CANCELLED = "CANCELLED"
+
+# Incident listing GSIs (see specs/_active/0042-incident-listing-gsi).
+# Two single-partition indices serve the two read patterns with one Query each:
+#   incident-status-index — SPARSE: only open incidents carry gsi_open_pk, so a
+#                           resolve overwrite (which omits it) evicts the row for
+#                           free. Backs list_open_incidents.
+#   incident-all-index    — every incident carries gsi_all_pk. Backs list_incidents
+#                           (history + metrics).
+# Both sort by created_at (ISO-8601 UTC sorts lexically), queried newest-first.
+_INCIDENT_OPEN_INDEX = "incident-status-index"
+_INCIDENT_ALL_INDEX = "incident-all-index"
+_GSI_OPEN_PK = "gsi_open_pk"
+_GSI_ALL_PK = "gsi_all_pk"
+_GSI_OPEN_VALUE = "OPEN"
+_GSI_ALL_VALUE = "INCIDENT"
+
+# Single home for the open/terminal rule. An incident is "open" iff its state is
+# one of these; terminal (RESOLVED/CLOSED) incidents are omitted from the sparse
+# open index. _to_item derives gsi_open_pk from this set.
+_OPEN_STATES = frozenset(
+    {
+        IncidentState.TRIGGERED,
+        IncidentState.ACKNOWLEDGED,
+        IncidentState.ESCALATED,
+    }
+)
 
 
 def _serialize_datetime(dt: datetime | None) -> str | None:
@@ -231,6 +257,14 @@ class DynamoIncidentStore:
         item: dict[str, Any] = incident.model_dump(mode="json")
         item["pk"] = f"INCIDENT#{incident.correlation_id}"
         item["sk"] = _SENTINEL_SK_META
+        # GSI keys derived purely from state (created_at is already a top-level
+        # ISO-8601 string from model_dump). Every incident is in the all-index;
+        # only open incidents are in the sparse open index — omitting gsi_open_pk
+        # for terminal states keeps them out of it, so a resolve overwrite evicts
+        # the row with no explicit REMOVE.
+        item[_GSI_ALL_PK] = _GSI_ALL_VALUE
+        if incident.state in _OPEN_STATES:
+            item[_GSI_OPEN_PK] = _GSI_OPEN_VALUE
         return item
 
     @staticmethod
@@ -308,63 +342,68 @@ class DynamoIncidentStore:
             )
             raise
 
-    def list_open_incidents(self, account_id: str | None = None) -> list[Incident]:
-        """Scan for non-closed incidents.
+    def _query_incident_index(
+        self,
+        index_name: str,
+        partition_attr: str,
+        partition_value: str,
+        account_id: str | None,
+    ) -> list[Incident]:
+        """Query an incident GSI newest-first, paginating fully.
 
-        Args:
-            account_id: If provided, further filter by this AWS account ID.
-
-        Returns:
-            List of Incident models whose state is not CLOSED/RESOLVED.
-
-        Notes:
-            TODO: add a GSI on (account_id, state) to avoid a full table scan
-                  for the account_id-filtered path.  Current implementation uses
-                  Scan which will be expensive at scale.
+        Both listing methods share this: a single-partition Query
+        (``partition_attr = partition_value``) with ``ScanIndexForward=False`` so
+        the ``created_at`` sort key returns newest-first, an optional
+        ``account_id`` FilterExpression, and a ``LastEvaluatedKey`` loop to drain
+        every page. Reads only the index's rows — never non-incident items.
         """
-        # TODO: replace Scan with a GSI Query once the GSI is provisioned.
-        filter_expr = (
-            Attr("pk").begins_with("INCIDENT#")
-            & Attr("sk").eq(_SENTINEL_SK_META)
-            & Attr("state").ne(IncidentState.CLOSED)
-            & Attr("state").ne(IncidentState.RESOLVED)
-        )
+        query_kwargs: dict[str, Any] = {
+            "IndexName": index_name,
+            "KeyConditionExpression": Key(partition_attr).eq(partition_value),
+            "ScanIndexForward": False,
+        }
         if account_id is not None:
-            filter_expr = filter_expr & Attr("account_id").eq(account_id)
-
-        try:
-            response = self._table.scan(FilterExpression=filter_expr)
-        except ClientError:
-            logger.exception("DynamoDB scan failed for list_open_incidents")
-            raise
-
-        items = response.get("Items", [])
-        # TODO: handle pagination (LastEvaluatedKey) for large result sets.
-        return [self._from_item(item) for item in items]
-
-    def list_incidents(self, account_id: str | None = None) -> list[Incident]:
-        """List ALL incidents (open + resolved/closed) — for the history view.
-
-        Like list_open_incidents but without the state filter. Scans for items
-        with an INCIDENT# partition key. TODO: GSI/pagination at scale.
-        """
-        filter_expr = Attr("pk").begins_with("INCIDENT#") & Attr("sk").eq(_SENTINEL_SK_META)
-        if account_id is not None:
-            filter_expr = filter_expr & Attr("account_id").eq(account_id)
+            query_kwargs["FilterExpression"] = Attr("account_id").eq(account_id)
         items: list[dict[str, Any]] = []
-        scan_kwargs: dict[str, Any] = {"FilterExpression": filter_expr}
         try:
             while True:
-                response = self._table.scan(**scan_kwargs)
+                response = self._table.query(**query_kwargs)
                 items.extend(response.get("Items", []))
                 lek = response.get("LastEvaluatedKey")
                 if not lek:
                     break
-                scan_kwargs["ExclusiveStartKey"] = lek
+                query_kwargs["ExclusiveStartKey"] = lek
         except ClientError:
-            logger.exception("DynamoDB scan failed for list_incidents")
+            logger.exception(
+                "DynamoDB query failed for incident index %s", index_name
+            )
             raise
         return [self._from_item(item) for item in items]
+
+    def list_open_incidents(self, account_id: str | None = None) -> list[Incident]:
+        """List open incidents (state not RESOLVED/CLOSED), newest-first.
+
+        Queries the sparse ``incident-status-index`` (only open incidents carry
+        ``gsi_open_pk``), so the read touches open incident rows only — not
+        terminal incidents and not other entity types in the shared table.
+
+        Args:
+            account_id: If provided, further filter by this AWS account ID.
+        """
+        return self._query_incident_index(
+            _INCIDENT_OPEN_INDEX, _GSI_OPEN_PK, _GSI_OPEN_VALUE, account_id
+        )
+
+    def list_incidents(self, account_id: str | None = None) -> list[Incident]:
+        """List ALL incidents (open + terminal), newest-first — history + metrics.
+
+        Queries ``incident-all-index`` (every incident carries ``gsi_all_pk``), so
+        the read touches incident rows only. Callers slice terminal-only (history)
+        or compute over the full set (metrics) themselves.
+        """
+        return self._query_incident_index(
+            _INCIDENT_ALL_INDEX, _GSI_ALL_PK, _GSI_ALL_VALUE, account_id
+        )
 
     def purge_incidents(
         self,

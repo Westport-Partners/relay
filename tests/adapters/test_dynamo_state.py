@@ -11,12 +11,14 @@ import boto3
 import pytest
 
 from relay.adapters.aws.dynamo_stores import (
+    DynamoContactStore,
     DynamoDeadlineTimer,
     DynamoEscalationStateStore,
     DynamoIncidentStore,
 )
 from relay.core.escalation import EscalationContext, EscalationPhase
 from relay.core.model import (
+    Contact,
     Incident,
     IncidentState,
     Severity,
@@ -30,6 +32,27 @@ from relay.core.model import (
 # ---------------------------------------------------------------------------
 
 TABLE_NAME = "relay-test"
+
+# Incident-listing GSIs, mirroring infra/stacks/data_stack.py so moto Queries
+# resolve against real indices. Shared with other moto fixtures via import.
+INCIDENT_GSIS = [
+    {
+        "IndexName": "incident-status-index",
+        "KeySchema": [
+            {"AttributeName": "gsi_open_pk", "KeyType": "HASH"},
+            {"AttributeName": "created_at", "KeyType": "RANGE"},
+        ],
+        "Projection": {"ProjectionType": "ALL"},
+    },
+    {
+        "IndexName": "incident-all-index",
+        "KeySchema": [
+            {"AttributeName": "gsi_all_pk", "KeyType": "HASH"},
+            {"AttributeName": "created_at", "KeyType": "RANGE"},
+        ],
+        "Projection": {"ProjectionType": "ALL"},
+    },
+]
 
 
 @pytest.fixture(scope="module")
@@ -49,7 +72,11 @@ def dynamo_table():
             AttributeDefinitions=[
                 {"AttributeName": "pk", "AttributeType": "S"},
                 {"AttributeName": "sk", "AttributeType": "S"},
+                {"AttributeName": "gsi_open_pk", "AttributeType": "S"},
+                {"AttributeName": "gsi_all_pk", "AttributeType": "S"},
+                {"AttributeName": "created_at", "AttributeType": "S"},
             ],
+            GlobalSecondaryIndexes=INCIDENT_GSIS,
             BillingMode="PAY_PER_REQUEST",
         )
         table.wait_until_exists()
@@ -580,3 +607,176 @@ class TestPurgeIncidents:
             Key={"pk": "ESC#purge-cascade-001", "sk": "DEADLINE"}
         ).get("Item")
         assert deadline_item is None
+
+
+# ---------------------------------------------------------------------------
+# Incident listing (GSI-backed) — isolated per-test table so the module-scoped
+# table's accumulated incidents don't pollute these assertions.
+# ---------------------------------------------------------------------------
+
+ISO_TABLE = "relay-listing-test"
+
+
+@pytest.fixture
+def listing_session():
+    """A fresh moto table (with the incident GSIs) per test for clean listings."""
+    from moto import mock_aws
+
+    with mock_aws():
+        session = boto3.session.Session(region_name="us-east-1")
+        ddb = session.resource("dynamodb")
+        table = ddb.create_table(
+            TableName=ISO_TABLE,
+            KeySchema=[
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "S"},
+                {"AttributeName": "gsi_open_pk", "AttributeType": "S"},
+                {"AttributeName": "gsi_all_pk", "AttributeType": "S"},
+                {"AttributeName": "created_at", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=INCIDENT_GSIS,
+            BillingMode="PAY_PER_REQUEST",
+        )
+        table.wait_until_exists()
+        try:
+            yield session
+        finally:
+            # The module-scoped dynamo_table fixture holds an outer mock_aws open,
+            # so this nested mock shares its backend and the table would otherwise
+            # leak into the next test. Drop it explicitly.
+            table.delete()
+
+
+def _listing_store(session):
+    return DynamoIncidentStore(table_name=ISO_TABLE, boto3_session=session)
+
+
+def _incident_state(correlation_id, dt, state, account_id="123456789012", synthetic=False):
+    inc = _incident_at(correlation_id, dt, synthetic=synthetic)
+    inc.account_id = account_id
+    inc.state = state
+    return inc
+
+
+class TestListOpenIncidents:
+    """list_open_incidents queries the sparse open GSI (US1)."""
+
+    def test_returns_only_open_newest_first(self, listing_session):
+        store = _listing_store(listing_session)
+        base = datetime(2026, 5, 1, tzinfo=_UTC)
+        # Three open (varying states + times), two terminal — terminal must be absent.
+        store.put_incident(_incident_state("o1", base, IncidentState.TRIGGERED))
+        store.put_incident(
+            _incident_state("o2", base + timedelta(hours=2), IncidentState.ACKNOWLEDGED)
+        )
+        store.put_incident(
+            _incident_state("o3", base + timedelta(hours=1), IncidentState.ESCALATED)
+        )
+        store.put_incident(
+            _incident_state("t1", base + timedelta(hours=3), IncidentState.RESOLVED)
+        )
+        store.put_incident(
+            _incident_state("t2", base + timedelta(hours=4), IncidentState.CLOSED)
+        )
+        # A non-incident row must never be read by the open query.
+        DynamoContactStore(table_name=ISO_TABLE, boto3_session=listing_session).put_contact(
+            Contact(contact_id="c1", name="Pat", email="pat@example.com")
+        )
+
+        result = store.list_open_incidents()
+        ids = [i.correlation_id for i in result]
+        assert ids == ["o2", "o3", "o1"]  # newest-first by created_at
+
+    def test_account_filter(self, listing_session):
+        store = _listing_store(listing_session)
+        base = datetime(2026, 5, 2, tzinfo=_UTC)
+        store.put_incident(_incident_state("a1", base, IncidentState.TRIGGERED, account_id="111"))
+        store.put_incident(
+            _incident_state("a2", base + timedelta(hours=1), IncidentState.TRIGGERED, account_id="222")
+        )
+        result = store.list_open_incidents(account_id="222")
+        assert [i.correlation_id for i in result] == ["a2"]
+
+    def test_empty_returns_empty(self, listing_session):
+        store = _listing_store(listing_session)
+        assert store.list_open_incidents() == []
+
+    def test_resolve_evicts_from_open_index(self, listing_session):
+        """Sparse eviction: re-putting an incident as RESOLVED drops it from the
+        open index with no explicit REMOVE (FR-007)."""
+        store = _listing_store(listing_session)
+        inc = _incident_state("evict-1", datetime(2026, 5, 3, tzinfo=_UTC), IncidentState.TRIGGERED)
+        store.put_incident(inc)
+        assert [i.correlation_id for i in store.list_open_incidents()] == ["evict-1"]
+
+        inc.state = IncidentState.RESOLVED
+        store.put_incident(inc)
+        assert store.list_open_incidents() == []
+        # Still present in the all-index.
+        assert [i.correlation_id for i in store.list_incidents()] == ["evict-1"]
+
+    def test_pagination_returns_full_set(self, listing_session, monkeypatch):
+        """A result set spanning multiple query pages returns in full (FR-003)."""
+        store = _listing_store(listing_session)
+        base = datetime(2026, 5, 4, tzinfo=_UTC)
+        for n in range(25):
+            store.put_incident(
+                _incident_state(f"pg-{n:02d}", base + timedelta(minutes=n), IncidentState.TRIGGERED)
+            )
+        # Force tiny pages so the LastEvaluatedKey loop is exercised.
+        real_query = store._table.query
+
+        def paged_query(**kwargs):
+            kwargs["Limit"] = 5
+            return real_query(**kwargs)
+
+        monkeypatch.setattr(store._table, "query", paged_query)
+        result = store.list_open_incidents()
+        assert len(result) == 25
+        assert len({i.correlation_id for i in result}) == 25
+
+
+class TestListIncidents:
+    """list_incidents queries the all GSI (US2)."""
+
+    def test_returns_open_and_terminal_excludes_non_incident(self, listing_session):
+        store = _listing_store(listing_session)
+        base = datetime(2026, 6, 1, tzinfo=_UTC)
+        store.put_incident(_incident_state("all-open", base, IncidentState.TRIGGERED))
+        store.put_incident(
+            _incident_state("all-term", base + timedelta(hours=1), IncidentState.CLOSED)
+        )
+        DynamoContactStore(table_name=ISO_TABLE, boto3_session=listing_session).put_contact(
+            Contact(contact_id="c2", name="Sam", email="sam@example.com")
+        )
+        ids = {i.correlation_id for i in store.list_incidents()}
+        assert ids == {"all-open", "all-term"}
+
+    def test_includes_synthetic(self, listing_session):
+        store = _listing_store(listing_session)
+        base = datetime(2026, 6, 2, tzinfo=_UTC)
+        store.put_incident(
+            _incident_state("syn-1", base, IncidentState.TRIGGERED, synthetic=True)
+        )
+        result = store.list_incidents()
+        assert [i.correlation_id for i in result] == ["syn-1"]
+        assert result[0].synthetic is True
+
+    def test_pagination_returns_full_set(self, listing_session, monkeypatch):
+        store = _listing_store(listing_session)
+        base = datetime(2026, 6, 3, tzinfo=_UTC)
+        for n in range(20):
+            state = IncidentState.TRIGGERED if n % 2 else IncidentState.CLOSED
+            store.put_incident(_incident_state(f"a-{n:02d}", base + timedelta(minutes=n), state))
+        real_query = store._table.query
+
+        def paged_query(**kwargs):
+            kwargs["Limit"] = 4
+            return real_query(**kwargs)
+
+        monkeypatch.setattr(store._table, "query", paged_query)
+        assert len(store.list_incidents()) == 20
