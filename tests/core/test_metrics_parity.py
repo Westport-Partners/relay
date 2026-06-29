@@ -35,10 +35,10 @@ from relay.core.model import (
 _NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(_NODE is None, reason="node not available")
 
-_MODULE = (
-    Path(__file__).resolve().parent.parent
-    / "src/relay/hub/dashboard_modules/metrics-compute.js"
+_REPO_ROOT = next(
+    p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()
 )
+_MODULE = _REPO_ROOT / "src/relay/hub/dashboard_modules/metrics-compute.js"
 
 T0 = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)
 

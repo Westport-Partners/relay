@@ -30,7 +30,10 @@ from relay.config.schema import (
     RoutingConfig,
 )
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+_REPO_ROOT = next(
+    p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()
+)
+CONFIG_DIR = _REPO_ROOT / "config"
 
 
 def _load(name: str) -> dict[str, Any]:

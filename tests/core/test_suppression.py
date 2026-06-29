@@ -27,7 +27,7 @@ from relay.config.schema import (
     SuppressionRule,
 )
 from relay.core.model import Incident, Severity, SignalSource
-from tests.test_node_handler import (
+from tests.node.test_node_handler import (
     ESCALATION_YAML,
     FakeAlarmSource,
     FakeDispatcher,
