@@ -158,6 +158,6 @@ These mirror the env vars RelayComputeStack sets on the Fargate container:
   export AWS_REGION=${AWS_REGION}
 
 To tear these down later: scripts/relay-down.sh does NOT remove them (it only
-scales ECS). Delete by hand with aws dynamodb delete-table / sns delete-topic /
-sqs delete-queue / events delete-rule if you need a clean slate.
+scales ECS). Run scripts/relay-teardown-cli.sh (same RELAY_TEAM_NAME) for a
+clean slate — it deletes these resources in dependency-safe order.
 SUMMARY
