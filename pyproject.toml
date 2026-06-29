@@ -29,9 +29,14 @@ demo = [
     "faker>=30.0",
     "httpx>=0.27",
 ]
+infra = [
+    "aws-cdk-lib>=2.260.0",
+    "constructs>=10.6.0",
+]
 dev = [
     "relay-westport[serve]",
     "relay-westport[demo]",
+    "relay-westport[infra]",
     "pytest>=8.0",
     "ruff>=0.4",
     "mypy>=1.10",

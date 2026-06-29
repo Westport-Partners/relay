@@ -122,7 +122,7 @@ every DynamoDB client routes to the local endpoint. No code branches in the stor
 ## Prerequisites
 
 - Python 3.12+, Node.js 18+ (CDK CLI), `npm i -g aws-cdk` (or the bundled `npx`)
-- `pip install aws-cdk-lib constructs` in the venv
+- `pip install -e ".[infra]"` in the venv (bundled into `.[dev]`)
 - AWS credentials for the target account
 
 ## Useful CDK commands
