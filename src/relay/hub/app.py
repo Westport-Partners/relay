@@ -1314,9 +1314,14 @@ class SQSConsumer:
                         ReceiptHandle=receipt_handle,
                     )
                 except Exception:
-                    # TODO: add dead-letter queue routing for poison messages.
+                    # Do NOT delete: the message stays un-acked and becomes
+                    # visible again after the visibility timeout. The queue's
+                    # redrive policy (max_receive_count=5, see RelayComputeStack)
+                    # moves it to the DLQ after repeated failures, so a poison
+                    # message cannot redrive forever or starve the consumer.
                     logger.error(
-                        "Failed to process SQS message %s; leaving in queue for DLQ",
+                        "Failed to process SQS message %s; leaving un-acked for "
+                        "redrive to DLQ after max receives",
                         message.get("MessageId"),
                         exc_info=True,
                     )

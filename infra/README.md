@@ -5,7 +5,7 @@ AWS CDK (Python, v2) infrastructure for Relay. Relay deploys as **independent, s
 | Stack | What it owns | Deploy cadence |
 |---|---|---|
 | **RelayDataStack** | DynamoDB table (+ `incident-status-index` GSI, stream) + paging SNS topics | Once; RETAIN |
-| **RelayComputeStack** | VPC (or BYOV), ECS cluster, always-on Fargate service + ALB, CloudWatch-alarm EventBridge rule → SQS ingress + DLQ, task + exec IAM roles | Every image change |
+| **RelayComputeStack** | VPC (or BYOV), ECS cluster, always-on Fargate service + ALB, CloudWatch-alarm EventBridge rule → SQS ingress + DLQ (+ DLQ-depth alarm → paging topic), task + exec IAM roles | Every image change |
 | **RelayFederationStack** | (federated-hub only) the `relay-hub` EventBridge bus + resource policy + ingest rule | Rarely |
 
 There are two **topologies**, selected by `relay:role`:

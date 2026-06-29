@@ -71,6 +71,12 @@ from aws_cdk import (
     aws_certificatemanager as acm,
 )
 from aws_cdk import (
+    aws_cloudwatch as cloudwatch,
+)
+from aws_cdk import (
+    aws_cloudwatch_actions as cw_actions,
+)
+from aws_cdk import (
     aws_dynamodb as dynamodb,
 )
 from aws_cdk import (
@@ -498,6 +504,38 @@ class RelayComputeStack(Stack):
         )
         if not byor_mode:
             ingest_queue.grant_consume_messages(task_role)
+
+        # Poison-message visibility (issue #21): a message that fails to process
+        # 5 times is redriven to the DLQ by the policy above. That move is silent
+        # — without an alarm an operator never learns ingestion is dropping
+        # events. Alarm on any message landing in the DLQ and notify out-of-band
+        # via the team paging topic (NOT back through the ingest pipeline, which
+        # is exactly what's broken when the DLQ fills). Self-contained per
+        # account: each deployment watches its own DLQ, so a federated hub never
+        # needs to know about — or reach into — any team account's queues.
+        dlq_paging_topic = self._import_topic(
+            "RelayDLQPagingTopic", paging_topic_arn
+        )
+        dlq_depth_alarm = cloudwatch.Alarm(
+            self,
+            "RelayHubIngestDLQDepthAlarm",
+            alarm_name="relay-hub-ingest-dlq-not-empty",
+            alarm_description=(
+                "Relay ingest DLQ has poison messages — events failed to process "
+                "5x and were redriven. Investigate the un-parseable message(s)."
+            ),
+            metric=ingest_dlq.metric_approximate_number_of_messages_visible(
+                period=Duration.minutes(5),
+                statistic="Maximum",
+            ),
+            threshold=0,
+            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+            evaluation_periods=1,
+            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+        )
+        dlq_depth_alarm.add_alarm_action(
+            cw_actions.SnsAction(dlq_paging_topic)
+        )
 
         # The account-local CloudWatch alarm rule (zero-config seam): every alarm
         # state change → ALARM is delivered to the ingest queue. The container
