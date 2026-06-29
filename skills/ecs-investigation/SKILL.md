@@ -49,6 +49,21 @@ The probe prints these sections (each isolated — one failing never aborts the 
 6. **ALB target health** — target group health for the service, with
    `reason`/`description` for unhealthy targets.
 
+## Required IAM permissions
+
+The probe is read-only. The calling principal (the investigation agent's role in the
+team account) needs the actions below. A missing **Required** permission makes the
+probe silently skip that section — output looks like "no results" rather than "denied".
+
+| Action | Required | Used for |
+|--------|----------|----------|
+| `ecs:DescribeServices` | **Yes** | Service status, deployments, events |
+| `ecs:ListClusters` | No | Discover the cluster by app name |
+| `ecs:ListServices` | No | Discover the service within the cluster |
+| `ecs:ListTasks` | No | Find recently stopped tasks |
+| `ecs:DescribeTasks` | No | Stopped-task details and exit codes |
+| `elasticloadbalancing:DescribeTargetHealth` | No | ALB target health for tasks |
+
 ## How to interpret (raw output → hypotheses)
 
 - **`runningCount < desiredCount` + stopped tasks with `OutOfMemory` /

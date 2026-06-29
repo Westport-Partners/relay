@@ -60,6 +60,20 @@ The probe prints these sections (each isolated — one failure never aborts the 
 4. **Route tables** — routes for the target subnets; notes whether a path exists (local, NAT, IGW, TGW, VPC peering, or VPC endpoint).
 5. **VPC endpoints** — interface and gateway endpoints in the VPC; relevant when the dependency is an AWS service reached from a no-NAT private subnet.
 
+## Required IAM permissions
+
+The probe is read-only. The calling principal (the investigation agent's role in the
+team account) needs the actions below. A missing **Required** permission makes the
+probe silently skip that section — output looks like "no results" rather than "denied".
+
+| Action | Required | Used for |
+|--------|----------|----------|
+| `ec2:DescribeSecurityGroups` | **Yes** | Security-group inbound/egress rules |
+| `ec2:DescribeNetworkAcls` | **Yes** | NACL stateless rules per direction |
+| `ec2:DescribeRouteTables` | **Yes** | Routes and default-gateway presence |
+| `ec2:DescribeSubnets` | No | Discover subnets in the VPC |
+| `ec2:DescribeVpcEndpoints` | No | VPC endpoints for AWS-service connectivity |
+
 ## How to interpret (raw output → hypotheses)
 
 - **Target SG has no inbound rule matching the port and source SG / CIDR** →

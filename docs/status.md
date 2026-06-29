@@ -190,6 +190,7 @@ can be re-verified against the repo, not taken on faith.
 | Pure-CLI data-plane provisioning (no CDK/bootstrap) | ✅ | `scripts/relay-provision-cli.sh` | Creates DynamoDB (+GSIs/PITR/TTL/stream), SNS topics, SQS+DLQ, EventBridge alarm rule via plain `aws` calls for the run-locally-on-EC2 evaluation path. |
 | Run-on-EC2 evaluation path documented (no ECS) | ✅ | `docs/local-dev.md` (Run on EC2 against real AWS); `relay.hub.app:main` (`relay-hub` entrypoint) | Two on-ramps: released GHCR container (`docker run`) and plain Python (`pip install -e .[serve]` → `relay-hub`), both `RELAY_RUNTIME=local-aws` against Phase-1 resources. |
 | Preflight: versioned-python probe + AWS_PROFILE + target-aware Docker | ✅ | `scripts/relay-preflight.sh` | Probes `python3.12`/`python3.13` (Amazon Linux trap), warns when `AWS_PROFILE` overrides the instance role, escalates Docker WARN→FAIL when `RELAY_DEPLOY_TARGET=ecs`. |
+| GitLab pipeline usable on first clone (Python 3.12, fail-fast, BYOR/BYOV) | ✅ | `.gitlab-ci.yml` (`python:3.12-bookworm`, `validate-inputs` `.pre` job, `default.tags` runner tag, BYOR/BYOV + `hub_image_uri` inputs, current `team`/`federated-hub` topology); `scripts/relay-synth.sh` (`image_check=false`); `scripts/relay-context.sh` (BYOR/BYOV env passthrough) | Base image now provides Python 3.12 (was 3.11 → pip rejected); synth no longer needs a pre-built image; required inputs fail fast with a clear message; every job is pinned to the in-account runner tag. |
 
 ### 12. Integrations & config
 

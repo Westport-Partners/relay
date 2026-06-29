@@ -62,6 +62,19 @@ The probe prints these sections (each isolated — one failing never aborts the 
    `?ERROR ?Error ?error ?Exception ?timeout ?5xx`, last ~20 lines with
    timestamps. Capped to keep output scannable.
 
+## Required IAM permissions
+
+The probe is read-only. The calling principal (the investigation agent's role in the
+team account) needs the actions below. A missing **Required** permission makes the
+probe silently skip that section — output looks like "no results" rather than "denied".
+
+| Action | Required | Used for |
+|--------|----------|----------|
+| `cloudwatch:DescribeAlarms` | **Yes** | Firing alarms and alarm details |
+| `cloudwatch:GetMetricStatistics` | **Yes** | Metric datapoints over the lookback window |
+| `logs:DescribeLogGroups` | No | Discover the log group by app name |
+| `logs:FilterLogEvents` | No | Error-pattern log lines in the window |
+
 ## How to interpret (raw output → hypotheses)
 
 ### Metric trend (section 3)

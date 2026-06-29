@@ -206,6 +206,17 @@ and one task role + one execution role). There is no Lambda and no EventBridge S
 }
 ```
 
+> **Why the `Get*`/`Describe*` actions are not optional.** CloudFormation reads a
+> resource back immediately after creating it to confirm it exists and to populate
+> attributes — e.g. it calls `sns:GetTopicAttributes` right after `sns:CreateTopic`,
+> and `sqs:GetQueueAttributes` right after `sqs:CreateQueue`. If the runner role can
+> create but not read a resource type, the deploy fails with an opaque AccessDenied
+> on the *Get* call even though creation succeeded. This matters most when deploying
+> via `aws cloudformation deploy` directly (the locked-down `iam:PassRole` workaround
+> in [deploy.md](../docs/deploy.md#locked-down-accounts-iampassrole-denied)), where
+> the runner role — not a CDK execution role — makes every API call. Keep the paired
+> `Create*` + `Get*`/`Describe*` actions together for each service above.
+
 ---
 
 ## Federated-hub deploy policy

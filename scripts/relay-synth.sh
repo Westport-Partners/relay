@@ -22,7 +22,13 @@ cd "${RELAY_ROOT}"
 echo "Synthesizing: ${RELAY_STACKS}" >&2
 # Synthesize to cdk.out (works for one OR many stacks; multi-stack synth does
 # not echo a template to stdout, so we rely on the cdk.out artifacts).
+# Always pass relay:image_check=false: synth makes NO AWS writes and is a
+# validation step, so the compute stack's real-image guard must not fail a
+# dry-run synth before any image has been built (the common first-use case —
+# every team synths before they have an image). The guard still fires at deploy
+# time, where it matters. relay-deploy.sh re-synthesizes fresh, so a guard-free
+# synth artifact can never leak a placeholder into a deploy.
 # shellcheck disable=SC2086
-relay_cdk synth ${RELAY_STACKS} ${RELAY_CDK_CONTEXT} >/dev/null
+relay_cdk synth ${RELAY_STACKS} ${RELAY_CDK_CONTEXT} -c relay:image_check=false >/dev/null
 echo "Synthesized templates in ${RELAY_ROOT}/cdk.out:" >&2
 ls -1 "${RELAY_ROOT}"/cdk.out/*.template.json >&2 2>/dev/null || true

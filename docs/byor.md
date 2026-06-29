@@ -34,6 +34,13 @@ Pass two CDK context keys and the compute stack imports the roles instead of cre
 
 BYOR activates when **both** are supplied. The stack creates zero IAM roles.
 
+> **One role for both is fine.** If your organization pre-provisions a single service
+> role that covers both ECS task and execution responsibilities, pass the **same ARN**
+> for both context keys. The stack imports it twice under separate CDK construct IDs
+> (`RelayHubTaskRole` and `RelayHubExecutionRole`) — valid, and it results in one role
+> carrying both inline policies. In that case apply **both** emitted inline policies
+> (`ByorTaskRoleInlinePolicy` + `ByorExecutionRoleInlinePolicy`) to that single role.
+
 ### What the stack emits in BYOR mode
 
 Because the stack cannot modify the roles itself, it emits the exact policy JSON you need
