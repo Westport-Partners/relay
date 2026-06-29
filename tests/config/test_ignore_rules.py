@@ -447,6 +447,39 @@ ignore:
 
 
 # ---------------------------------------------------------------------------
+# 3b. Shipped default ignore rules (the real config files)
+# ---------------------------------------------------------------------------
+
+
+def test_shipped_config_drops_aws_autoscaling_alarms():
+    """The shipped routing template default-ignores AWS autoscaling alarms so a
+    fresh install never pages on its own (or the monitored account's) scaling
+    activity — including Relay's own hub service scaling down when idle.
+
+    The alarm name is the real shape AWS generates for an ECS target-tracking
+    policy, which also contains a "/" (the tile-detail route must handle that).
+
+    Asserts on ``routing.example.yaml`` (the version-controlled artifact); the
+    live ``routing.yaml`` is gitignored and absent in a fresh checkout.
+    """
+    cfg = RoutingConfig.model_validate(
+        yaml.safe_load(open("config/routing.example.yaml"))
+    )
+    assert cfg.ignore is not None and cfg.ignore.enabled is True
+
+    real_alarm = (
+        "TargetTracking-service/relay-hub/"
+        "relay-hub-AlarmLow-9b855cda-34a1-4b5b-ba84-5896b06c9fff"
+    )
+    matched = cfg.ignore.first_match(_incident(alarm_name=real_alarm))
+    assert matched is not None
+    assert matched.name == "aws-autoscaling-target-tracking"
+
+    # A genuine app alarm must still pass through (not over-broad).
+    assert cfg.ignore.first_match(_incident(alarm_name="prod-checkout-5xx")) is None
+
+
+# ---------------------------------------------------------------------------
 # 4. DynamoIgnoreRuleStore (moto)
 # ---------------------------------------------------------------------------
 

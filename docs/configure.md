@@ -288,6 +288,8 @@ ignore:
 
 > The Ignore action in the incident drawer pre-fills a rule from the open incident (precise match by default). You can broaden it to `alarm_name_prefix` or whole-app/env before saving. Creating the rule also auto-resolves the triggering incident with a "ignored" timeline event.
 
+**Shipped default.** The stock `routing.yaml` / `routing.example.yaml` ship one default ignore rule, `aws-autoscaling-target-tracking` (`alarm_name_prefix: "TargetTracking-"`). AWS auto-creates target-tracking alarms to drive autoscaling; they flip to `ALARM` as normal scaling control-loop behavior — including Relay's own hub service scaling down when idle — and are never a real incident. The default keeps a fresh install from paging on its own (and the monitored account's) autoscaling activity. Remove it via the Rules screen if you do want those alarms.
+
 ---
 
 ## Config source

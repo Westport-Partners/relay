@@ -189,7 +189,7 @@ def _schedule_to_stored(sched):
 def test_tile_detail_serves_snapshot_when_no_schedule_store(monkeypatch):
     # Federated Hub: no local schedule → the pushed snapshot is returned as-is.
     c = _client_tile(monkeypatch, _tile(), schedule_store=None)
-    r = c.get("/fleet/123456789012/checkout-api")
+    r = c.get("/fleet/tile?account_id=123456789012&app_name=checkout-api")
     assert r.status_code == 200
     body = r.json()
     assert body["metadata"]["owner"] == "team-pay"
@@ -221,7 +221,7 @@ def test_tile_detail_fills_oncall_live_on_team_hub(monkeypatch):
         monkeypatch, _tile(), schedule_store=store,
         contacts=[Contact(contact_id="cnt-live", name="Live Person", email="live@x.com")],
     )
-    r = c.get("/fleet/123456789012/checkout-api")
+    r = c.get("/fleet/tile?account_id=123456789012&app_name=checkout-api")
     assert r.status_code == 200
     oc = r.json()["on_call"]
     # Live resolution wins over the pushed snapshot.
@@ -231,4 +231,17 @@ def test_tile_detail_fills_oncall_live_on_team_hub(monkeypatch):
 
 def test_tile_detail_404_for_unknown(monkeypatch):
     c = _client_tile(monkeypatch, _tile(), schedule_store=None)
-    assert c.get("/fleet/000/ghost").status_code == 404
+    assert c.get("/fleet/tile?account_id=000&app_name=ghost").status_code == 404
+
+
+def test_tile_detail_resolves_app_name_with_slash(monkeypatch):
+    # An app_name derived from an ECS autoscaling alarm contains a "/", which a
+    # path-segment route could never match. Query params represent it cleanly.
+    slashed = _tile(account_id="652107191239", app_name="TargetTracking-service/relay")
+    c = _client_tile(monkeypatch, slashed, schedule_store=None)
+    r = c.get(
+        "/fleet/tile",
+        params={"account_id": "652107191239", "app_name": "TargetTracking-service/relay"},
+    )
+    assert r.status_code == 200
+    assert r.json()["app_name"] == "TargetTracking-service/relay"
