@@ -8,6 +8,10 @@
 # It does NOT touch any IAM/role/VPC resources and creates nothing — purely a
 # desired-count change, so it's safe in locked-down accounts.
 #
+# To fully remove CLI-provisioned data-plane resources (table, topics, queues,
+# alarm rule), use scripts/relay-teardown-cli.sh instead — this script leaves
+# them intact.
+#
 # Usage:
 #   ./scripts/relay-down.sh
 #

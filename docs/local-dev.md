@@ -190,6 +190,18 @@ CDK instead in an account that denies `iam:PassRole`, see
 For a native Terraform equivalent of this data plane, see
 [deploy.md → Terraform / Terragrunt path](deploy.md#terraform--terragrunt-path-native-no-cdk).)
 
+> **Enterprise accounts — central security alarm noise.** If your AWS account is
+> governed by a central security team, you may see a flood of incidents within
+> minutes of install from alarms like `IAMPolicyChanges`, `UnauthorizedAPICalls`,
+> or `RootAccountUsage`. These are CloudTrail metric alarms installed account-wide
+> by a CloudFormation **StackSet** (CSPM / Security Hub / CIS tooling) — they fire
+> on routine admin activity, including the activity of installing Relay. They are
+> working as designed and are **not** application incidents. Suppress them with an
+> ignore rule scoped to the StackSet's alarm-name prefix (find it on the
+> Maintenance → Ignore Rules screen, or in `config/routing.yaml` under `ignore:` —
+> see the commented CSPM block in `config/routing.example.yaml`). `relay-preflight.sh`
+> scans for `StackSet-`-prefixed alarms and warns you if any are present.
+
 ### Phase 2, on-ramp A — run the released container (lowest friction)
 
 The Hub image is published to `ghcr.io/westport-partners/relay`. Pull it and run
@@ -256,6 +268,48 @@ pipeline end-to-end, inject an alarm over HTTP (`RELAY_ALLOW_INGEST=true` opens
 
 The matching tile turns red and an incident appears on `/incidents`. Real SNS
 paging fires when `RELAY_SNS_TOPIC_ARN` is set (as above).
+
+### Tearing down / starting over
+
+`relay-down.sh` only scales the ECS service to zero — it deliberately leaves the
+data plane intact. To remove the resources `relay-provision-cli.sh` created (clean
+slate after a test, or to re-provision from scratch), run **`relay-teardown-cli.sh`**
+with the same `RELAY_TEAM_NAME`:
+
+```bash
+RELAY_TEAM_NAME=<team> AWS_REGION=us-east-1 ./scripts/relay-teardown-cli.sh
+```
+
+It deletes in dependency-safe order — EventBridge rule → SQS ingest + DLQ → SNS
+paging topics → DynamoDB table last. The DynamoDB table holds durable
+incident/contact/schedule data, so the script prompts for confirmation before
+deleting it (set `RELAY_FORCE=1` to skip the prompt in automation).
+
+### Transitioning from the CLI provisioner to the CDK deploy
+
+The CLI provisioner and `RelayDataStack` create resources with the **same names**
+(`relay-<team>` table, paging topics, ingest queue, alarm rule). `RelayDataStack`
+**creates** these resources — it does not adopt or import pre-existing ones. So if
+you provisioned via the CLI and then deploy `RelayDataStack` on top, CloudFormation
+fails with:
+
+```
+Resource already exists: relay-<team>
+```
+
+Two supported paths, depending on whether you want to keep the evaluation data:
+
+- **Discard and redeploy (clean cutover):** run `relay-teardown-cli.sh` to remove
+  the CLI resources, then deploy `RelayDataStack`. The CLI path is for evaluation —
+  if you have no data worth keeping, this is the simplest transition.
+- **Keep the data:** the DynamoDB table is `RemovalPolicy.RETAIN`, so you can leave
+  the CLI-provisioned table in place and run only `RelayComputeStack` against it
+  (point it at the existing table name). Do **not** deploy `RelayDataStack` over the
+  existing resources — it will fail on the name clash.
+
+> CloudFormation resource import (`cdk import`) of the existing table into
+> `RelayDataStack` is possible but not currently scripted; treat it as an advanced,
+> manual operation.
 
 ---
 

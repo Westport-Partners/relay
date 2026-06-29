@@ -452,6 +452,41 @@ else
 fi
 
 # ===========================================================================
+# CHECK 5 — central security StackSet alarm noise
+# ===========================================================================
+# Enterprise accounts governed by a central security team carry account-wide
+# CloudTrail metric alarms (IAMPolicyChanges, UnauthorizedAPICalls, …) installed
+# via a CloudFormation StackSet. They fire on routine admin activity — including
+# a Relay install — and surface as incidents the operator cannot resolve. Warn
+# up front and point at the ignore-rule fix. Best-effort: a denied
+# cloudwatch:DescribeAlarms just skips the check (no failure).
+_progress ""
+_progress "--- 5. Central security alarm noise (StackSet-) ---"
+
+if [ -n "${_AWS_REGION_RESOLVED}" ]; then
+  _stackset_alarm_count="$(aws cloudwatch describe-alarms \
+        --alarm-name-prefix "StackSet-" \
+        --region "${_AWS_REGION_RESOLVED}" \
+        --query 'length(MetricAlarms)' --output text 2>/dev/null || echo "skip")"
+  if [ "${_stackset_alarm_count}" = "skip" ]; then
+    _record WARN "cspm-alarms" "could not list CloudWatch alarms (cloudwatch:DescribeAlarms denied or unavailable)" \
+      "If this account has central security alarms, add an ignore rule for their prefix in config/routing.yaml (see config/routing.example.yaml)."
+    _progress "  WARN: skipped StackSet alarm scan (DescribeAlarms denied)"
+  elif [ "${_stackset_alarm_count:-0}" -gt 0 ] 2>/dev/null; then
+    _record WARN "cspm-alarms" "${_stackset_alarm_count} StackSet-prefixed CloudWatch alarm(s) found — these will surface as incidents" \
+      "These are central security controls, not application incidents. Add an ignore rule scoped to their prefix in config/routing.yaml (see the CSPM block in config/routing.example.yaml)."
+    _progress "  WARN: ${_stackset_alarm_count} StackSet- alarms may create noise — add an ignore rule"
+  else
+    _record PASS "cspm-alarms" "no StackSet-prefixed CloudWatch alarms found"
+    _progress "  no StackSet- alarms found"
+  fi
+else
+  _record WARN "cspm-alarms" "skipped (no region resolved — cannot query CloudWatch)" \
+    "set AWS_REGION and re-run to scan for central security alarm noise"
+  _progress "  WARN: skipped StackSet alarm scan (no region)"
+fi
+
+# ===========================================================================
 # Tally
 # ===========================================================================
 _n_pass=0
