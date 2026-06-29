@@ -95,18 +95,18 @@ class TestGitLabCreate:
         body = json.loads(fake.calls[0]["body"])
         assert str(severity).lower() in body["labels"]
 
-    def test_http_error_returns_empty_string(self, incident: Incident) -> None:
-        """403 response causes create_incident to return empty string."""
-        fake = FakeHttp(status=403, response={})
-        sink = GitLabSink(_gitlab_config(), http_fn=fake)
-
-        result = sink.create_incident(incident)
-
-        assert result == ""
-
-    def test_exception_swallowed(self, incident: Incident) -> None:
-        """Exception from http_fn is swallowed; empty string is returned."""
-        fake = FakeHttp(raise_exc=ConnectionError("refused"))
+    @pytest.mark.parametrize(
+        "fake",
+        [
+            FakeHttp(status=403, response={}),
+            FakeHttp(raise_exc=ConnectionError("refused")),
+        ],
+        ids=["http_error_403", "exception_swallowed"],
+    )
+    def test_create_returns_empty_on_failure(
+        self, incident: Incident, fake: FakeHttp
+    ) -> None:
+        """403 response or exception causes create_incident to return empty string."""
         sink = GitLabSink(_gitlab_config(), http_fn=fake)
 
         result = sink.create_incident(incident)
@@ -127,12 +127,22 @@ class TestGitLabUpdate:
         assert call["method"] == "PUT"
         assert "/issues/5" in call["url"]
 
-    def test_update_exception_swallowed(self, incident: Incident) -> None:
-        """Exception during update is swallowed."""
-        fake = FakeHttp(raise_exc=RuntimeError("timeout"))
+    @pytest.mark.parametrize(
+        ("exc", "operation"),
+        [
+            (RuntimeError("timeout"), "update_incident"),
+            (OSError("conn refused"), "close_incident"),
+        ],
+        ids=["update_exception_swallowed", "close_exception_swallowed"],
+    )
+    def test_mutating_exception_swallowed(
+        self, incident: Incident, exc: Exception, operation: str
+    ) -> None:
+        """Exception from http_fn during update or close is swallowed without raising."""
+        fake = FakeHttp(raise_exc=exc)
         sink = GitLabSink(_gitlab_config(), http_fn=fake)
 
-        sink.update_incident("5", incident)
+        getattr(sink, operation)("5", incident)
 
 
 class TestGitLabClose:
@@ -147,13 +157,6 @@ class TestGitLabClose:
         assert put_calls, "Expected at least one PUT call"
         put_body = json.loads(put_calls[0]["body"])
         assert put_body.get("state_event") == "close"
-
-    def test_close_exception_swallowed(self, incident: Incident) -> None:
-        """Exception during close is swallowed."""
-        fake = FakeHttp(raise_exc=OSError("conn refused"))
-        sink = GitLabSink(_gitlab_config(), http_fn=fake)
-
-        sink.close_incident("5", incident)
 
 
 class TestGitLabConfig:

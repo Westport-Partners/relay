@@ -99,9 +99,27 @@ def _client_settings(monkeypatch, settings=None):
     return TestClient(app_obj.build_fastapi_app())
 
 
-def test_settings_get_unconfigured():
+# ---------------------------------------------------------------------------
+# GET /settings — unconfigured defaults
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        pytest.param("teams_webhook_configured", id="teams"),
+        pytest.param("gitlab_token_configured", id="gitlab"),
+        pytest.param("servicenow_configured", id="servicenow"),
+    ],
+)
+def test_settings_get_unconfigured(key):
     c = _client_settings(None)
-    assert c.get("/settings").json()["teams_webhook_configured"] is False
+    assert c.get("/settings").json()[key] is False
+
+
+# ---------------------------------------------------------------------------
+# SET endpoint tests — kept separate because masking/validation rules differ
+# ---------------------------------------------------------------------------
 
 
 def test_set_teams_webhook_requires_auth_and_https(monkeypatch):
@@ -123,20 +141,6 @@ def test_set_teams_webhook_requires_auth_and_https(monkeypatch):
         "https://x.webhook.office.com/abc123def456") <= 30
 
 
-def test_clear_teams_webhook(monkeypatch):
-    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
-    s = _FakeSettings()
-    s.set("teams_webhook_url", "https://x.webhook.office.com/y")
-    c = _client_settings(monkeypatch, settings=s)
-    assert c.put("/settings/teams-webhook", json={"webhook_url": ""}).json()["configured"] is False
-    assert c.get("/settings").json()["teams_webhook_configured"] is False
-
-
-def test_settings_get_gitlab_unconfigured():
-    c = _client_settings(None)
-    assert c.get("/settings").json()["gitlab_token_configured"] is False
-
-
 def test_set_gitlab_token_requires_auth_then_stores_masked(monkeypatch):
     c = _client_settings(monkeypatch)
     # unauth
@@ -150,26 +154,6 @@ def test_set_gitlab_token_requires_auth_then_stores_masked(monkeypatch):
     assert body["gitlab_token_configured"] is True
     assert body["gitlab_token_masked"] == "…1234"
     assert "secrettoken" not in body["gitlab_token_masked"]
-
-
-def test_clear_gitlab_token(monkeypatch):
-    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
-    s = _FakeSettings()
-    s.set("gitlab_token", "glpat-secrettoken1234")
-    c = _client_settings(monkeypatch, settings=s)
-    assert c.put("/settings/gitlab-token", json={"token": ""}).json()["configured"] is False
-    assert c.get("/settings").json()["gitlab_token_configured"] is False
-
-
-def test_gitlab_token_test_404_when_unconfigured(monkeypatch):
-    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
-    c = _client_settings(monkeypatch)
-    assert c.post("/settings/gitlab-token/test").status_code == 404
-
-
-def test_settings_get_servicenow_unconfigured():
-    c = _client_settings(None)
-    assert c.get("/settings").json()["servicenow_configured"] is False
 
 
 def test_set_servicenow_credentials_requires_auth_then_stores_masked(monkeypatch):
@@ -200,17 +184,62 @@ def test_set_servicenow_requires_instance_and_password(monkeypatch):
                  json={"username": "u"}).status_code == 400
 
 
-def test_clear_servicenow_credentials(monkeypatch):
+# ---------------------------------------------------------------------------
+# CLEAR endpoint tests — shape-identical across integrations
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "store_keys, endpoint, clear_payload, configured_key",
+    [
+        pytest.param(
+            {"teams_webhook_url": "https://x.webhook.office.com/y"},
+            "/settings/teams-webhook",
+            {"webhook_url": ""},
+            "teams_webhook_configured",
+            id="teams",
+        ),
+        pytest.param(
+            {"gitlab_token": "glpat-secrettoken1234"},
+            "/settings/gitlab-token",
+            {"token": ""},
+            "gitlab_token_configured",
+            id="gitlab",
+        ),
+        pytest.param(
+            {
+                "servicenow_instance_url": "https://dev123.service-now.com",
+                "servicenow_username": "relay_api",
+                "servicenow_password": "s3cretpw7890",
+            },
+            "/settings/servicenow-credentials",
+            {"instance_url": "", "username": "", "password": ""},
+            "servicenow_configured",
+            id="servicenow",
+        ),
+    ],
+)
+def test_clear_integration_setting(
+    monkeypatch, store_keys, endpoint, clear_payload, configured_key
+):
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
     s = _FakeSettings()
-    s.set("servicenow_instance_url", "https://dev123.service-now.com")
-    s.set("servicenow_username", "relay_api")
-    s.set("servicenow_password", "s3cretpw7890")
+    for k, v in store_keys.items():
+        s.set(k, v)
     c = _client_settings(monkeypatch, settings=s)
-    assert c.put("/settings/servicenow-credentials",
-                 json={"instance_url": "", "username": "", "password": ""}
-                 ).json()["configured"] is False
-    assert c.get("/settings").json()["servicenow_configured"] is False
+    assert c.put(endpoint, json=clear_payload).json()["configured"] is False
+    assert c.get("/settings").json()[configured_key] is False
+
+
+# ---------------------------------------------------------------------------
+# Test-connection 404 when unconfigured — kept separate (different endpoints)
+# ---------------------------------------------------------------------------
+
+
+def test_gitlab_token_test_404_when_unconfigured(monkeypatch):
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    c = _client_settings(monkeypatch)
+    assert c.post("/settings/gitlab-token/test").status_code == 404
 
 
 def test_servicenow_test_404_when_unconfigured(monkeypatch):
@@ -224,27 +253,31 @@ def test_servicenow_test_404_when_unconfigured(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_integrations_locked_gitlab_save_returns_403(monkeypatch):
-    """PUT /settings/gitlab-token with a non-empty token is blocked when locked."""
+@pytest.mark.parametrize(
+    "endpoint, payload",
+    [
+        pytest.param(
+            "/settings/gitlab-token",
+            {"token": "glpat-secrettoken1234"},
+            id="gitlab",
+        ),
+        pytest.param(
+            "/settings/servicenow-credentials",
+            {
+                "instance_url": "https://dev123.service-now.com",
+                "username": "relay_api",
+                "password": "s3cretpw7890",
+            },
+            id="servicenow",
+        ),
+    ],
+)
+def test_integrations_locked_save_returns_403(monkeypatch, endpoint, payload):
+    """PUT with a non-empty payload is blocked when integrations are locked."""
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
     monkeypatch.setenv("RELAY_INTEGRATIONS_LOCKED", "true")
     c = _client_settings(monkeypatch)
-    r = c.put("/settings/gitlab-token", json={"token": "glpat-secrettoken1234"})
-    assert r.status_code == 403
-    assert "locked" in r.json()["detail"].lower()
-
-
-def test_integrations_locked_servicenow_save_returns_403(monkeypatch):
-    """PUT /settings/servicenow-credentials with non-empty creds is blocked when locked."""
-    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
-    monkeypatch.setenv("RELAY_INTEGRATIONS_LOCKED", "true")
-    c = _client_settings(monkeypatch)
-    creds = {
-        "instance_url": "https://dev123.service-now.com",
-        "username": "relay_api",
-        "password": "s3cretpw7890",
-    }
-    r = c.put("/settings/servicenow-credentials", json=creds)
+    r = c.put(endpoint, json=payload)
     assert r.status_code == 403
     assert "locked" in r.json()["detail"].lower()
 
@@ -261,20 +294,22 @@ def test_integrations_locked_gitlab_clear_still_succeeds(monkeypatch):
     assert r.json()["configured"] is False
 
 
-def test_integrations_locked_config_flag_reported_in_config(monkeypatch):
-    """GET /config includes features.integrations_locked == true when the flag is set."""
-    monkeypatch.setenv("RELAY_INTEGRATIONS_LOCKED", "true")
+@pytest.mark.parametrize(
+    "locked_env, expected",
+    [
+        pytest.param("true", True, id="flag_set"),
+        pytest.param(None, False, id="flag_unset"),
+    ],
+)
+def test_integrations_locked_config_flag(monkeypatch, locked_env, expected):
+    """GET /config features.integrations_locked reflects the env flag."""
+    if locked_env is not None:
+        monkeypatch.setenv("RELAY_INTEGRATIONS_LOCKED", locked_env)
+    else:
+        monkeypatch.delenv("RELAY_INTEGRATIONS_LOCKED", raising=False)
     c = _client_settings(monkeypatch)
     body = c.get("/config").json()
-    assert body["features"]["integrations_locked"] is True
-
-
-def test_integrations_locked_false_by_default(monkeypatch):
-    """GET /config features.integrations_locked is false when the flag is unset."""
-    monkeypatch.delenv("RELAY_INTEGRATIONS_LOCKED", raising=False)
-    c = _client_settings(monkeypatch)
-    body = c.get("/config").json()
-    assert body["features"]["integrations_locked"] is False
+    assert body["features"]["integrations_locked"] is expected
 
 
 def test_teams_webhook_notifier_builds_dual_payload():

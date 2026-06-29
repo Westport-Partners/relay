@@ -138,35 +138,21 @@ class TestLivenessDerivation:
     def test_never_seen_is_unknown(self):
         assert liveness_from_heartbeat(None) == Liveness.UNKNOWN
 
-    def test_fresh_heartbeat_is_live(self, clock):
+    @pytest.mark.parametrize(
+        ("elapsed", "expected_liveness"),
+        [
+            pytest.param(60,   Liveness.LIVE,  id="fresh_heartbeat_is_live"),
+            pytest.param(120,  Liveness.LIVE,  id="at_2x_boundary_is_live"),
+            pytest.param(121,  Liveness.STALE, id="just_past_2x_is_stale"),
+            pytest.param(300,  Liveness.STALE, id="at_5x_boundary_is_stale"),
+            pytest.param(301,  Liveness.LOST,  id="just_past_5x_is_lost"),
+            pytest.param(3600, Liveness.LOST,  id="long_silence_is_lost"),
+        ],
+    )
+    def test_liveness_boundary(self, clock, elapsed, expected_liveness):
         hb = clock()
-        clock.advance(60)  # exactly 1× cadence — still live (≤2× = 120s)
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.LIVE
-
-    def test_at_2x_boundary_is_live(self, clock):
-        hb = clock()
-        clock.advance(120)  # exactly 2× cadence — boundary, still live
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.LIVE
-
-    def test_just_past_2x_is_stale(self, clock):
-        hb = clock()
-        clock.advance(121)  # 2×+1 → stale
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.STALE
-
-    def test_at_5x_boundary_is_stale(self, clock):
-        hb = clock()
-        clock.advance(300)  # exactly 5× cadence — boundary, still stale
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.STALE
-
-    def test_just_past_5x_is_lost(self, clock):
-        hb = clock()
-        clock.advance(301)  # >5× → lost
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.LOST
-
-    def test_long_silence_is_lost(self, clock):
-        hb = clock()
-        clock.advance(3600)  # 1 hour → lost
-        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == Liveness.LOST
+        clock.advance(elapsed)
+        assert liveness_from_heartbeat(hb, cadence_seconds=DEFAULT_CADENCE_SECONDS, clock=clock) == expected_liveness
 
     def test_liveness_progression_live_to_stale_to_lost(self, clock):
         hb = clock()
@@ -190,58 +176,92 @@ class TestLivenessDerivation:
 
 
 class TestWorstOf:
-    # --- red conditions ---
-    def test_lost_liveness_is_red(self):
-        assert worst_of(Liveness.LOST) == "red"
-
-    def test_lost_liveness_with_no_incidents_is_red(self):
-        assert worst_of(Liveness.LOST, open_incidents=0) == "red"
-
-    def test_live_sev1_is_red(self):
-        assert worst_of(Liveness.LIVE, open_incidents=1, worst_severity=Severity.SEV1) == "red"
-
-    def test_live_sev2_is_red(self):
-        assert worst_of(Liveness.LIVE, open_incidents=1, worst_severity=Severity.SEV2) == "red"
-
-    def test_stale_sev1_is_red(self):
-        # liveness==lost wins over stale, but we test that SEV1 independently forces red.
-        assert worst_of(Liveness.STALE, open_incidents=1, worst_severity=Severity.SEV1) == "red"
-
-    # --- degraded conditions ---
-    def test_stale_no_incidents_is_degraded(self):
-        assert worst_of(Liveness.STALE, open_incidents=0) == "degraded"
-
-    def test_live_sev3_is_degraded(self):
-        assert worst_of(Liveness.LIVE, open_incidents=1, worst_severity=Severity.SEV3) == "degraded"
-
-    def test_live_sev4_is_degraded(self):
-        assert worst_of(Liveness.LIVE, open_incidents=1, worst_severity=Severity.SEV4) == "degraded"
-
-    def test_live_acked_is_degraded(self):
-        assert worst_of(Liveness.LIVE, open_incidents=1, has_acked=True) == "degraded"
-
-    # --- grey condition ---
-    def test_unknown_no_incidents_is_grey(self):
-        assert worst_of(Liveness.UNKNOWN) == "grey"
-
-    def test_unknown_no_incidents_is_not_red(self):
-        assert worst_of(Liveness.UNKNOWN, open_incidents=0) == "grey"
-
-    # --- green condition ---
-    def test_live_no_incidents_is_green(self):
-        assert worst_of(Liveness.LIVE) == "green"
-
-    def test_live_no_incidents_explicit_is_green(self):
-        assert worst_of(Liveness.LIVE, open_incidents=0, worst_severity=None) == "green"
-
-    # --- unknown with incidents: SEV1 -> red (incident beats unknown liveness for red) ---
-    def test_unknown_sev1_is_red(self):
-        # SEV1/SEV2 → red regardless of liveness being unknown.
-        assert worst_of(Liveness.UNKNOWN, open_incidents=1, worst_severity=Severity.SEV1) == "red"
-
-    def test_unknown_sev3_is_degraded(self):
-        # SEV3 → degraded; unknown liveness → grey — but degraded check runs first.
-        assert worst_of(Liveness.UNKNOWN, open_incidents=1, worst_severity=Severity.SEV3) == "degraded"
+    @pytest.mark.parametrize(
+        ("kwargs", "expected_color"),
+        [
+            # --- red conditions ---
+            pytest.param(
+                {"liveness": Liveness.LOST},
+                "red",
+                id="lost_liveness_is_red",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LOST, "open_incidents": 0},
+                "red",
+                id="lost_liveness_with_no_incidents_is_red",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 1, "worst_severity": Severity.SEV1},
+                "red",
+                id="live_sev1_is_red",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 1, "worst_severity": Severity.SEV2},
+                "red",
+                id="live_sev2_is_red",
+            ),
+            pytest.param(
+                {"liveness": Liveness.STALE, "open_incidents": 1, "worst_severity": Severity.SEV1},
+                "red",
+                id="stale_sev1_is_red",
+            ),
+            pytest.param(
+                {"liveness": Liveness.UNKNOWN, "open_incidents": 1, "worst_severity": Severity.SEV1},
+                "red",
+                id="unknown_sev1_is_red",
+            ),
+            # --- degraded conditions ---
+            pytest.param(
+                {"liveness": Liveness.STALE, "open_incidents": 0},
+                "degraded",
+                id="stale_no_incidents_is_degraded",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 1, "worst_severity": Severity.SEV3},
+                "degraded",
+                id="live_sev3_is_degraded",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 1, "worst_severity": Severity.SEV4},
+                "degraded",
+                id="live_sev4_is_degraded",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 1, "has_acked": True},
+                "degraded",
+                id="live_acked_is_degraded",
+            ),
+            pytest.param(
+                {"liveness": Liveness.UNKNOWN, "open_incidents": 1, "worst_severity": Severity.SEV3},
+                "degraded",
+                id="unknown_sev3_is_degraded",
+            ),
+            # --- grey conditions ---
+            pytest.param(
+                {"liveness": Liveness.UNKNOWN},
+                "grey",
+                id="unknown_no_incidents_is_grey",
+            ),
+            pytest.param(
+                {"liveness": Liveness.UNKNOWN, "open_incidents": 0},
+                "grey",
+                id="unknown_no_incidents_explicit_is_grey",
+            ),
+            # --- green conditions ---
+            pytest.param(
+                {"liveness": Liveness.LIVE},
+                "green",
+                id="live_no_incidents_is_green",
+            ),
+            pytest.param(
+                {"liveness": Liveness.LIVE, "open_incidents": 0, "worst_severity": None},
+                "green",
+                id="live_no_incidents_explicit_is_green",
+            ),
+        ],
+    )
+    def test_worst_of_color(self, kwargs, expected_color):
+        assert worst_of(**kwargs) == expected_color
 
 
 # ===========================================================================

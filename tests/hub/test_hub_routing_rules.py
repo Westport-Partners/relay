@@ -201,25 +201,20 @@ def _clear_auth_env(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_create_routing_rule_requires_auth():
+@pytest.mark.parametrize(
+    "http_method,url_path,body",
+    [
+        pytest.param("post", "/routing-rules", {"escalation_policy_id": "p1", "priority": 10}, id="create_routing_rule_requires_auth"),
+        pytest.param("put", "/routing-rules/some-id", {"priority": 5}, id="update_routing_rule_requires_auth"),
+        pytest.param("delete", "/routing-rules/some-id", None, id="delete_routing_rule_requires_auth"),
+        pytest.param("post", "/incidents/c-123/route", {"escalation_policy_id": "p1"}, id="route_incident_requires_auth"),
+    ],
+)
+def test_writer_gating_requires_auth(http_method, url_path, body):
     c = _client()
-    r = c.post("/routing-rules", json={"escalation_policy_id": "p1", "priority": 10})
+    method = getattr(c, http_method)
+    r = method(url_path, json=body) if body is not None else method(url_path)
     assert r.status_code == 403
-
-
-def test_update_routing_rule_requires_auth():
-    c = _client()
-    assert c.put("/routing-rules/some-id", json={"priority": 5}).status_code == 403
-
-
-def test_delete_routing_rule_requires_auth():
-    c = _client()
-    assert c.delete("/routing-rules/some-id").status_code == 403
-
-
-def test_route_incident_requires_auth():
-    c = _client()
-    assert c.post("/incidents/c-123/route", json={"escalation_policy_id": "p1"}).status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -227,34 +222,21 @@ def test_route_incident_requires_auth():
 # ---------------------------------------------------------------------------
 
 
-def test_create_routing_rule_missing_policy_422(monkeypatch):
+@pytest.mark.parametrize(
+    "payload,expected_field",
+    [
+        pytest.param({"priority": 10}, "escalation_policy_id", id="create_routing_rule_missing_policy_422"),
+        pytest.param({"escalation_policy_id": "p1"}, "priority", id="create_routing_rule_missing_priority_422"),
+        pytest.param({"escalation_policy_id": "p1", "priority": 10, "alarm_name_regex": "[invalid-regex("}, None, id="create_routing_rule_bad_regex_422"),
+    ],
+)
+def test_create_routing_rule_validation_422(monkeypatch, payload, expected_field):
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
     c = _client()
-    r = c.post("/routing-rules", json={"priority": 10})
+    r = c.post("/routing-rules", json=payload)
     assert r.status_code == 422
-    assert "escalation_policy_id" in r.json()["detail"]
-
-
-def test_create_routing_rule_missing_priority_422(monkeypatch):
-    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
-    c = _client()
-    r = c.post("/routing-rules", json={"escalation_policy_id": "p1"})
-    assert r.status_code == 422
-    assert "priority" in r.json()["detail"]
-
-
-def test_create_routing_rule_bad_regex_422(monkeypatch):
-    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
-    c = _client()
-    r = c.post(
-        "/routing-rules",
-        json={
-            "escalation_policy_id": "p1",
-            "priority": 10,
-            "alarm_name_regex": "[invalid-regex(",
-        },
-    )
-    assert r.status_code == 422
+    if expected_field is not None:
+        assert expected_field in r.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -573,21 +555,20 @@ def test_seed_routing_nonempty_store_does_not_overwrite():
     assert stored[0][1].rule_id == "existing-r"
 
 
-def test_seed_routing_none_config():
-    """None config → empty baseline, seeded=False."""
+class _FakeConfigNoRouting:
+    routing = None
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param(None, id="seed_routing_none_config"),
+        pytest.param(_FakeConfigNoRouting(), id="seed_routing_config_no_routing_block"),
+    ],
+)
+def test_seed_routing_no_rules_config(config):
+    """None config or config with no routing block → empty baseline, seeded=False."""
     store = _FakeRoutingRuleStore()
-    baseline, seeded = _seed_routing_rules(store, None)
-    assert baseline == []
-    assert seeded is False
-
-
-def test_seed_routing_config_no_routing_block():
-    """Config with no routing block → empty baseline, seeded=False."""
-
-    class _FakeConfig:
-        routing = None
-
-    store = _FakeRoutingRuleStore()
-    baseline, seeded = _seed_routing_rules(store, _FakeConfig())
+    baseline, seeded = _seed_routing_rules(store, config)
     assert baseline == []
     assert seeded is False

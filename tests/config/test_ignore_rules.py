@@ -15,6 +15,7 @@ Uses moto to mock DynamoDB — no real AWS calls are made.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock
 
 import boto3
@@ -76,73 +77,185 @@ def test_empty_rule_matches_anything():
     assert rule.matches(_incident()) is True
 
 
-def test_alarm_name_exact_match():
-    rule = IgnoreRule(alarm_name="my-app-5xx")
-    assert rule.matches(_incident(alarm_name="my-app-5xx")) is True
-    assert rule.matches(_incident(alarm_name="my-app-4xx")) is False
-
-
-def test_alarm_name_exact_does_not_prefix_match():
-    """alarm_name is an EXACT match; 'my-app' should not match 'my-app-5xx'."""
-    rule = IgnoreRule(alarm_name="my-app")
-    assert rule.matches(_incident(alarm_name="my-app-5xx")) is False
-
-
-def test_alarm_name_prefix_match():
-    rule = IgnoreRule(alarm_name_prefix="my-app-")
-    assert rule.matches(_incident(alarm_name="my-app-5xx")) is True
-    assert rule.matches(_incident(alarm_name="my-app-latency")) is True
-    assert rule.matches(_incident(alarm_name="other-app-5xx")) is False
-
-
-def test_alarm_name_prefix_empty_matches_all():
-    """Empty prefix matches any alarm name (startswith('') is always True)."""
-    rule = IgnoreRule(alarm_name_prefix="")
-    assert rule.matches(_incident()) is True
-
-
-def test_account_id_exact_match():
-    rule = IgnoreRule(account_id="123456789012")
-    assert rule.matches(_incident(account_id="123456789012")) is True
-    assert rule.matches(_incident(account_id="999999999999")) is False
-
-
-def test_app_name_exact_match():
-    rule = IgnoreRule(app_name="my-app")
-    assert rule.matches(_incident(app_name="my-app")) is True
-    assert rule.matches(_incident(app_name="other-app")) is False
-
-
-def test_environment_string_match():
-    rule = IgnoreRule(environment="production")
-    assert rule.matches(_incident(environment="production")) is True
-    assert rule.matches(_incident(environment="staging")) is False
-
-
-def test_environment_list_match():
-    rule = IgnoreRule(environment=["dev", "test", "preprod"])
-    assert rule.matches(_incident(environment="dev")) is True
-    assert rule.matches(_incident(environment="preprod")) is True
-    assert rule.matches(_incident(environment="production")) is False
-
-
-def test_environment_none_matches_any():
-    rule = IgnoreRule(environment=None)
-    assert rule.matches(_incident(environment="production")) is True
-    assert rule.matches(_incident(environment="dev")) is True
-
-
-def test_tags_all_must_be_present():
-    rule = IgnoreRule(tags={"team": "core", "tier": "1"})
-    assert rule.matches(_incident(tags={"team": "core", "tier": "1"})) is True
-    assert rule.matches(_incident(tags={"team": "core"})) is False  # missing tier
-    assert rule.matches(_incident(tags={"team": "core", "tier": "2"})) is False  # wrong value
-
-
-def test_tags_empty_matches_anything():
-    rule = IgnoreRule(tags={})
-    assert rule.matches(_incident()) is True
-    assert rule.matches(_incident(tags={"anything": "goes"})) is True
+@pytest.mark.parametrize(
+    "rule, incident_kwargs, expected",
+    [
+        # alarm_name exact — positive
+        pytest.param(
+            IgnoreRule(alarm_name="my-app-5xx"),
+            {"alarm_name": "my-app-5xx"},
+            True,
+            id="alarm_name_exact_match",
+        ),
+        # alarm_name exact — negative
+        pytest.param(
+            IgnoreRule(alarm_name="my-app-5xx"),
+            {"alarm_name": "my-app-4xx"},
+            False,
+            id="alarm_name_exact_no_match",
+        ),
+        # alarm_name exact does NOT prefix-match
+        pytest.param(
+            IgnoreRule(alarm_name="my-app"),
+            {"alarm_name": "my-app-5xx"},
+            False,
+            id="alarm_name_exact_not_prefix",
+        ),
+        # alarm_name_prefix — positive (two sub-cases kept as separate ids)
+        pytest.param(
+            IgnoreRule(alarm_name_prefix="my-app-"),
+            {"alarm_name": "my-app-5xx"},
+            True,
+            id="alarm_name_prefix_match_5xx",
+        ),
+        pytest.param(
+            IgnoreRule(alarm_name_prefix="my-app-"),
+            {"alarm_name": "my-app-latency"},
+            True,
+            id="alarm_name_prefix_match_latency",
+        ),
+        # alarm_name_prefix — negative
+        pytest.param(
+            IgnoreRule(alarm_name_prefix="my-app-"),
+            {"alarm_name": "other-app-5xx"},
+            False,
+            id="alarm_name_prefix_no_match",
+        ),
+        # empty prefix matches any alarm name
+        pytest.param(
+            IgnoreRule(alarm_name_prefix=""),
+            {},
+            True,
+            id="alarm_name_prefix_empty_matches_all",
+        ),
+        # account_id — positive
+        pytest.param(
+            IgnoreRule(account_id="123456789012"),
+            {"account_id": "123456789012"},
+            True,
+            id="account_id_match",
+        ),
+        # account_id — negative
+        pytest.param(
+            IgnoreRule(account_id="123456789012"),
+            {"account_id": "999999999999"},
+            False,
+            id="account_id_no_match",
+        ),
+        # app_name — positive
+        pytest.param(
+            IgnoreRule(app_name="my-app"),
+            {"app_name": "my-app"},
+            True,
+            id="app_name_match",
+        ),
+        # app_name — negative
+        pytest.param(
+            IgnoreRule(app_name="my-app"),
+            {"app_name": "other-app"},
+            False,
+            id="app_name_no_match",
+        ),
+        # environment string — positive
+        pytest.param(
+            IgnoreRule(environment="production"),
+            {"environment": "production"},
+            True,
+            id="environment_string_match",
+        ),
+        # environment string — negative
+        pytest.param(
+            IgnoreRule(environment="production"),
+            {"environment": "staging"},
+            False,
+            id="environment_string_no_match",
+        ),
+        # environment list — positive (two values)
+        pytest.param(
+            IgnoreRule(environment=["dev", "test", "preprod"]),
+            {"environment": "dev"},
+            True,
+            id="environment_list_match_dev",
+        ),
+        pytest.param(
+            IgnoreRule(environment=["dev", "test", "preprod"]),
+            {"environment": "preprod"},
+            True,
+            id="environment_list_match_preprod",
+        ),
+        # environment list — negative
+        pytest.param(
+            IgnoreRule(environment=["dev", "test", "preprod"]),
+            {"environment": "production"},
+            False,
+            id="environment_list_no_match",
+        ),
+        # environment None matches any
+        pytest.param(
+            IgnoreRule(environment=None),
+            {"environment": "production"},
+            True,
+            id="environment_none_matches_production",
+        ),
+        pytest.param(
+            IgnoreRule(environment=None),
+            {"environment": "dev"},
+            True,
+            id="environment_none_matches_dev",
+        ),
+        # tags — all present + correct
+        pytest.param(
+            IgnoreRule(tags={"team": "core", "tier": "1"}),
+            {"tags": {"team": "core", "tier": "1"}},
+            True,
+            id="tags_all_present",
+        ),
+        # tags — missing one tag
+        pytest.param(
+            IgnoreRule(tags={"team": "core", "tier": "1"}),
+            {"tags": {"team": "core"}},
+            False,
+            id="tags_missing_tier",
+        ),
+        # tags — wrong value
+        pytest.param(
+            IgnoreRule(tags={"team": "core", "tier": "1"}),
+            {"tags": {"team": "core", "tier": "2"}},
+            False,
+            id="tags_wrong_value",
+        ),
+        # tags empty matches anything
+        pytest.param(
+            IgnoreRule(tags={}),
+            {},
+            True,
+            id="tags_empty_matches_default",
+        ),
+        pytest.param(
+            IgnoreRule(tags={}),
+            {"tags": {"anything": "goes"}},
+            True,
+            id="tags_empty_matches_any_tags",
+        ),
+        # omitted fields are wildcards
+        pytest.param(
+            IgnoreRule(app_name="my-app"),
+            {"app_name": "my-app", "alarm_name": "anything", "environment": "dev"},
+            True,
+            id="omitted_fields_wildcard_match",
+        ),
+        pytest.param(
+            IgnoreRule(app_name="my-app"),
+            {"app_name": "other-app"},
+            False,
+            id="omitted_fields_wildcard_no_match",
+        ),
+    ],
+)
+def test_single_field_match(
+    rule: IgnoreRule, incident_kwargs: dict[str, Any], expected: bool
+):
+    assert rule.matches(_incident(**incident_kwargs)) is expected
 
 
 def test_and_logic_all_fields_must_match():
@@ -176,14 +289,6 @@ def test_and_logic_all_fields_must_match():
     )) is False
 
 
-def test_omitted_fields_are_wildcards():
-    """Fields not set on the rule do not constrain matching."""
-    # Rule only constrains app_name; other incident fields can be anything
-    rule = IgnoreRule(app_name="my-app")
-    assert rule.matches(_incident(app_name="my-app", alarm_name="anything", environment="dev")) is True
-    assert rule.matches(_incident(app_name="other-app")) is False
-
-
 def test_alarm_name_and_prefix_both_set_and_logic():
     """When both alarm_name and alarm_name_prefix are set, both must pass."""
     rule = IgnoreRule(alarm_name="my-app-5xx", alarm_name_prefix="my-app-")
@@ -198,80 +303,92 @@ def test_alarm_name_and_prefix_both_set_and_logic():
 # ---------------------------------------------------------------------------
 
 
-def test_first_match_returns_first_matching_rule():
-    cfg = IgnoreConfig(
-        enabled=True,
-        rules=[
-            IgnoreRule(name="rule-a", alarm_name="alarm-a"),
-            IgnoreRule(name="rule-b", alarm_name="alarm-b"),
-        ],
-    )
-    result = cfg.first_match(_incident(alarm_name="alarm-b"))
-    assert result is not None
-    assert result.name == "rule-b"
-
-
-def test_first_match_ordering_first_wins():
-    """When two rules both match, the first one in list order wins."""
-    cfg = IgnoreConfig(
-        enabled=True,
-        rules=[
-            IgnoreRule(name="first", app_name="my-app"),
-            IgnoreRule(name="second", app_name="my-app"),
-        ],
-    )
-    result = cfg.first_match(_incident(app_name="my-app"))
-    assert result is not None
-    assert result.name == "first"
-
-
-def test_first_match_no_match_returns_none():
-    cfg = IgnoreConfig(
-        enabled=True,
-        rules=[IgnoreRule(alarm_name="specific-alarm")],
-    )
-    result = cfg.first_match(_incident(alarm_name="different-alarm"))
-    assert result is None
-
-
-def test_first_match_disabled_config_returns_none():
-    """When IgnoreConfig.enabled is False, first_match always returns None."""
-    cfg = IgnoreConfig(
-        enabled=False,
-        rules=[IgnoreRule()],  # catch-all rule — would match if config were enabled
-    )
-    result = cfg.first_match(_incident())
-    assert result is None
-
-
-def test_first_match_skips_disabled_rules():
-    """Rules with enabled=False are skipped even if they would otherwise match."""
-    cfg = IgnoreConfig(
-        enabled=True,
-        rules=[
-            IgnoreRule(name="off", alarm_name="my-app-5xx", enabled=False),
-            IgnoreRule(name="on", alarm_name="my-app-5xx", enabled=True),
-        ],
-    )
-    result = cfg.first_match(_incident(alarm_name="my-app-5xx"))
-    assert result is not None
-    assert result.name == "on"
-
-
-def test_first_match_all_disabled_returns_none():
-    cfg = IgnoreConfig(
-        enabled=True,
-        rules=[
-            IgnoreRule(enabled=False),
-            IgnoreRule(enabled=False),
-        ],
-    )
-    assert cfg.first_match(_incident()) is None
-
-
-def test_ignore_config_empty_rules_returns_none():
-    cfg = IgnoreConfig(enabled=True, rules=[])
-    assert cfg.first_match(_incident()) is None
+@pytest.mark.parametrize(
+    "cfg, incident_kwargs, expected_name",
+    [
+        pytest.param(
+            IgnoreConfig(
+                enabled=True,
+                rules=[
+                    IgnoreRule(name="rule-a", alarm_name="alarm-a"),
+                    IgnoreRule(name="rule-b", alarm_name="alarm-b"),
+                ],
+            ),
+            {"alarm_name": "alarm-b"},
+            "rule-b",
+            id="returns_first_matching_rule",
+        ),
+        pytest.param(
+            IgnoreConfig(
+                enabled=True,
+                rules=[
+                    IgnoreRule(name="first", app_name="my-app"),
+                    IgnoreRule(name="second", app_name="my-app"),
+                ],
+            ),
+            {"app_name": "my-app"},
+            "first",
+            id="ordering_first_wins",
+        ),
+        pytest.param(
+            IgnoreConfig(
+                enabled=True,
+                rules=[IgnoreRule(alarm_name="specific-alarm")],
+            ),
+            {"alarm_name": "different-alarm"},
+            None,
+            id="no_match_returns_none",
+        ),
+        pytest.param(
+            IgnoreConfig(
+                enabled=False,
+                rules=[IgnoreRule()],  # catch-all rule — would match if config were enabled
+            ),
+            {},
+            None,
+            id="disabled_config_returns_none",
+        ),
+        pytest.param(
+            IgnoreConfig(
+                enabled=True,
+                rules=[
+                    IgnoreRule(name="off", alarm_name="my-app-5xx", enabled=False),
+                    IgnoreRule(name="on", alarm_name="my-app-5xx", enabled=True),
+                ],
+            ),
+            {"alarm_name": "my-app-5xx"},
+            "on",
+            id="skips_disabled_rules",
+        ),
+        pytest.param(
+            IgnoreConfig(
+                enabled=True,
+                rules=[
+                    IgnoreRule(enabled=False),
+                    IgnoreRule(enabled=False),
+                ],
+            ),
+            {},
+            None,
+            id="all_disabled_returns_none",
+        ),
+        pytest.param(
+            IgnoreConfig(enabled=True, rules=[]),
+            {},
+            None,
+            id="empty_rules_returns_none",
+        ),
+    ],
+)
+def test_first_match(
+    cfg: IgnoreConfig, incident_kwargs: dict[str, Any], expected_name: str | None
+):
+    result = cfg.first_match(_incident(**incident_kwargs))
+    if expected_name is None:
+        assert result is None
+    else:
+        assert result is not None
+        assert result.name == expected_name
 
 
 # ---------------------------------------------------------------------------
@@ -653,8 +770,8 @@ class TestNodeHandlerIgnoreGate:
             environment=environment,
         )
 
-    def test_matching_rule_returns_ignored_true(self, monkeypatch):
-        """An alarm matching an enabled ignore rule must return ignored=True."""
+    def test_matching_rule_ignored(self, monkeypatch):
+        """An alarm matching an enabled ignore rule: ignored=True, not persisted, not paged, trigger recorded."""
         rule = IgnoreRule(name="drop-test", alarm_name="test-alarm-high-error")
         store = FakeIgnoreRuleStore(rules=[("rule-001", rule)])
         inc = self._incident()
@@ -669,45 +786,9 @@ class TestNodeHandlerIgnoreGate:
         assert result["statusCode"] == 200
         assert result["team_ok"] is False
         assert result["central_ok"] is False
-
-    def test_matching_rule_does_not_persist(self, monkeypatch):
-        """An ignored alarm must NOT be saved to the incident store."""
-        rule = IgnoreRule(alarm_name="test-alarm-high-error")
-        store = FakeIgnoreRuleStore(rules=[("rule-002", rule)])
-        inc = self._incident()
-
-        h, incident_store, dispatch_spy = _build_ignore_handler(
-            monkeypatch, ignore_rule_store=store, incident=inc
-        )
-        h._handle_alarm({})
-
         incident_store.put_incident.assert_not_called()
-
-    def test_matching_rule_does_not_page(self, monkeypatch):
-        """An ignored alarm must NOT dispatch a page."""
-        rule = IgnoreRule(alarm_name="test-alarm-high-error")
-        store = FakeIgnoreRuleStore(rules=[("rule-003", rule)])
-        inc = self._incident()
-
-        h, incident_store, dispatch_spy = _build_ignore_handler(
-            monkeypatch, ignore_rule_store=store, incident=inc
-        )
-        h._handle_alarm({})
-
         assert not dispatch_spy.called
-
-    def test_record_trigger_called_with_rule_id(self, monkeypatch):
-        """record_trigger must be called with the matched rule_id."""
-        rule = IgnoreRule(alarm_name="test-alarm-high-error")
-        store = FakeIgnoreRuleStore(rules=[("rule-004", rule)])
-        inc = self._incident()
-
-        h, _, _ = _build_ignore_handler(
-            monkeypatch, ignore_rule_store=store, incident=inc
-        )
-        h._handle_alarm({})
-
-        assert store.triggered == ["rule-004"]
+        assert store.triggered == ["rule-001"]
 
     def test_non_matching_rule_proceeds_normally(self, monkeypatch):
         """An alarm that does NOT match any ignore rule must be dispatched."""
@@ -896,4 +977,3 @@ class TestNodeHandlerIgnoreGate:
         assert store.list_rules.call_count == 1, (
             "list_rules must only be called once within the TTL window"
         )
-
