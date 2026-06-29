@@ -188,6 +188,8 @@ can be re-verified against the repo, not taken on faith.
 | Data-only deploy works before an image exists | ✅ | `scripts/relay-context.sh` (sets `relay:image_check=false` when `RelayComputeStack` not a target); `compute_stack.py` (guard error documents the escape hatch) | The documented "data plane first" step no longer trips the compute stack's real-image guard. |
 | Deploy without `iam:PassRole` (locked-down accounts) | ✅ | `scripts/relay-deploy-direct.sh` (cdk synth → `aws cloudformation deploy` with caller creds); `docs/deploy.md` (Locked-down accounts section) | No CDK assets, so synthesized templates deploy directly. Data plane creates zero roles/VPC → deploys in the most restricted accounts. |
 | Pure-CLI data-plane provisioning (no CDK/bootstrap) | ✅ | `scripts/relay-provision-cli.sh` | Creates DynamoDB (+GSIs/PITR/TTL/stream), SNS topics, SQS+DLQ, EventBridge alarm rule via plain `aws` calls for the run-locally-on-EC2 evaluation path. |
+| Run-on-EC2 evaluation path documented (no ECS) | ✅ | `docs/local-dev.md` (Run on EC2 against real AWS); `relay.hub.app:main` (`relay-hub` entrypoint) | Two on-ramps: released GHCR container (`docker run`) and plain Python (`pip install -e .[serve]` → `relay-hub`), both `RELAY_RUNTIME=local-aws` against Phase-1 resources. |
+| Preflight: versioned-python probe + AWS_PROFILE + target-aware Docker | ✅ | `scripts/relay-preflight.sh` | Probes `python3.12`/`python3.13` (Amazon Linux trap), warns when `AWS_PROFILE` overrides the instance role, escalates Docker WARN→FAIL when `RELAY_DEPLOY_TARGET=ecs`. |
 
 ### 12. Integrations & config
 

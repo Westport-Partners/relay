@@ -2,8 +2,9 @@
 
 This guide covers the inner dev loop: running Relay fully offline against
 DynamoDB-Local, firing test alarms, and watching the dashboard respond — with
-no AWS account and no credentials. It also covers running against a real sandbox
-table and executing the test suite.
+no AWS account and no credentials. It also covers the **evaluation path** —
+provisioning real AWS resources and running the Hub locally on an EC2 instance
+(released container or plain Python, no ECS) — and executing the test suite.
 
 ---
 
@@ -154,40 +155,105 @@ stack sets `RELAY_AUTH_MODE=dev`, and `RELAY_DEMO=true` forces it on if unset.
 
 ---
 
-## Run against a real table (local-aws mode)
+## Run on EC2 against real AWS (the evaluation path)
 
-Use this when you want to test against a real DynamoDB table in a sandbox account
-from your laptop or EC2 dev box. AWS credentials come from the instance role or
-mounted `~/.aws` credentials — no dummy keys.
+This is the **recommended way to evaluate Relay** before committing to a full ECS
+deploy: stand up the few stateful AWS resources Relay needs, then run the Hub
+locally on an EC2 instance against them. It needs **no ECS, no VPC, no IAM role
+creation, and no `iam:PassRole`** — so it works in locked-down accounts where the
+full CDK deploy cannot. Progression:
+
+```
+Phase 1 — provision the data plane + alarm ingest (one script)
+Phase 2 — run the Hub locally (released container OR plain Python)
+Phase 3 — (later) build an image + deploy RelayComputeStack on ECS  → docs/deploy.md
+```
+
+AWS credentials come from the EC2 instance role automatically — no access keys.
+(Run `./scripts/relay-preflight.sh` first; if it warns that `AWS_PROFILE` is set,
+that profile overrides the instance role — `unset AWS_PROFILE` to use the role.)
+
+### Phase 1 — provision the data plane
+
+`scripts/relay-provision-cli.sh` creates the DynamoDB table (+ GSIs, PITR, TTL,
+stream), the SNS paging topics, and the alarm ingest path (SQS + DLQ + an
+EventBridge rule that routes CloudWatch `ALARM` state changes into the queue) —
+all with plain AWS CLI calls, no CDK or CloudFormation:
 
 ```bash
-docker build -t relay-hub:dev .
+RELAY_TEAM_NAME=<team> AWS_REGION=us-east-1 ./scripts/relay-provision-cli.sh
+```
 
+On success it prints the exact `export` lines for the next step. (To provision via
+CDK instead in an account that denies `iam:PassRole`, see
+[deploy.md → Locked-down accounts](deploy.md#locked-down-accounts-iampassrole-denied).)
+
+### Phase 2, on-ramp A — run the released container (lowest friction)
+
+The Hub image is published to `ghcr.io/westport-partners/relay`. Pull it and run
+it against the resources from Phase 1 — no build step:
+
+```bash
 docker run -d --name relay -p 8080:8080 \
   -e RELAY_RUNTIME=local-aws \
   -e RELAY_ALLOW_INGEST=true \
-  -e LOG_LEVEL=INFO \
   -e AWS_REGION=us-east-1 \
   -e AWS_DEFAULT_REGION=us-east-1 \
-  -e RELAY_TABLE_NAME=<your-table> \
-  -e RELAY_FLEET_TABLE_NAME=<your-table> \
+  -e RELAY_TABLE_NAME=relay-<team> \
+  -e RELAY_FLEET_TABLE_NAME=relay-<team> \
+  -e RELAY_SQS_QUEUE_URL=<queue-url from Phase 1> \
+  -e RELAY_SNS_TOPIC_ARN=<paging-topic-arn from Phase 1> \
   -e RELAY_CONFIG_SOURCE=local \
-  -e RELAY_CONFIG_DIR=/app/config \
   -e RELAY_AUTH_MODE=dev \
   -e RELAY_DEV_USER=you \
-  relay-hub:dev
+  ghcr.io/westport-partners/relay:latest
 
 docker logs -f relay
+open http://localhost:8080/
 ```
 
-To exercise real SNS paging, add:
+### Phase 2, on-ramp B — run as a plain Python process (no Docker)
+
+If Docker isn't available (or you want to iterate on the code), run the Hub
+directly. `pip install` exposes the `relay-hub` console entrypoint, which serves
+the dashboard on port 8080:
 
 ```bash
-  -e RELAY_SNS_TOPIC_ARN=<topic-arn>
+python3.12 -m venv .venv && source .venv/bin/activate   # see note below
+pip install -e ".[serve]"
+
+export RELAY_RUNTIME=local-aws
+export RELAY_ALLOW_INGEST=true
+export AWS_REGION=us-east-1
+export RELAY_TABLE_NAME=relay-<team>
+export RELAY_FLEET_TABLE_NAME=relay-<team>
+export RELAY_SQS_QUEUE_URL=<queue-url from Phase 1>
+export RELAY_SNS_TOPIC_ARN=<paging-topic-arn from Phase 1>
+export RELAY_CONFIG_SOURCE=local
+export RELAY_AUTH_MODE=dev RELAY_DEV_USER=you
+
+relay-hub      # serves http://0.0.0.0:8080
 ```
 
-The SQS consumer does not run in `local-aws` mode; inject alarms directly via
-`relay-fire.sh` or any HTTP client that can reach port 8080.
+> **Amazon Linux 2023:** the system `python3` is 3.9, but Relay needs 3.12+. Install
+> it with `sudo dnf install -y python3.12` and create the venv with the **versioned**
+> binary (`python3.12 -m venv .venv`) — installing 3.12 does not repoint `python3`.
+> `relay-preflight.sh` detects this and tells you which binary to use.
+
+### Verifying ingestion
+
+In `local-aws` mode the SQS consumer does not run, so the EventBridge → SQS path
+buffers alarms but the Hub does not drain the queue automatically. To confirm the
+pipeline end-to-end, inject an alarm over HTTP (`RELAY_ALLOW_INGEST=true` opens
+`POST /ingest/alarm`):
+
+```bash
+./scripts/relay-fire.sh                       # localhost:8080
+./scripts/relay-fire.sh fixtures/alarms/canary-failure.json http://<ec2-host>:8080
+```
+
+The matching tile turns red and an incident appears on `/incidents`. Real SNS
+paging fires when `RELAY_SNS_TOPIC_ARN` is set (as above).
 
 ---
 

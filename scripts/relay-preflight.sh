@@ -11,6 +11,11 @@
 #
 # Environment variables (all optional):
 #   AWS_REGION / AWS_DEFAULT_REGION  — target region for CDK/CloudFormation checks
+#   RELAY_DEPLOY_TARGET              — ecs | local (default: local). When "ecs",
+#                                      a missing Docker daemon is a FAIL (the image
+#                                      can't be built) instead of a WARN. The local
+#                                      run-on-EC2 path needs no Docker, so it stays
+#                                      a WARN there.
 #
 # Exit codes:
 #   0  — no FAIL-level checks triggered
@@ -218,9 +223,14 @@ if command -v docker >/dev/null 2>&1; then
   if docker info >/dev/null 2>&1; then
     _record PASS "docker" "${_docker_client_ver}"
     _progress "  ${_docker_client_ver} (daemon up)"
+  elif [ "${RELAY_DEPLOY_TARGET:-local}" = "ecs" ]; then
+    # ECS deploy MUST build + push the container image, so a dead daemon blocks it.
+    _record FAIL "docker" "${_docker_client_ver} — daemon not reachable (required for RELAY_DEPLOY_TARGET=ecs)" \
+      "Docker is required to build the Relay image for an ECS deploy. Start it: sudo systemctl start docker  (or: sudo service docker start)"
+    _progress "  ${_docker_client_ver}: daemon not reachable, target=ecs — FAIL"
   else
     _record WARN "docker" "${_docker_client_ver} — daemon not reachable" \
-      "start the docker service: sudo systemctl start docker  (or: sudo service docker start)"
+      "start the docker service: sudo systemctl start docker  (or: sudo service docker start). Not needed for the local run-on-EC2 path; required for an ECS image build (set RELAY_DEPLOY_TARGET=ecs)."
     _progress "  ${_docker_client_ver}: daemon not reachable — WARN"
   fi
 else
@@ -243,18 +253,42 @@ else
   _progress "  node: NOT FOUND"
 fi
 
-# ---- python3 >= 3.12 ----
-_progress "  python3..."
-if _py_ver="$(python3 --version 2>/dev/null)"; then
-  # "Python 3.12.3" -> "3.12.3"
-  _py_ver_str="${_py_ver#Python }"
-  if _ver_ge "${_py_ver_str}" 3 12; then
-    _record PASS "python3" "python3 ${_py_ver_str}"
-    _progress "  python3 ${_py_ver_str}"
-  else
-    _record FAIL "python3" "python3 ${_py_ver_str} (need >= 3.12)" "$(_install_cmd python3)"
-    _progress "  python3 ${_py_ver_str}: too old — FAIL"
+# ---- python >= 3.12 (probe versioned binaries, not just python3) ----
+# Amazon Linux 2023 (and some RHEL/Fedora) keep `python3` pinned at the system
+# version (3.9) and install a newer interpreter as a PARALLEL binary named
+# `python3.12` — installing 3.12 does NOT repoint the `python3` symlink. Probe
+# the versioned names too so a correct install is detected; report which binary
+# satisfies the requirement so the venv can be created with it.
+_progress "  python (>= 3.12)..."
+_py_found_bin=""
+_py_found_ver=""
+_py_best_bin=""      # newest interpreter seen, even if < 3.12 (for the FAIL message)
+_py_best_ver=""
+for _py_bin in python3.13 python3.12 python3; do
+  command -v "${_py_bin}" >/dev/null 2>&1 || continue
+  _cand_ver="$("${_py_bin}" --version 2>/dev/null)" || continue
+  _cand_ver="${_cand_ver#Python }"
+  [ -z "${_py_best_bin}" ] && { _py_best_bin="${_py_bin}"; _py_best_ver="${_cand_ver}"; }
+  if _ver_ge "${_cand_ver}" 3 12; then
+    _py_found_bin="${_py_bin}"
+    _py_found_ver="${_cand_ver}"
+    break
   fi
+done
+if [ -n "${_py_found_bin}" ]; then
+  _record PASS "python3" "${_py_found_bin} ${_py_found_ver}"
+  _progress "  ${_py_found_bin} ${_py_found_ver}"
+  # Nudge when `python3` itself is too old but a versioned binary satisfies it —
+  # this is the Amazon Linux trap: the venv MUST be created with the versioned name.
+  if [ "${_py_found_bin}" != "python3" ]; then
+    _record WARN "python3-venv-binary" \
+      "use '${_py_found_bin}' for the venv ('python3' is older)" \
+      "Create the virtualenv with the versioned binary: ${_py_found_bin} -m venv .venv"
+    _progress "  note: create the venv with ${_py_found_bin} (python3 is older)"
+  fi
+elif [ -n "${_py_best_bin}" ]; then
+  _record FAIL "python3" "${_py_best_bin} ${_py_best_ver} (need >= 3.12; no 3.12+ binary found)" "$(_install_cmd python3)"
+  _progress "  ${_py_best_bin} ${_py_best_ver}: too old, and no python3.12/3.13 found — FAIL"
 else
   _record FAIL "python3" "not found" "$(_install_cmd python3)"
   _progress "  python3: NOT FOUND"
@@ -298,6 +332,20 @@ else
   _record WARN "aws-region" "no AWS region configured" \
     "set AWS_REGION env var, or run: aws configure (set default region)"
   _progress "  WARN: no region found in AWS_REGION, AWS_DEFAULT_REGION, or aws configure"
+fi
+
+# ---- AWS_PROFILE override warning ----
+# When AWS_PROFILE is set, every aws/CDK call uses that named profile and SILENTLY
+# ignores the EC2 instance role — common on a multi-account dev box. There is no
+# error: operations can target the wrong account or fail on a permission mismatch
+# in a different account, which is especially dangerous for resource-creating
+# deploys. The identity above already reflects the resolved credentials, so point
+# the operator at it.
+if [ -n "${AWS_PROFILE:-}" ]; then
+  _record WARN "aws-profile" \
+    "AWS_PROFILE=${AWS_PROFILE} is set — it overrides the EC2 instance role" \
+    "Confirm the account/ARN above is the intended deploy target. To use the instance profile instead: unset AWS_PROFILE"
+  _progress "  WARN: AWS_PROFILE=${AWS_PROFILE} overrides the instance role — verify the account above"
 fi
 
 # ===========================================================================
