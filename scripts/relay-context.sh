@@ -258,6 +258,18 @@ relay_build_context() {
     *) echo "ERROR: unknown RELAY_STACK_SELECTOR='${RELAY_STACK_SELECTOR}' (data|compute|federation|all)" >&2; exit 1 ;;
   esac
 
+  # The compute stack's real-image guard (compute_stack.py) only matters when the
+  # compute stack is an actual deploy target. For a data-only (or federation-only)
+  # deploy the compute stack is still constructed by infra/app.py but never
+  # deployed (relay-deploy.sh runs --exclusively), so requiring a real ECR image
+  # would needlessly block the documented "data plane first" step — which is the
+  # only step a locked-down account (PassRole/CreateRole denied) can run at all.
+  # Skip the guard when compute is out of scope; keep it on when compute deploys.
+  case " ${RELAY_STACKS} " in
+    *" RelayComputeStack "*) : ;;                       # compute deploys → keep guard
+    *) ctx="${ctx} -c relay:image_check=false" ;;       # no compute → image not required
+  esac
+
   export RELAY_CDK_CONTEXT="${ctx}" RELAY_STACKS
   echo "Stacks: ${RELAY_STACKS}" >&2
   echo "Context: ${RELAY_CDK_CONTEXT}" >&2
