@@ -8,6 +8,7 @@ the existing test harness conventions are consistent.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -70,7 +71,7 @@ class FakeAlarmSource:
     def __init__(self, incident: Incident) -> None:
         self._incident = incident
 
-    def parse_event(self, event: dict) -> Incident:
+    def parse_event(self, event: dict[str, Any]) -> Incident:
         return self._incident
 
 
@@ -160,7 +161,7 @@ def _build_handler(config: RelayConfig, incident: Incident) -> tuple[NodeHandler
 
     store = FakeIncidentStore()
     original = handler_mod.DualStreamDispatcher
-    handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore[assignment]
+    handler_mod.DualStreamDispatcher = FakeDispatcher
     try:
         h = NodeHandler(
             _config_loader=FakeConfigLoader(config),
@@ -174,7 +175,7 @@ def _build_handler(config: RelayConfig, incident: Incident) -> tuple[NodeHandler
             _clock=lambda: 0.0,
         )
     finally:
-        handler_mod.DualStreamDispatcher = original  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = original
     return h, store
 
 

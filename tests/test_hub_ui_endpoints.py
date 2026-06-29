@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -831,8 +832,8 @@ def test_teams_webhook_notifier_non_2xx_returns_false():
 
 class _FakeScheduleStore:
     def __init__(self):
-        self.avail: dict[str, dict] = {}
-        self.sched: dict[str, dict] = {}
+        self.avail: dict[str, dict[str, Any]] = {}
+        self.sched: dict[str, dict[str, Any]] = {}
 
     def list_availability(self):
         return list(self.avail.values())

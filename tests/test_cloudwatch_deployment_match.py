@@ -6,6 +6,8 @@ Covers the generic ``relay:project`` tag matched against a node's
 
 from __future__ import annotations
 
+from typing import Any
+
 from relay.adapters.aws.cloudwatch_source import CloudWatchAlarmSource
 from relay.core.model import OrgNode, OrgTree
 
@@ -135,7 +137,7 @@ def test_relay_deployment_wins_over_component_id():
 
 
 
-def _minimal_alarm_event(alarm_name: str = "team-app-cpu-alarm") -> dict:
+def _minimal_alarm_event(alarm_name: str = "team-app-cpu-alarm") -> dict[str, Any]:
     return {
         "source": "aws.cloudwatch",
         "detail-type": "CloudWatch Alarm State Change",
@@ -160,7 +162,7 @@ def _minimal_alarm_event(alarm_name: str = "team-app-cpu-alarm") -> dict:
 
 
 class _StubTagResolver:
-    def __init__(self, tags: dict):
+    def __init__(self, tags: dict[str, str]):
         self._tags = tags
 
     def resolve(self, *, alarm_arn, detail):
@@ -195,14 +197,14 @@ def test_parse_event_relay_app_tag_becomes_app_name():
 # ---------------------------------------------------------------------------
 
 
-def _alarm_event_with_top_level_marker() -> dict:
+def _alarm_event_with_top_level_marker() -> dict[str, Any]:
     """Event with relay_synthetic=True at the EventBridge envelope level."""
     ev = _minimal_alarm_event()
     ev["relay_synthetic"] = True
     return ev
 
 
-def _alarm_event_with_detail_marker() -> dict:
+def _alarm_event_with_detail_marker() -> dict[str, Any]:
     """Event with relay_synthetic=True inside the detail dict."""
     ev = _minimal_alarm_event()
     ev["detail"]["relay_synthetic"] = True
@@ -261,7 +263,7 @@ def test_parse_event_synthetic_independent_of_signal_source():
 
 def _alarm_event_with_relay_hints(
     *, alarm_name="primary-search-cpu-high", app=None, env=None, dep=None
-) -> dict:
+) -> dict[str, Any]:
     ev = _minimal_alarm_event(alarm_name)
     if app is not None:
         ev["detail"]["relay_app"] = app

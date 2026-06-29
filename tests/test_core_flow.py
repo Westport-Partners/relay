@@ -11,6 +11,7 @@ Ack/resolve event_type constants confirmed from flow.py:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import pytest
 
@@ -114,7 +115,7 @@ def _policy(
 
 
 class TestConfigPartialReach:
-    def _build(self) -> dict:
+    def _build(self) -> dict[str, Any]:
         policy = _policy(
             steps=[
                 (0, ["c1"], []),
@@ -127,7 +128,7 @@ class TestConfigPartialReach:
             _page_sent_ev("inc-p", 1, _t(60), contact_ids=["c2"], event_id="ps-1"),
         ]
         inc = _inc("inc-p", timeline=timeline, escalation_policy_id="pol-1")
-        return build_flow(inc, policy, {"c1": "Alice", "c2": "Bob", "c3": "Carol"})
+        return cast(dict[str, Any], build_flow(inc, policy, {"c1": "Alice", "c2": "Bob", "c3": "Carol"}))
 
     def test_source_is_config(self):
         r = self._build()
@@ -178,7 +179,7 @@ class TestConfigPartialReach:
 
 
 class TestConfigResolvedEarly:
-    def _build(self) -> dict:
+    def _build(self) -> dict[str, Any]:
         policy = _policy(steps=[(0, ["c1"], []), (1, ["c2"], [])])
         timeline = [
             _page_sent_ev("inc-r", 0, _t(0), contact_ids=["c1"], event_id="ps-0"),
@@ -202,7 +203,7 @@ class TestConfigResolvedEarly:
             ),
         ]
         inc = _inc("inc-r", timeline=timeline, escalation_policy_id="pol-1")
-        return build_flow(inc, policy, {"c1": "Alice", "c2": "Bob"})
+        return cast(dict[str, Any], build_flow(inc, policy, {"c1": "Alice", "c2": "Bob"}))
 
     def test_step0_reached_step1_not(self):
         r = self._build()
@@ -231,7 +232,7 @@ class TestConfigResolvedEarly:
 
 
 class TestConfigExhausted:
-    def _build(self) -> dict:
+    def _build(self) -> dict[str, Any]:
         policy = _policy(steps=[(0, ["c1"], []), (1, ["c2"], [])])
         timeline = [
             _page_sent_ev("inc-ex", 0, _t(0), contact_ids=["c1"], event_id="ps-0"),
@@ -247,7 +248,7 @@ class TestConfigExhausted:
             ),
         ]
         inc = _inc("inc-ex", timeline=timeline, escalation_policy_id="pol-1")
-        return build_flow(inc, policy, {})
+        return cast(dict[str, Any], build_flow(inc, policy, {}))
 
     def test_exhausted_event_in_actual_events(self):
         r = self._build()
@@ -270,7 +271,7 @@ class TestConfigExhausted:
 
 
 class TestDerived:
-    def _build(self) -> dict:
+    def _build(self) -> dict[str, Any]:
         timeline = [
             _page_sent_ev(
                 "inc-d", 0, _t(0),
@@ -284,7 +285,7 @@ class TestDerived:
             ),
         ]
         inc = _inc("inc-d", timeline=timeline)
-        return build_flow(inc, None, {"c1": "Alice", "c2": "Bob"})
+        return cast(dict[str, Any], build_flow(inc, None, {"c1": "Alice", "c2": "Bob"}))
 
     def test_source_is_derived(self):
         assert self._build()["source"] == "derived"
@@ -379,7 +380,7 @@ class TestPolicyIdResolution:
 
 
 class TestContactsRestriction:
-    def _run(self) -> dict:
+    def _run(self) -> dict[str, Any]:
         """
         Contacts map has c1 (referenced by step 0 contact_ids),
         c2 (referenced only by page_sent detail in actual_events),
@@ -402,7 +403,7 @@ class TestContactsRestriction:
             ),
         ]
         inc = _inc("inc-ct", timeline=timeline, escalation_policy_id="pol-1")
-        return build_flow(
+        return cast(dict[str, Any], build_flow(
             inc, policy,
             {
                 "c1": "Alice",   # referenced by expected step 0
@@ -410,7 +411,7 @@ class TestContactsRestriction:
                 "c3": "Carol",   # actor on ack event (present in contacts map)
                 "c_extra": "Zed",  # unreferenced — must be dropped
             },
-        )
+        ))
 
     def test_unreferenced_contact_is_dropped(self):
         r = self._run()

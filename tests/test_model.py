@@ -1,6 +1,7 @@
 """Tests for relay.core.model — verifies domain model construction, validation, and behavior."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -126,7 +127,7 @@ def test_incident_add_event():
 # ---------------------------------------------------------------------------
 
 
-def _incident_kwargs(**overrides) -> dict:
+def _incident_kwargs(**overrides) -> dict[str, Any]:
     base = dict(
         correlation_id="inc-xt",
         account_id="123456789012",

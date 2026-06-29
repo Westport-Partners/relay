@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import threading
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import pytest
 
@@ -67,7 +68,7 @@ class _FakeIgnoreRuleStore:
     """In-memory implementation of DynamoIgnoreRuleStore's public interface."""
 
     def __init__(self) -> None:
-        self._rules: dict[str, tuple] = {}  # rule_id -> (IgnoreRule, trigger_count)
+        self._rules: dict[str, tuple[Any, ...]] = {}  # rule_id -> (IgnoreRule, trigger_count)
         self._counter: int = 0
 
     def put_rule(self, rule, rule_id: str | None = None) -> str:
@@ -82,7 +83,7 @@ class _FakeIgnoreRuleStore:
         entry = self._rules.get(rule_id)
         return entry[0] if entry else None
 
-    def list_rules(self) -> list[tuple]:
+    def list_rules(self) -> list[tuple[Any, ...]]:
         return [
             (rid, rule, count)
             for rid, (rule, count) in sorted(self._rules.items())
@@ -95,7 +96,7 @@ class _FakeIgnoreRuleStore:
         if rule_id in self._rules:
             rule, count = self._rules[rule_id]
             self._rules[rule_id] = (rule, count + 1)
-            return count + 1
+            return cast(int, count + 1)
         return 0
 
 
@@ -302,6 +303,7 @@ def test_ignore_incident_creates_rule_and_resolves(monkeypatch):
 
     # Incident must be RESOLVED with an "ignored" timeline event
     stored_inc = inc_store.get_incident("c-123")
+    assert stored_inc is not None
     assert stored_inc.state == IncidentState.RESOLVED
     ignored_events = [e for e in stored_inc.timeline if e.event_type == "ignored"]
     assert len(ignored_events) == 1

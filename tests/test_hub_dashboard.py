@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import threading
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import MagicMock
 
 import boto3
@@ -1175,7 +1176,7 @@ def _fev(
     cid: str,
     step_index: int,
     occurred_at: datetime,
-    contact_ids: list | None = None,
+    contact_ids: list[str] | None = None,
     event_id: str | None = None,
 ) -> TimelineEvent:
     """Build an escalation.page_sent TimelineEvent."""
@@ -1198,7 +1199,7 @@ def _fev(
 
 def _flow_incident(
     cid: str = "flow-inc-001",
-    timeline: list | None = None,
+    timeline: list[Any] | None = None,
     escalation_policy_id: str | None = None,
 ) -> Incident:
     return Incident(
@@ -1243,7 +1244,7 @@ class _FlowFakeContactStore:
             for cid, name in contacts.items()
         ]
 
-    def list_contacts(self) -> list:
+    def list_contacts(self) -> list[Any]:
         return list(self._db)
 
 

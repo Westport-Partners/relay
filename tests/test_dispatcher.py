@@ -3,6 +3,7 @@
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from relay.core.dispatcher import DualStreamDispatcher
 from relay.core.model import Incident, Severity, SignalSource, Stream
@@ -14,7 +15,7 @@ from relay.core.model import Incident, Severity, SignalSource, Stream
 
 @dataclass
 class FakeNotifier:
-    calls: list = field(default_factory=list)
+    calls: list[dict[str, Any]] = field(default_factory=list)
     should_fail: bool = False
 
     def send(self, *, incident, contact_ids, stream):
@@ -27,7 +28,7 @@ class FakeNotifier:
 
 @dataclass
 class FakeTransport:
-    calls: list = field(default_factory=list)
+    calls: list[dict[str, Any]] = field(default_factory=list)
     should_fail: bool = False
 
     def emit(self, *, incident, stream):

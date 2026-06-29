@@ -18,6 +18,7 @@ import shutil
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -60,7 +61,7 @@ def _inc(cid, sev, source, state, created=T0, acked=None, resolved=None,
     )
 
 
-def _serialize(inc: Incident) -> dict:
+def _serialize(inc: Incident) -> dict[str, Any]:
     """Mirror the enriched /incidents serialization the client consumes."""
     resolved = _resolved_at(inc)
     return {
@@ -76,7 +77,7 @@ def _serialize(inc: Incident) -> dict:
     }
 
 
-def _run_js(serialized: list[dict]) -> dict:
+def _run_js(serialized: list[dict[str, Any]]) -> dict[str, Any]:
     """Invoke computeMetrics in node on the serialized incidents."""
     script = f"""
 import {{ computeMetrics }} from {json.dumps(str(_MODULE))};
@@ -87,12 +88,13 @@ process.stdin.on("end", () => {{
   process.stdout.write(JSON.stringify(computeMetrics(incidents)));
 }});
 """
+    assert _NODE is not None
     proc = subprocess.run(
         [_NODE, "--input-type=module", "-e", script],
         input=json.dumps(serialized),
         capture_output=True, text=True, check=True,
     )
-    return json.loads(proc.stdout)
+    return cast(dict[str, Any], json.loads(proc.stdout))
 
 
 def _fixture() -> list[Incident]:

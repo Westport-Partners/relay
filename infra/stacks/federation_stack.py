@@ -23,6 +23,8 @@ Context keys consumed:
 
 from __future__ import annotations
 
+from typing import Any
+
 import aws_cdk as cdk
 from aws_cdk import Stack
 from aws_cdk import (
@@ -53,7 +55,7 @@ class RelayFederationStack(Stack):
         construct_id: str,
         *,
         ingest_queue_arn: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 

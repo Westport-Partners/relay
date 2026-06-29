@@ -21,6 +21,7 @@ Covers:
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -90,7 +91,7 @@ def _make_processor(
     return proc, incident_store, hub_state
 
 
-def _event(incident: Incident, extra_detail: dict | None = None) -> dict:
+def _event(incident: Incident, extra_detail: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build an EventBridge-style event dict from an Incident."""
     detail = incident.model_dump(mode="json")
     if extra_detail:

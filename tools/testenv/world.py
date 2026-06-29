@@ -30,7 +30,7 @@ import json
 import random
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -367,7 +367,7 @@ def world_to_catalog_yaml(world: World) -> str:
     for n in world.nodes:
         node = {k: v for k, v in n.items() if v is not None}
         clean_nodes.append(node)
-    return yaml.safe_dump({"nodes": clean_nodes}, sort_keys=False, width=100)
+    return cast(str, yaml.safe_dump({"nodes": clean_nodes}, sort_keys=False, width=100))
 
 
 def world_to_contacts_yaml(world: World) -> str:
@@ -376,7 +376,7 @@ def world_to_contacts_yaml(world: World) -> str:
         {"contact_id": p.contact_id, "name": p.name, "email": p.email, "phone": p.phone}
         for p in world.people
     ]
-    return yaml.safe_dump({"contacts": contacts}, sort_keys=False, width=100)
+    return cast(str, yaml.safe_dump({"contacts": contacts}, sort_keys=False, width=100))
 
 
 def main() -> None:

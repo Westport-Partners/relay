@@ -218,7 +218,7 @@ def _make_handler(
     import relay.node.handler as handler_mod
 
     original_dispatcher = handler_mod.DualStreamDispatcher
-    handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+    handler_mod.DualStreamDispatcher = _FakeDispatcher
     try:
         h = NodeHandler(
             _config_loader=_FakeConfigLoader(config),
@@ -231,10 +231,10 @@ def _make_handler(
             _escalation_engine=engine,
         )
     finally:
-        handler_mod.DualStreamDispatcher = original_dispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = original_dispatcher
 
     # Keep the fake dispatcher active for the duration of each test.
-    handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+    handler_mod.DualStreamDispatcher = _FakeDispatcher
     return h, store, state_store
 
 
@@ -249,7 +249,7 @@ class TestEscalationStart:
 
         import relay.node.handler as handler_mod
 
-        handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = _FakeDispatcher
         h.process({})  # drives _handle_alarm via FakeAlarmSource
 
         persisted = store.get_incident(inc.correlation_id)
@@ -268,7 +268,7 @@ class TestEscalationStart:
         h, store, _ = _make_handler(policy=_TWO_STEP_POLICY, incident=inc)
 
         import relay.node.handler as handler_mod
-        handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = _FakeDispatcher
         h.process({})
 
         persisted = store.get_incident(inc.correlation_id)
@@ -287,7 +287,7 @@ class TestEscalationStart:
         h, store, _ = _make_handler(policy=_TWO_STEP_POLICY, incident=inc)
 
         import relay.node.handler as handler_mod
-        handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = _FakeDispatcher
         h.process({})
 
         persisted = store.get_incident(inc.correlation_id)
@@ -310,7 +310,7 @@ class TestEscalationStepAdvance:
         h, store, _ = _make_handler(policy=_TWO_STEP_POLICY, incident=inc)
 
         import relay.node.handler as handler_mod
-        handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = _FakeDispatcher
 
         # Trigger the incident first (step 0)
         h.process({})
@@ -341,7 +341,7 @@ class TestEscalationStepAdvance:
         h, store, _ = _make_handler(policy=_TWO_STEP_POLICY, incident=inc)
 
         import relay.node.handler as handler_mod
-        handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = _FakeDispatcher
 
         h.process({})
         h.process({
@@ -369,7 +369,7 @@ class TestEscalationExhaust:
         h, store, _ = _make_handler(policy=_ONE_STEP_POLICY, incident=inc)
 
         import relay.node.handler as handler_mod
-        handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = _FakeDispatcher
 
         # Trigger (step 0)
         h.process({})
@@ -397,7 +397,7 @@ class TestEscalationExhaust:
         h, store, _ = _make_handler(policy=_ONE_STEP_POLICY, incident=inc)
 
         import relay.node.handler as handler_mod
-        handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = _FakeDispatcher
 
         h.process({})
         h.process({
@@ -428,7 +428,7 @@ class TestDuplicateTimeoutIdempotency:
         h, store, _ = _make_handler(policy=_TWO_STEP_POLICY, incident=inc)
 
         import relay.node.handler as handler_mod
-        handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = _FakeDispatcher
 
         # Start (step 0 paged)
         h.process({})
@@ -470,7 +470,7 @@ class TestDuplicateTimeoutIdempotency:
         h, store, state_store = _make_handler(policy=_TWO_STEP_POLICY, incident=inc)
 
         import relay.node.handler as handler_mod
-        handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = _FakeDispatcher
 
         h.process({})
         persisted_after_start = store.get_incident(inc.correlation_id)
@@ -512,7 +512,7 @@ class TestAckNoPhantomEvents:
         h, store, _ = _make_handler(policy=_TWO_STEP_POLICY, incident=inc)
 
         import relay.node.handler as handler_mod
-        handler_mod.DualStreamDispatcher = _FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = _FakeDispatcher
 
         # Start (step 0 paged)
         h.process({})

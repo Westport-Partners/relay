@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import threading
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import pytest
 
@@ -51,7 +52,7 @@ class _FakeRoutingRuleStore:
     """In-memory implementation of DynamoRoutingRuleStore's public interface."""
 
     def __init__(self) -> None:
-        self._rules: dict[str, tuple] = {}  # rule_id -> (RoutingRule, match_count, enabled)
+        self._rules: dict[str, tuple[Any, ...]] = {}  # rule_id -> (RoutingRule, match_count, enabled)
 
     def put_rule(self, rule, rule_id=None, *, enabled=True) -> str:
         import uuid
@@ -59,13 +60,13 @@ class _FakeRoutingRuleStore:
             rule_id = rule.rule_id or uuid.uuid4().hex
         existing_count = self._rules.get(rule_id, (None, 0, True))[1]
         self._rules[rule_id] = (rule, existing_count, enabled)
-        return rule_id
+        return cast(str, rule_id)
 
     def get_rule(self, rule_id: str):
         entry = self._rules.get(rule_id)
         return entry[0] if entry else None
 
-    def list_rules(self) -> list[tuple]:
+    def list_rules(self) -> list[tuple[Any, ...]]:
         rows = [
             (rid, rule, count, en)
             for rid, (rule, count, en) in self._rules.items()
@@ -80,7 +81,7 @@ class _FakeRoutingRuleStore:
         if rule_id in self._rules:
             rule, count, en = self._rules[rule_id]
             self._rules[rule_id] = (rule, count + 1, en)
-            return count + 1
+            return cast(int, count + 1)
         return 0
 
     def set_enabled(self, rule_id: str, enabled: bool) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from relay.adapters.registry import AdapterManifest
 from relay.config.preflight import (
@@ -57,7 +58,7 @@ def _make_config(
     return base
 
 
-def _leaf(node_id: str, metadata: dict | None = None, parent: str | None = None) -> OrgNode:
+def _leaf(node_id: str, metadata: dict[str, Any] | None = None, parent: str | None = None) -> OrgNode:
     return OrgNode(
         id=node_id,
         name=node_id,

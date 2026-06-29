@@ -60,6 +60,7 @@ warning is emitted.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import aws_cdk as cdk
 from aws_cdk import (
@@ -108,6 +109,9 @@ from aws_cdk import (
 )
 from aws_cdk import (
     aws_secretsmanager as secretsmanager,
+)
+from aws_cdk import (
+    aws_sns as sns,
 )
 from aws_cdk import (
     aws_sqs as sqs,
@@ -163,13 +167,13 @@ def resolve_internal_alb(explicit: str | None) -> bool:
 
 
 def resolve_certificate(
-    stack,
+    stack: Stack,
     *,
     certificate_arn: str,
     phz_id: str,
     phz_name: str,
     alb_subdomain: str,
-):
+) -> tuple[acm.ICertificate | None, route53.IHostedZone | None, str | None]:
     """Resolve an ACM certificate (and optional Route53 zone + FQDN) for the ALB.
 
     Resolution priority:
@@ -213,6 +217,7 @@ def resolve_certificate(
         # DNS validation writes a CNAME record into the hosted zone. For a
         # private-only zone not reachable from the public internet, ACM cannot
         # complete automatic DNS validation — supply relay:certificate_arn instead.
+        assert fqdn is not None  # guaranteed: phz_name is truthy in this branch
         cert = acm.Certificate(
             stack,
             "RelayCert",
@@ -244,7 +249,7 @@ class RelayComputeStack(Stack):
         paging_topic_arn: str,
         central_paging_topic_arn: str,
         role: str = "team",
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
@@ -426,7 +431,7 @@ class RelayComputeStack(Stack):
             central_paging_topic.grant_publish(task_role)
             # The container also publishes to the team paging topic (resolved
             # on-call). Grant by ARN (imported topic).
-            task_role.add_to_policy(
+            task_role.add_to_principal_policy(
                 iam.PolicyStatement(
                     sid="RelayTeamPaging",
                     effect=iam.Effect.ALLOW,
@@ -439,7 +444,7 @@ class RelayComputeStack(Stack):
             # resource's tags to populate Incident.tags (COMPONENT_ID/GIT_SHA/
             # GITLAB_* join keys). These APIs don't support resource scoping.
             if resolve_alarm_tags:
-                task_role.add_to_policy(
+                task_role.add_to_principal_policy(
                     iam.PolicyStatement(
                         sid="RelayAlarmTagResolution",
                         effect=iam.Effect.ALLOW,
@@ -458,7 +463,7 @@ class RelayComputeStack(Stack):
         ai_uses_bedrock = ai_enabled and ai_provider in ("", "bedrock", "bedrock-converse")
 
         if enable_direct_sms and not byor_mode:
-            task_role.add_to_policy(
+            task_role.add_to_principal_policy(
                 iam.PolicyStatement(
                     sid="RelayHubDirectSms",
                     effect=iam.Effect.ALLOW,
@@ -468,7 +473,7 @@ class RelayComputeStack(Stack):
                 )
             )
         if ai_uses_bedrock and not byor_mode:
-            task_role.add_to_policy(
+            task_role.add_to_principal_policy(
                 iam.PolicyStatement(
                     sid="RelayHubBedrockInvoke",
                     effect=iam.Effect.ALLOW,
@@ -636,7 +641,7 @@ class RelayComputeStack(Stack):
         if resolved_scope == "local-federated" and central_hub_bus_arn:
             container_env["RELAY_CENTRAL_HUB_BUS_ARN"] = central_hub_bus_arn
             if not byor_mode:
-                task_role.add_to_policy(
+                task_role.add_to_principal_policy(
                     iam.PolicyStatement(
                         sid="RelayCentralHubForwardEvents",
                         effect=iam.Effect.ALLOW,
@@ -696,7 +701,7 @@ class RelayComputeStack(Stack):
         # max_healthy_percent=200 gives room to run the new one alongside the old.
         # Circuit breaker WITH rollback so a bad image rolls back, never wedges.
         # ------------------------------------------------------------------
-        _alb_kwargs: dict = dict(
+        _alb_kwargs: dict[str, Any] = dict(
             cluster=cluster,
             task_definition=task_def,
             desired_count=min_capacity,
@@ -740,7 +745,9 @@ class RelayComputeStack(Stack):
         )
         scheme = "https" if cert is not None else "http"
         _dashboard_host = fqdn or alb_service.load_balancer.load_balancer_dns_name
-        alb_service.task_definition.default_container.add_environment(
+        default_container = alb_service.task_definition.default_container
+        assert default_container is not None  # set above via add_container
+        default_container.add_environment(
             "RELAY_DASHBOARD_URL",
             f"{scheme}://{_dashboard_host}/",
         )
@@ -788,30 +795,29 @@ class RelayComputeStack(Stack):
     # Helpers
     # ----------------------------------------------------------------------
 
-    def _import_topic(self, construct_id: str, topic_arn: str):
-        from aws_cdk import aws_sns as sns
+    def _import_topic(self, construct_id: str, topic_arn: str) -> sns.ITopic:
         return sns.Topic.from_topic_arn(self, construct_id, topic_arn)
 
     def _emit_byor_outputs(
         self,
         *,
-        fleet_table,
-        ingest_queue,
-        central_paging_topic,
-        paging_topic_arn,
-        resolved_scope,
-        central_hub_bus_arn,
-        enable_direct_sms,
-        ai_uses_bedrock,
-        ai_api_key_secret_name,
-        resolve_alarm_tags,
+        fleet_table: dynamodb.ITable,
+        ingest_queue: sqs.IQueue,
+        central_paging_topic: sns.ITopic,
+        paging_topic_arn: str,
+        resolved_scope: str,
+        central_hub_bus_arn: str,
+        enable_direct_sms: bool,
+        ai_uses_bedrock: bool,
+        ai_api_key_secret_name: str,
+        resolve_alarm_tags: bool,
     ) -> None:
         """Emit inline-policy + trust JSON for the two pre-provisioned ECS roles."""
         log_group_arn = (
             f"arn:{self.partition}:logs:{self.region}:{self.account}:"
             "log-group:/relay/hub:*"
         )
-        task_statements: list[dict] = [
+        task_statements: list[dict[str, Any]] = [
             {
                 "Sid": "RelayHubFleetTable",
                 "Effect": "Allow",
@@ -882,7 +888,7 @@ class RelayComputeStack(Stack):
             })
         task_policy = {"Version": "2012-10-17", "Statement": task_statements}
 
-        exec_statements: list[dict] = [
+        exec_statements: list[dict[str, Any]] = [
             {
                 "Sid": "RelayHubEcr",
                 "Effect": "Allow",

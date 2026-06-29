@@ -14,6 +14,7 @@ Uses moto to mock DynamoDB — no real AWS calls.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import boto3
 import pytest
@@ -201,8 +202,8 @@ def test_engine_with_deadline_timer_advances_on_sweep(dynamo_table):
 class _FakeTimer:
     def __init__(self, due):
         self._due = list(due)
-        self.claimed: list[tuple] = []
-        self._claim_returns: dict[tuple, bool] = {}
+        self.claimed: list[tuple[Any, ...]] = []
+        self._claim_returns: dict[tuple[Any, ...], bool] = {}
 
     def set_claim(self, key, value):
         self._claim_returns[key] = value
@@ -225,7 +226,7 @@ def test_sweeper_fires_claimed_deadlines():
     from relay.hub.app import DeadlineSweeper
 
     timer = _FakeTimer([_due("inc-1", 0), _due("inc-2", 1)])
-    fired: list[tuple] = []
+    fired: list[tuple[Any, ...]] = []
     sweeper = DeadlineSweeper(timer=timer, fire=lambda i, s: fired.append((i, s)))
 
     count = sweeper.sweep_once()
@@ -238,7 +239,7 @@ def test_sweeper_skips_unclaimed():
 
     timer = _FakeTimer([_due("inc-1", 0)])
     timer.set_claim(("inc-1", 0), False)  # lost the race
-    fired: list[tuple] = []
+    fired: list[tuple[Any, ...]] = []
     sweeper = DeadlineSweeper(timer=timer, fire=lambda i, s: fired.append((i, s)))
 
     assert sweeper.sweep_once() == 0
@@ -249,7 +250,7 @@ def test_sweeper_isolates_fire_failure():
     from relay.hub.app import DeadlineSweeper
 
     timer = _FakeTimer([_due("inc-bad", 0), _due("inc-ok", 0)])
-    fired: list[tuple] = []
+    fired: list[tuple[Any, ...]] = []
 
     def _fire(incident_id, step_index):
         if incident_id == "inc-bad":

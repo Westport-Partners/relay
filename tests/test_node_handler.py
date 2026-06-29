@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import textwrap
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -150,7 +151,7 @@ class FakeAlarmSource:
     def __init__(self, incident: Incident) -> None:
         self._incident = incident
 
-    def parse_event(self, event: dict) -> Incident:
+    def parse_event(self, event: dict[str, Any]) -> Incident:
         return self._incident
 
 
@@ -247,7 +248,7 @@ def _make_handler(
     # Patch DualStreamDispatcher so no real AWS calls happen
     import relay.node.handler as handler_mod
     original_dispatcher = handler_mod.DualStreamDispatcher
-    handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore[assignment]
+    handler_mod.DualStreamDispatcher = FakeDispatcher
 
     try:
         h = NodeHandler(
@@ -262,12 +263,12 @@ def _make_handler(
             _clock=_clock,
         )
     finally:
-        handler_mod.DualStreamDispatcher = original_dispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = original_dispatcher
 
     # Keep the patched dispatcher in place for the duration of the test by
     # re-patching it on the module after construction.  We store the revert
     # for callers that want to call process().
-    handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore[assignment]
+    handler_mod.DualStreamDispatcher = FakeDispatcher
 
     return h, loader
 
@@ -297,7 +298,7 @@ class TestConfigTTLRefresh:
             loader = FakeConfigLoader(cfg)
             inc = _make_incident()
             alarm_source = FakeAlarmSource(inc)
-            handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = FakeDispatcher
 
             h = NodeHandler(
                 _config_loader=loader,
@@ -320,7 +321,7 @@ class TestConfigTTLRefresh:
                 "refresh() should NOT be called before TTL elapses"
             )
         finally:
-            handler_mod.DualStreamDispatcher = original_dispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = original_dispatcher
 
     def test_refresh_called_once_ttl_elapses(self, monkeypatch):
         """process() MUST call refresh() exactly once after the TTL elapses."""
@@ -342,7 +343,7 @@ class TestConfigTTLRefresh:
             loader = FakeConfigLoader(cfg)
             inc = _make_incident()
             alarm_source = FakeAlarmSource(inc)
-            handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = FakeDispatcher
 
             h = NodeHandler(
                 _config_loader=loader,
@@ -363,7 +364,7 @@ class TestConfigTTLRefresh:
                 "refresh() should be called exactly once when TTL elapses"
             )
         finally:
-            handler_mod.DualStreamDispatcher = original_dispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = original_dispatcher
 
     def test_refresh_failure_is_swallowed_and_old_config_retained(self, monkeypatch):
         """A refresh() that raises must NOT propagate and must keep the old config."""
@@ -387,7 +388,7 @@ class TestConfigTTLRefresh:
 
             inc = _make_incident()
             alarm_source = FakeAlarmSource(inc)
-            handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = FakeDispatcher
 
             h = NodeHandler(
                 _config_loader=loader,
@@ -413,7 +414,7 @@ class TestConfigTTLRefresh:
             # Event handling still produced a result
             assert "statusCode" in result
         finally:
-            handler_mod.DualStreamDispatcher = original_dispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = original_dispatcher
 
     def test_event_handling_succeeds_after_refresh_failure(self, monkeypatch):
         """Even when refresh() raises, the alarm event must be processed successfully."""
@@ -436,7 +437,7 @@ class TestConfigTTLRefresh:
 
             inc = _make_incident()
             alarm_source = FakeAlarmSource(inc)
-            handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = FakeDispatcher
 
             h = NodeHandler(
                 _config_loader=loader,
@@ -454,7 +455,7 @@ class TestConfigTTLRefresh:
             # Should succeed with statusCode 200 from _handle_alarm
             assert result.get("statusCode") == 200
         finally:
-            handler_mod.DualStreamDispatcher = original_dispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = original_dispatcher
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +491,7 @@ class TestRoleResolverWiring:
         cfg = make_relay_config()
         loader = FakeConfigLoader(cfg)
         original_dispatcher = handler_mod.DualStreamDispatcher
-        handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore
+        handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
             return NodeHandler(
                 _config_loader=loader,
@@ -504,7 +505,7 @@ class TestRoleResolverWiring:
                 **inject,
             )
         finally:
-            handler_mod.DualStreamDispatcher = original_dispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = original_dispatcher
 
     def test_default_construction_wires_schedule_backed_resolver(self):
         """With no injection, the Node builds a real ScheduleRoleResolver backed
@@ -537,7 +538,7 @@ class TestHeartbeat:
         cfg = make_relay_config()
         loader = FakeConfigLoader(cfg)
         original_dispatcher = handler_mod.DualStreamDispatcher
-        handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore
+        handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
             h = NodeHandler(
                 _config_loader=loader,
@@ -550,9 +551,9 @@ class TestHeartbeat:
                 _escalation_engine=FakeEscalationEngine(),
             )
         finally:
-            handler_mod.DualStreamDispatcher = original_dispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = original_dispatcher
         # Keep dispatcher patched so process() calls work cleanly
-        handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore
+        handler_mod.DualStreamDispatcher = FakeDispatcher
         return h
 
     def test_heartbeat_event_emits_via_transport(self, monkeypatch):
@@ -654,7 +655,7 @@ class TestHeartbeat:
         cfg = make_relay_config()
         loader = FakeConfigLoader(cfg)
         original = handler_mod.DualStreamDispatcher
-        handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore
+        handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
             h = NodeHandler(
                 _config_loader=loader,
@@ -669,7 +670,7 @@ class TestHeartbeat:
                 _tag_enricher=enricher,
             )
         finally:
-            handler_mod.DualStreamDispatcher = original  # type: ignore
+            handler_mod.DualStreamDispatcher = original
 
         h.process({"relay_event": "heartbeat"})
 
@@ -695,7 +696,7 @@ class TestHeartbeatOrgPath:
         cfg = make_relay_config()
         loader = FakeConfigLoader(cfg)
         original_dispatcher = handler_mod.DualStreamDispatcher
-        handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore
+        handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
             h = NodeHandler(
                 _config_loader=loader,
@@ -708,8 +709,8 @@ class TestHeartbeatOrgPath:
                 _escalation_engine=FakeEscalationEngine(),
             )
         finally:
-            handler_mod.DualStreamDispatcher = original_dispatcher  # type: ignore
-        handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore
+            handler_mod.DualStreamDispatcher = original_dispatcher
+        handler_mod.DualStreamDispatcher = FakeDispatcher
         return h
 
     def test_heartbeat_emits_org_path_override(self, monkeypatch):
@@ -794,7 +795,7 @@ class TestTimeoutMarksEscalated:
             new_phase = "ESCALATING"
             contact_ids_to_page = ["cnt-secondary"]
             roles_to_page: list[str] = []
-            streams: list = []
+            streams: list[str] = []
             note = "advanced"
 
         def on_timeout(self, incident_id, step_index, policy):
@@ -875,7 +876,7 @@ class TestRoutingProvenance:
         import relay.node.handler as handler_mod
 
         monkeypatch_dispatcher = handler_mod.DualStreamDispatcher
-        handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
             h = NodeHandler(
                 _config_loader=FakeConfigLoader(config),
@@ -888,8 +889,8 @@ class TestRoutingProvenance:
                 _escalation_engine=FakeEscalationEngine(),
             )
         finally:
-            handler_mod.DualStreamDispatcher = monkeypatch_dispatcher  # type: ignore[assignment]
-        handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore[assignment]
+            handler_mod.DualStreamDispatcher = monkeypatch_dispatcher
+        handler_mod.DualStreamDispatcher = FakeDispatcher
         return h
 
     def _make_config_with_rule(self, rule_id: str, alarm_name_prefix: str) -> RelayConfig:  # noqa: F821

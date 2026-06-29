@@ -9,12 +9,13 @@ the NIGHT shift of the wrong day.)
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from relay.hub.app import _resolve_now_on_call
 
 
 class _FakeScheduleStore:
-    def __init__(self, schedules: dict):
+    def __init__(self, schedules: dict[str, Any]):
         self._schedules = schedules
 
     def get_schedule(self, week_start: str):

@@ -22,8 +22,8 @@ scripts/relay-verify.sh --base main
 (If the change touched `docs/` or `infra/` the script auto-detects and runs
 `mkdocs build --strict` / `relay-synth.sh`. Pass `--all` to force everything.)
 
-Report each gate's result. **Blocking gates** — ruff, `mypy src`, pytest, and
-(when relevant) mkdocs --strict and cdk synth — must all pass.
+Report each gate's result. **Blocking gates** — ruff, `mypy` (src, infra, tools,
+tests), pytest, and (when relevant) mkdocs --strict and cdk synth — must all pass.
 
 ## Step 2 — Determine what changed
 

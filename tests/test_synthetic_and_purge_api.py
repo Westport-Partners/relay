@@ -392,7 +392,7 @@ def test_purge_recomputes_affected_fleet_tiles_and_publishes(monkeypatch):
         def list_open_incidents(self, account_id=None):
             return []  # everything purged; tile should clear
 
-    recompute_calls: list[tuple] = []
+    recompute_calls: list[tuple[Any, ...]] = []
 
     class _RecordingHubState:
         def recompute_tile(
