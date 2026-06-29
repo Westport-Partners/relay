@@ -172,3 +172,29 @@ ignore:
     - name: aws-autoscaling-target-tracking
       alarm_name_prefix: "TargetTracking-"
       note: "AWS autoscaling control-loop alarms, not incidents (incl. Relay's own hub)."
+
+    # -----------------------------------------------------------------------
+    # ENTERPRISE CSPM / SECURITY STACKSET NOISE (commented out — uncomment +
+    # adjust the prefix to match your account's controls).
+    #
+    # In many enterprise/government accounts a central security team deploys
+    # CloudFormation StackSets that install account-wide CloudTrail metric
+    # alarms (IAMPolicyChanges, UnauthorizedAPICalls, RootAccountUsage, etc.).
+    # These fire on routine administrative activity — INCLUDING the actions a
+    # fresh Relay install performs (creating inline policies, and the denied
+    # API calls made while discovering permissions). The result: within minutes
+    # of install, the board surfaces "incidents" that are central security
+    # controls, not application incidents. Ignore them by their StackSet prefix.
+    #
+    # Find the real prefix in your account:
+    #   aws cloudwatch describe-alarms --query 'MetricAlarms[].AlarmName' --output text
+    # then match it below (StackSet-managed alarms are commonly prefixed
+    # "StackSet-" or carry the security team's naming convention).
+    # -----------------------------------------------------------------------
+    # - name: cspm-stackset-alarms
+    #   alarm_name_prefix: "StackSet-"
+    #   note: "Central CSPM/security StackSet controls — not application incidents."
+    #
+    # - name: cloudtrail-security-metric-alarms
+    #   alarm_name_prefix: "CIS-"          # CIS-benchmark metric alarms
+    #   note: "Centrally-managed CIS benchmark alarms — not application incidents."

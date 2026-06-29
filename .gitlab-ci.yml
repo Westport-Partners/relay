@@ -1,22 +1,25 @@
 # =============================================================================
 # Relay — GitLab CI/CD pipeline
 # =============================================================================
-# Deploys the Relay Node (per-team) or Hub (central) CDK stack into the AWS
-# account where the GitLab runner lives.
+# Deploys a Relay team or federated-hub CDK stack into the AWS account where the
+# GitLab runner lives.
 #
 # ASSUMPTIONS
 #   * A GitLab runner is registered IN the target AWS account, and that runner
 #     (EC2 instance profile or ECS task role) has the IAM permissions CDK needs
-#     to deploy. We therefore do NOT take AWS access keys as inputs — the SDK
-#     picks up the runner's role automatically. The account ID is discovered at
-#     runtime via `aws sts get-caller-identity`.
+#     to deploy (see infra/RUNNER_IAM.md). We therefore do NOT take AWS access
+#     keys as inputs — the SDK picks up the runner's role automatically. The
+#     account ID is discovered at runtime via `aws sts get-caller-identity`.
+#   * The runner is selected by the `runner_tag` input (see below). Every job
+#     carries that tag so the pipeline runs ONLY on the in-account runner — an
+#     untagged job can land on any runner and silently target the wrong account.
 #
 # HOW A TEAM USES IT
 #   1. Clone/fork this repo into their GitLab.
 #   2. CI/CD > Pipelines > "Run pipeline" (web UI).
-#   3. Pick the inputs (deploy_type = node | hub, plus a few basics).
-#   4. Run. The pipeline tests, synthesizes, and (on the manual `deploy` job)
-#      deploys the selected stack.
+#   3. Pick the inputs (deploy_type = team | federated-hub, plus a few basics).
+#   4. Run. The pipeline validates inputs, tests, synthesizes, and (on the manual
+#      `deploy` job) deploys the selected stack.
 #
 # The web "Run pipeline" screen renders the `spec.inputs` below as a form with
 # dropdowns and defaults.
@@ -27,52 +30,71 @@ spec:
     deploy_type:
       description: >-
         Which Relay topology to deploy.
-        standalone: Node + local Hub in ONE account, ONE deploy (default — no org needed).
-        node: per-team Node only; hub_event_bus_arn required.
-        hub: central org-wide Hub only; org_id required.
-      default: "standalone"
+        team: one always-on container + data plane in ONE account (default).
+        federated-hub: the org-wide aggregator (adds the federation bus); org_id required.
+      default: "team"
       options:
-        - "standalone"  # Node + local Hub, single account (default — no org required)
-        - "node"        # per-team Node only (~200 of these)
-        - "hub"         # central org-wide Hub (deploy once per org)
+        - "team"
+        - "federated-hub"
+
+    runner_tag:
+      description: >-
+        REQUIRED in any GitLab with more than one runner. Tag of the runner
+        registered in the TARGET AWS account (its instance role provides AWS
+        creds). If your project has exactly one runner you may leave this as the
+        default and the job runs on it.
+      default: "aws-ec2"
 
     aws_region:
       description: "AWS region to deploy into."
       default: "us-east-1"
 
-    # --- Node-only inputs (ignored when deploy_type=standalone or hub) ---
+    # --- team inputs ---
     team_name:
-      description: "[node/standalone] Unique team identifier (used in resource names + Hub tagging), e.g. payments-api."
+      description: "REQUIRED for team. Unique team identifier used in resource names + Hub tagging, e.g. payments-api."
       default: ""
 
-    hub_event_bus_arn:
-      description: "[node only] ARN of the Hub's EventBridge bus (from the Hub deploy output). Not used for standalone — the local bus ARN is wired automatically."
-      default: ""
-
-    # --- Hub-only inputs (ignored when deploy_type=node or standalone) ---
+    # --- federated-hub inputs ---
     org_id:
-      description: "[hub only] AWS Organizations ID (o-xxxx) — grants org-scoped PutEvents to the bus. Not required for standalone."
+      description: "REQUIRED for federated-hub. AWS Organizations ID (o-xxxx) — grants org-scoped PutEvents to the bus."
       default: ""
 
-    servicenow_instance:
-      description: "[hub/standalone] ServiceNow instance hostname, e.g. acme.service-now.com."
+    # --- compute image ---
+    hub_image_uri:
+      description: "ECR image URI for the Hub container. Required to DEPLOY compute; leave blank to only test/synth (synth skips the image guard)."
       default: ""
 
-    # --- Standalone / local-federated inputs ---
+    # --- federation (team forwarding up to a hub) ---
     hub_scope:
-      description: "[standalone] Hub bus ingress scope: local (default, same-account only) or local-federated (same-account + forwards up to a central Hub)."
+      description: "[team] Hub bus ingress scope: local (default, same-account) or local-federated (also forwards SEV1/2 up to a federated hub)."
       default: "local"
       options:
         - "local"
         - "local-federated"
 
-    central_hub_bus_arn:
-      description: "[standalone, hub_scope=local-federated] ARN of the upstream central Hub EventBridge bus to forward events to."
+    upstream_hub_bus_arn:
+      description: "[team, hub_scope=local-federated] ARN of the upstream federated-hub EventBridge bus to forward events to."
       default: ""
 
-    # --- Optional, all roles ---
+    # --- BYOR / BYOV (locked-down accounts; see docs/byor.md) ---
+    ecs_task_role_arn:
+      description: "[BYOR] Pre-provisioned ECS task role ARN. Leave blank to let CDK create one. BYOR needs BOTH role ARNs."
+      default: ""
+
+    ecs_execution_role_arn:
+      description: "[BYOR] Pre-provisioned ECS execution role ARN. Leave blank to let CDK create one. BYOR needs BOTH role ARNs."
+      default: ""
+
+    vpc_id:
+      description: "[BYOV] Existing VPC id to import. Leave blank to let CDK create a new VPC."
+      default: ""
+
+    servicenow_instance:
+      description: "[optional] ServiceNow instance hostname, e.g. acme.service-now.com."
+      default: ""
+
     gitlab_repo:
-      description: "GitLab repo path holding the config-as-code (rotations/escalation/routing), e.g. org/team-relay-config. Blank = use this repo."
+      description: "[optional] GitLab repo path holding config-as-code (escalation/routing), e.g. org/team-relay-config. Blank = use this repo."
       default: ""
 
     gitlab_secret_name:
@@ -90,8 +112,11 @@ spec:
 # ---------------------------------------------------------------------------
 # Pipeline-wide config
 # ---------------------------------------------------------------------------
-# A single image that carries Python 3.12 (app + CDK) and Node.js (CDK CLI).
-image: "node:20-bookworm"
+# Base image MUST provide Python 3.12+ (pyproject requires-python >= 3.12).
+# Debian Bookworm's default python3 is 3.11, which pip rejects — so we start
+# from the official python:3.12 image and install Node.js for the CDK CLI in
+# the setup anchor below.
+image: "python:3.12-bookworm"
 
 variables:
   # Surface the chosen inputs as ordinary env vars for the job scripts.
@@ -99,15 +124,24 @@ variables:
   AWS_REGION: "$[[ inputs.aws_region ]]"
   AWS_DEFAULT_REGION: "$[[ inputs.aws_region ]]"
   RELAY_TEAM_NAME: "$[[ inputs.team_name ]]"
-  RELAY_HUB_EVENT_BUS_ARN: "$[[ inputs.hub_event_bus_arn ]]"
   RELAY_ORG_ID: "$[[ inputs.org_id ]]"
+  RELAY_HUB_IMAGE_URI: "$[[ inputs.hub_image_uri ]]"
   RELAY_SERVICENOW_INSTANCE: "$[[ inputs.servicenow_instance ]]"
   RELAY_HUB_SCOPE: "$[[ inputs.hub_scope ]]"
-  RELAY_CENTRAL_HUB_BUS_ARN: "$[[ inputs.central_hub_bus_arn ]]"
+  RELAY_UPSTREAM_HUB_BUS_ARN: "$[[ inputs.upstream_hub_bus_arn ]]"
+  RELAY_ECS_TASK_ROLE_ARN: "$[[ inputs.ecs_task_role_arn ]]"
+  RELAY_ECS_EXECUTION_ROLE_ARN: "$[[ inputs.ecs_execution_role_arn ]]"
+  RELAY_VPC_ID: "$[[ inputs.vpc_id ]]"
   RELAY_GITLAB_REPO: "$[[ inputs.gitlab_repo ]]"
   RELAY_GITLAB_SECRET_NAME: "$[[ inputs.gitlab_secret_name ]]"
   RELAY_REQUIRE_APPROVAL: "$[[ inputs.require_approval ]]"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+# Run only on every job: the runner registered in the target AWS account. An
+# untagged job can run on ANY runner and silently target the wrong account.
+default:
+  tags:
+    - "$[[ inputs.runner_tag ]]"
 
 # Only run from the web "Run pipeline" button (this is a deploy tool, not a
 # commit-triggered CI). Remove/extend this if you also want MR validation.
@@ -116,15 +150,18 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "web"'
 
 stages:
+  - validate
   - test
   - synth
   - deploy
 
 # ---------------------------------------------------------------------------
-# Shared setup: install Python, app deps, CDK CLI.
+# Shared setup: install Node.js (CDK CLI) + app deps. Python 3.12 is already in
+# the base image, so we do NOT apt-get python here.
 # ---------------------------------------------------------------------------
 .python_cdk_setup: &python_cdk_setup
-  - apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv >/dev/null
+  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1
+  - apt-get install -y -qq nodejs >/dev/null
   - python3 -m venv .venv
   - . .venv/bin/activate
   - pip install --quiet --upgrade pip
@@ -138,6 +175,34 @@ cache:
   paths:
     - .cache/pip
     - .venv
+
+# ---------------------------------------------------------------------------
+# 0) VALIDATE — fail fast on missing required inputs BEFORE any slow setup.
+#    GitLab shows a green "Run pipeline" even with blank required inputs, so the
+#    only place to catch them with a clear message is here.
+# ---------------------------------------------------------------------------
+validate-inputs:
+  stage: validate
+  script:
+    - |
+      fail() { echo "ERROR: $*" >&2; exit 1; }
+      case "${RELAY_DEPLOY_TYPE}" in
+        team)
+          [ -n "${RELAY_TEAM_NAME}" ] || fail "team_name is required when deploy_type=team."
+          ;;
+        federated-hub)
+          [ -n "${RELAY_ORG_ID}" ] || fail "org_id is required when deploy_type=federated-hub."
+          ;;
+        *) fail "deploy_type must be 'team' or 'federated-hub' (got '${RELAY_DEPLOY_TYPE}')." ;;
+      esac
+      # BYOR needs both role ARNs or neither — one alone is silently ignored by the stack.
+      if { [ -n "${RELAY_ECS_TASK_ROLE_ARN}" ] && [ -z "${RELAY_ECS_EXECUTION_ROLE_ARN}" ]; } \
+         || { [ -z "${RELAY_ECS_TASK_ROLE_ARN}" ] && [ -n "${RELAY_ECS_EXECUTION_ROLE_ARN}" ]; }; then
+        fail "BYOR needs BOTH ecs_task_role_arn and ecs_execution_role_arn (or neither)."
+      fi
+      echo "Inputs OK: deploy_type=${RELAY_DEPLOY_TYPE}"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
 
 # ---------------------------------------------------------------------------
 # 1) TEST — run the unit suite before anything touches AWS.
@@ -160,6 +225,8 @@ test:
 # ---------------------------------------------------------------------------
 # 2) SYNTH — validate the CloudFormation synthesizes for the chosen role.
 #    Runs automatically; uploads the template as an artifact for review.
+#    relay-synth.sh passes relay:image_check=false, so this succeeds even
+#    before a container image has been built (the common first-use case).
 # ---------------------------------------------------------------------------
 synth:
   stage: synth

@@ -260,6 +260,54 @@ Relay. Everything here is auditable and runnable by hand:
 
 ---
 
+## Locked-down accounts (`iam:PassRole` denied)
+
+`cdk deploy` hands the CDK bootstrap CloudFormation execution role to
+CloudFormation via `iam:PassRole`. Many regulated and government accounts deny
+`iam:PassRole` in an identity-based policy, so `cdk deploy` fails before it
+creates anything:
+
+```
+User: arn:aws:iam::<account>:role/<runner-role>/... is not authorized to perform:
+iam:PassRole on resource: arn:aws:iam::<account>:role/cdk-hnb659fds-cfn-exec-role-...
+with an explicit deny in an identity-based policy
+```
+
+Use **`scripts/relay-deploy-direct.sh`** instead. It synthesizes the templates
+locally (no AWS writes), then submits each one with `aws cloudformation deploy`
+using **your own credentials** — CloudFormation acts as the caller, so there is
+no execution role to pass:
+
+```bash
+# Data plane first — creates zero IAM roles and zero VPC, so it deploys even in
+# the most restricted accounts. This is the right first step on a fresh account.
+RELAY_DEPLOY_TYPE=team \
+RELAY_TEAM_NAME=<team> \
+RELAY_STACK_SELECTOR=data \
+./scripts/relay-deploy-direct.sh
+```
+
+Relay's stacks reference the container image by registry URI (no CDK file or
+image assets), so the synthesized templates are self-contained and deploy this
+way with no asset-publishing step. The script takes the **same environment
+variables** as `relay-deploy.sh` (`RELAY_STACK_SELECTOR`, `RELAY_TEAM_NAME`,
+`RELAY_HUB_IMAGE_URI`, …).
+
+For the **compute** stack in accounts that *also* deny `iam:CreateRole` /
+`ec2:CreateVpc`, supply pre-provisioned ARNs (`relay:ecs_task_role_arn`,
+`relay:ecs_execution_role_arn`, `relay:vpc_id`) so the stack imports rather than
+creates them — see [byor.md](byor.md).
+
+> **CDK bootstrap is not required for this path.** `relay-deploy-direct.sh` never
+> calls the bootstrap execution role. If your account's bootstrap stack is pinned
+> at an older version by a platform team (e.g. v18) and you cannot update it, the
+> "outdated bootstrap version" notice CDK prints during `synth` is **safe to
+> ignore** — synth makes no AWS writes and the direct deploy does not use the
+> bootstrap roles. (A normal `cdk deploy` of the **compute** stack does expect a
+> current bootstrap; the data plane does not.)
+
+---
+
 ## Deploy environment variables
 
 ### Required

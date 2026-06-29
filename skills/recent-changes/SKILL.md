@@ -62,6 +62,21 @@ The probe prints these sections (each isolated — one failing never aborts the 
    queried here; that correlation is handled by the Hub's deploy-context
    attachment (see `docs/AI.md §4`).
 
+## Required IAM permissions
+
+The probe is read-only. The calling principal (the investigation agent's role in the
+team account) needs the actions below. A missing **Required** permission makes the
+probe silently skip that section — output looks like "no results" rather than "denied".
+
+| Action | Required | Used for |
+|--------|----------|----------|
+| `cloudtrail:LookupEvents` | **Yes — core** | Mutating API calls in the window |
+| `cloudformation:DescribeStackEvents` | **Yes** | Stack create/update/delete events |
+| `cloudformation:ListStacks` | No | Find the stack by app name |
+| `ecs:DescribeServices` | No | ECS deployment history |
+| `ecs:ListClusters` | No | Discover the cluster by app name |
+| `ecs:ListServices` | No | Discover the service within the cluster |
+
 ## How to interpret (raw output → hypotheses)
 
 **ECS deployment findings**

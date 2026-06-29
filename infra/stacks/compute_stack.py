@@ -316,9 +316,13 @@ class RelayComputeStack(Stack):
         # amazonlinux synth still crash-loops ECS — so we raise at synth.
         # ------------------------------------------------------------------
         hub_image_uri: str = self.node.try_get_context("relay:hub_image_uri") or ""
-        # `cdk bootstrap` / `cdk ls` execute the app to discover environments but
-        # never deploy a stack, so the image isn't needed there. relay-bootstrap.sh
-        # sets relay:image_check=false to skip the guard; deploy + synth leave it on.
+        # `cdk synth/deploy RelayDataStack` still executes this whole app, so this
+        # guard would fire on the compute stack even when ONLY the data plane is
+        # being deployed — blocking the documented "data plane first" step, which
+        # is the only step a locked-down account (PassRole/CreateRole denied) can
+        # run before an image exists. relay:image_check=false skips the guard; the
+        # deploy scripts set it automatically whenever RelayComputeStack is not a
+        # deploy target (relay-context.sh), and relay-bootstrap.sh sets it too.
         image_check = str(
             self.node.try_get_context("relay:image_check") or "true"
         ).lower() != "false"
@@ -329,7 +333,10 @@ class RelayComputeStack(Stack):
             raise ValueError(
                 "relay:hub_image_uri must be a real ECR image URI for the Relay "
                 f"container (got {hub_image_uri!r}). Build + push the image first "
-                "(scripts/relay-build-hub-image.sh) — never synth a placeholder."
+                "(scripts/relay-build-hub-image.sh) — never synth a placeholder. "
+                "If you are deploying ONLY the data plane (no compute), pass "
+                "-c relay:image_check=false (the deploy scripts do this for you "
+                "when RelayComputeStack is not a target)."
             )
         # A non-deploy invocation with no image still needs *something* to build
         # the container construct; use an obviously-fake tag that can never reach

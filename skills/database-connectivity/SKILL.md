@@ -61,6 +61,20 @@ The probe prints these sections (each isolated — one failing never aborts the 
    If `RELAY_APP_SECURITY_GROUP` is unset, notes it and prints all inbound rules for
    the DB port so a human can judge.
 
+## Required IAM permissions
+
+The probe is read-only. The calling principal (the investigation agent's role in the
+team account) needs the actions below. A missing **Required** permission makes the
+probe silently skip that section — output looks like "no results" rather than "denied".
+
+| Action | Required | Used for |
+|--------|----------|----------|
+| `rds:DescribeDBInstances` | **Yes** | RDS instance details |
+| `rds:DescribeDBClusters` | **Yes** | Aurora cluster details |
+| `ec2:DescribeSecurityGroups` | **Yes** | DB security-group inbound rules |
+| `cloudwatch:GetMetricStatistics` | No | Connection/CPU/memory saturation metrics |
+| `rds:DescribeEvents` | No | DB events in the window |
+
 ## How to interpret (raw output → hypotheses)
 
 - **`DBInstanceStatus` / cluster `Status` != `available`** (e.g. `rebooting`,

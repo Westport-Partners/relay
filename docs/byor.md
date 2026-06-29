@@ -13,6 +13,14 @@ and creates nothing.
 > Lambda execution role, no EventBridge Scheduler invoke role, and no `PassRole` grant in the
 > task definition.
 
+> **`cdk deploy` itself needs `iam:PassRole`.** BYOR/BYOV remove *runtime* role and
+> VPC creation, but `cdk deploy` still passes the CDK bootstrap execution role to
+> CloudFormation. If your account denies `iam:PassRole`, deploy with
+> `scripts/relay-deploy-direct.sh` (synth → `aws cloudformation deploy` with your own
+> credentials) — see [deploy.md → Locked-down accounts](deploy.md#locked-down-accounts-iampassrole-denied).
+> To evaluate Relay without deploying ECS at all, `scripts/relay-provision-cli.sh`
+> creates just the data plane + alarm ingest with plain AWS CLI calls.
+
 ---
 
 ## BYOR — Bring-Your-Own-Role
@@ -25,6 +33,13 @@ Pass two CDK context keys and the compute stack imports the roles instead of cre
 | `relay:ecs_execution_role_arn` | Your pre-provisioned ECS task execution role |
 
 BYOR activates when **both** are supplied. The stack creates zero IAM roles.
+
+> **One role for both is fine.** If your organization pre-provisions a single service
+> role that covers both ECS task and execution responsibilities, pass the **same ARN**
+> for both context keys. The stack imports it twice under separate CDK construct IDs
+> (`RelayHubTaskRole` and `RelayHubExecutionRole`) — valid, and it results in one role
+> carrying both inline policies. In that case apply **both** emitted inline policies
+> (`ByorTaskRoleInlinePolicy` + `ByorExecutionRoleInlinePolicy`) to that single role.
 
 ### What the stack emits in BYOR mode
 

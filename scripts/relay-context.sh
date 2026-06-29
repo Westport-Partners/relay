@@ -29,6 +29,10 @@
 #   (RELAY_INTERNAL_ALB already documented above)
 #   RELAY_ACCESS_CONTROL  true | false — fine-grained write access control
 #   RELAY_AUTH_ALLOWED_USERS  comma-separated list of OIDC usernames allowed to WRITE
+#   RELAY_ECS_TASK_ROLE_ARN       BYOR: pre-provisioned ECS task role ARN
+#   RELAY_ECS_EXECUTION_ROLE_ARN  BYOR: pre-provisioned ECS execution role ARN
+#                       (BYOR activates only when BOTH role ARNs are set)
+#   RELAY_VPC_ID        BYOV: existing VPC id to import (else a VPC is created)
 #
 # Build-time-only env vars (NOT passed as CDK context flags):
 #   RELAY_CONFIG_DIR    path to a team's live local config directory
@@ -213,6 +217,13 @@ relay_build_context() {
   # ALB exposure: unset => stack default (internal). Pass through only when set so
   # the stack's internal-by-default behavior stays authoritative for everyone else.
   [ -n "${RELAY_INTERNAL_ALB:-}" ] && ctx="${ctx} -c relay:internal_alb=${RELAY_INTERNAL_ALB}"
+  # BYOR / BYOV — accounts that deny iam:CreateRole / ec2:CreateVpc supply
+  # pre-provisioned ARNs and the compute stack imports them (see docs/byor.md).
+  # BYOR activates only when BOTH role ARNs are set; passing one is ignored by
+  # the stack. Pass through only when set so role/VPC creation stays the default.
+  [ -n "${RELAY_ECS_TASK_ROLE_ARN:-}" ]      && ctx="${ctx} -c relay:ecs_task_role_arn=${RELAY_ECS_TASK_ROLE_ARN}"
+  [ -n "${RELAY_ECS_EXECUTION_ROLE_ARN:-}" ] && ctx="${ctx} -c relay:ecs_execution_role_arn=${RELAY_ECS_EXECUTION_ROLE_ARN}"
+  [ -n "${RELAY_VPC_ID:-}" ]                 && ctx="${ctx} -c relay:vpc_id=${RELAY_VPC_ID}"
 
   # Normalize deprecated topology names to the two canonical ones:
   #   team (Node + local Hub, the default) <- standalone, node
@@ -256,6 +267,18 @@ relay_build_context() {
     federation) RELAY_STACKS="RelayFederationStack" ;;
     ""|all)     : ;;  # keep the topology default
     *) echo "ERROR: unknown RELAY_STACK_SELECTOR='${RELAY_STACK_SELECTOR}' (data|compute|federation|all)" >&2; exit 1 ;;
+  esac
+
+  # The compute stack's real-image guard (compute_stack.py) only matters when the
+  # compute stack is an actual deploy target. For a data-only (or federation-only)
+  # deploy the compute stack is still constructed by infra/app.py but never
+  # deployed (relay-deploy.sh runs --exclusively), so requiring a real ECR image
+  # would needlessly block the documented "data plane first" step — which is the
+  # only step a locked-down account (PassRole/CreateRole denied) can run at all.
+  # Skip the guard when compute is out of scope; keep it on when compute deploys.
+  case " ${RELAY_STACKS} " in
+    *" RelayComputeStack "*) : ;;                       # compute deploys → keep guard
+    *) ctx="${ctx} -c relay:image_check=false" ;;       # no compute → image not required
   esac
 
   export RELAY_CDK_CONTEXT="${ctx}" RELAY_STACKS

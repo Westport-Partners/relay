@@ -51,6 +51,20 @@ The probe prints these sections (each isolated — one failing never aborts the 
 3. **ALB listener certs** — HTTPS (443) listener(s) on the resolved ALB; the default cert plus all SNI certs from `describe-listener-certificates`. Each cert is cross-referenced to the ACM expiry data collected in section 2.
 4. **Live TLS check** — if `RELAY_ENDPOINT` is set, an `openssl s_client` handshake reads the leaf cert's `notAfter`, subject, and issuer, then reports days remaining. Skipped (with a note) if `openssl` is not installed or the connection fails.
 
+## Required IAM permissions
+
+The probe is read-only. The calling principal (the investigation agent's role in the
+team account) needs the actions below. A missing **Required** permission makes the
+probe silently skip that section — output looks like "no results" rather than "denied".
+
+| Action | Required | Used for |
+|--------|----------|----------|
+| `acm:ListCertificates` | **Yes** | Discover ACM certificates in region |
+| `acm:DescribeCertificate` | **Yes** | Cert details, status, expiry dates |
+| `elasticloadbalancing:DescribeLoadBalancers` | No | Resolve ALB by name |
+| `elasticloadbalancing:DescribeListeners` | No | Find HTTPS listeners on the ALB |
+| `elasticloadbalancing:DescribeListenerCertificates` | No | SNI certs attached to the listener |
+
 ## How to interpret (raw output → hypotheses)
 
 - **ACM `Status: PENDING_VALIDATION` or `FAILED`** → ACM's managed renewal hit a

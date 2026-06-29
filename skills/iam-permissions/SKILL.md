@@ -57,6 +57,25 @@ The probe prints these sections (each isolated — one failure never aborts the 
    `EvalDecision` and the matched/missing statements. Definitively answers
    whether the denial is implicit (missing grant) or explicit (Deny statement).
 
+## Required IAM permissions
+
+The probe is read-only. The calling principal (the investigation agent's role in the
+team account) needs the actions below. A missing **Required** permission makes the
+probe silently skip that section — output looks like "no results" rather than "denied".
+
+| Action | Required | Used for |
+|--------|----------|----------|
+| `cloudtrail:LookupEvents` | **Yes — core** | Find recent access-denied events |
+| `iam:SimulatePrincipalPolicy` | **Yes** | Allow/deny verdict for an action on a resource |
+| `iam:GetRole` | No | Role metadata + permissions boundary |
+| `iam:ListAttachedRolePolicies` | No | Managed policies attached to the role |
+| `iam:ListRolePolicies` | No | Inline policy names for the role |
+| `iam:GetRolePolicy` | No | Inline policy documents for the role |
+| `iam:GetUser` | No | User metadata + permissions boundary |
+| `iam:ListAttachedUserPolicies` | No | Managed policies attached to the user |
+| `iam:ListUserPolicies` | No | Inline policy names for the user |
+| `iam:GetUserPolicy` | No | Inline policy documents for the user |
+
 ## How to interpret (raw output → hypotheses)
 
 - **Denied CloudTrail call whose action appears in no attached or inline

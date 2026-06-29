@@ -57,6 +57,20 @@ The probe prints these sections (each isolated — one failing never aborts the 
    Unhandled, Exception, and `errorMessage` patterns. Last ~20 matching lines
    with timestamps.
 
+## Required IAM permissions
+
+The probe is read-only. The calling principal (the investigation agent's role in the
+team account) needs the actions below. A missing **Required** permission makes the
+probe silently skip that section — output looks like "no results" rather than "denied".
+
+| Action | Required | Used for |
+|--------|----------|----------|
+| `lambda:GetFunctionConfiguration` | **Yes** | Function config, state, timeout, memory |
+| `cloudwatch:GetMetricStatistics` | **Yes** | Invocation / error / throttle metrics |
+| `lambda:ListFunctions` | No | Discover the function by app name |
+| `lambda:GetAccountSettings` | No | Account concurrency limits |
+| `logs:FilterLogEvents` | No | Lambda error logs in `/aws/lambda/*` |
+
 ## How to interpret (raw output → hypotheses)
 
 - **Duration Maximum at/near the configured Timeout + "Task timed out" log
