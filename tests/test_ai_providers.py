@@ -90,7 +90,7 @@ class TestOpenAICompatAssistant:
         """complete() returns AICompletion with correct text/provider/tokens on 200."""
         monkeypatch.setenv("RELAY_AI_MODEL_ID", "gpt-4o")
 
-        def fake_http(url: str, headers: dict, body: str) -> tuple[int, str]:
+        def fake_http(url: str, headers: dict[str, str], body: str) -> tuple[int, str]:
             return 200, _OPENAI_SUCCESS_BODY
 
         assistant = OpenAICompatAssistant(
@@ -110,7 +110,7 @@ class TestOpenAICompatAssistant:
 
     def test_complete_non_2xx_returns_none(self) -> None:
         """complete() returns None on a non-2xx HTTP response."""
-        def fake_http(url: str, headers: dict, body: str) -> tuple[int, str]:
+        def fake_http(url: str, headers: dict[str, str], body: str) -> tuple[int, str]:
             return 500, "Internal Server Error"
 
         assistant = OpenAICompatAssistant(
@@ -125,7 +125,7 @@ class TestOpenAICompatAssistant:
 
     def test_complete_http_fn_raises_returns_none(self) -> None:
         """complete() returns None (never raises) when http_fn raises."""
-        def fake_http(url: str, headers: dict, body: str) -> tuple[int, str]:
+        def fake_http(url: str, headers: dict[str, str], body: str) -> tuple[int, str]:
             raise ConnectionError("network unreachable")
 
         assistant = OpenAICompatAssistant(
@@ -155,9 +155,9 @@ class TestOpenAICompatAssistant:
 
     def test_bearer_token_in_header(self) -> None:
         """complete() includes Authorization: Bearer header when api_key is set."""
-        captured: list[dict] = []
+        captured: list[dict[str, str]] = []
 
-        def fake_http(url: str, headers: dict, body: str) -> tuple[int, str]:
+        def fake_http(url: str, headers: dict[str, str], body: str) -> tuple[int, str]:
             captured.append(headers)
             return 200, _OPENAI_SUCCESS_BODY
 
@@ -173,9 +173,9 @@ class TestOpenAICompatAssistant:
 
     def test_no_auth_header_without_api_key(self) -> None:
         """complete() omits the Authorization header when api_key is not set."""
-        captured: list[dict] = []
+        captured: list[dict[str, str]] = []
 
-        def fake_http(url: str, headers: dict, body: str) -> tuple[int, str]:
+        def fake_http(url: str, headers: dict[str, str], body: str) -> tuple[int, str]:
             captured.append(headers)
             return 200, _OPENAI_SUCCESS_BODY
 

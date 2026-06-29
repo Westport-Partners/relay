@@ -40,7 +40,13 @@ jobs:
         run: ruff check .
 
       - name: Types (mypy)
-        run: mypy src
+        # Per-root: src/relay and infra each have top-level modules (app.py, …)
+        # that collide if mypy is handed all roots in one invocation.
+        run: |
+          for root in src infra tools tests; do
+            echo "== mypy $root =="
+            mypy "$root"
+          done
 
       - name: Test (pytest)
         run: pytest -q

@@ -1204,7 +1204,7 @@ def _build_routing_handler(
     *,
     routing_rule_store: FakeRoutingRuleStore,
     incident: Incident,
-    config_rules: list | None = None,
+    config_rules: list[Any] | None = None,
     suppression_store: Any = None,
 ) -> tuple[Any, Any, Any]:
     """Build a NodeHandler with injected routing_rule_store + all AWS fakes.

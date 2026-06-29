@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
 from relay.core.scheduling import (
     DEFAULT_ROLES,
@@ -73,7 +74,7 @@ def test_primary_and_secondary_never_same_person():
     a = _avail("a", ALL_DAYS, ALL_SHIFTS)
     b = _avail("b", ALL_DAYS, ALL_SHIFTS)
     sched = auto_schedule(WEEK, [a, b])
-    by_slot: dict[tuple, dict] = {}
+    by_slot: dict[tuple[Any, ...], dict[Any, Any]] = {}
     for s in sched.slots:
         by_slot.setdefault((s.date, s.shift), {})[s.role] = s.contact_id
     for assignments in by_slot.values():

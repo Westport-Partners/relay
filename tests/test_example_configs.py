@@ -17,6 +17,7 @@ If you change a schema, these tests force you to update the examples too.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -32,8 +33,9 @@ from relay.config.schema import (
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
 
-def _load(name: str) -> dict:
-    return yaml.safe_load((CONFIG_DIR / name).read_text(encoding="utf-8"))
+def _load(name: str) -> dict[str, Any]:
+    from typing import cast
+    return cast(dict[str, Any], yaml.safe_load((CONFIG_DIR / name).read_text(encoding="utf-8")))
 
 
 # ---------------------------------------------------------------------------

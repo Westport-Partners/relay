@@ -30,8 +30,8 @@ preserve that separation — no `boto3` imports in `core/`.
 2. Branch from `main`, make focused commits.
 3. **Add/Update tests.** The suite must stay green (`pytest -q`).
 4. Run the gates — `scripts/relay-verify.sh` bundles `ruff check`, `mypy`
-   (advisory), `pytest`, and the conditional docs/infra checks. See
-   [Definition of Done](#definition-of-done) below for the full list.
+   (whole codebase, blocking), `pytest`, and the conditional docs/infra checks.
+   See [Definition of Done](#definition-of-done) below for the full list.
 5. For infrastructure changes (`infra/`), confirm `cdk synth` succeeds for the affected
    stacks.
 6. Open a PR with a clear description of the change and why. Link the issue.
@@ -53,8 +53,8 @@ and then walks the judgment items below against the actual diff.
 **Blocking — must pass:**
 
 - [ ] **Lint:** `ruff check .` clean (CI runs this).
-- [ ] **Types:** `mypy src` clean (CI runs this; the strict backlog is at zero —
-      keep it there).
+- [ ] **Types:** `mypy` clean across `src`, `infra`, `tools`, and `tests` (CI
+      runs each root; the strict backlog is at zero — keep it there).
 - [ ] **Tests:** `pytest -q` green, and new/changed behavior has tests (a green
       suite with an untested new code path is *not* done).
 - [ ] **Docs site (if `docs/` or `mkdocs.yml` changed):** `mkdocs build --strict`

@@ -5,6 +5,7 @@ Uses injected fake boto3 sessions to avoid real AWS calls.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 from relay.adapters.aws.tag_resolver import AlarmTagResolver
@@ -15,7 +16,7 @@ from relay.adapters.aws.tag_resolver import AlarmTagResolver
 
 
 class _FakeCloudWatchClient:
-    def __init__(self, tags: list[dict]):
+    def __init__(self, tags: list[dict[str, Any]]):
         self._tags = tags
         self.call_count = 0
 
@@ -25,7 +26,7 @@ class _FakeCloudWatchClient:
 
 
 class _FakeLambdaClient:
-    def __init__(self, tags: dict):
+    def __init__(self, tags: dict[str, str]):
         self._tags = tags
 
     def list_tags(self, **_kwargs):
@@ -33,7 +34,7 @@ class _FakeLambdaClient:
 
 
 class _FakeSQSClient:
-    def __init__(self, tags: dict):
+    def __init__(self, tags: dict[str, str]):
         self._tags = tags
 
     def list_queue_tags(self, **_kwargs):
@@ -41,7 +42,7 @@ class _FakeSQSClient:
 
 
 class _FakeECSClient:
-    def __init__(self, tags: list[dict]):
+    def __init__(self, tags: list[dict[str, Any]]):
         self._tags = tags
 
     def list_tags_for_resource(self, **_kwargs):
@@ -49,7 +50,7 @@ class _FakeECSClient:
 
 
 class _FakeEC2Client:
-    def __init__(self, tags: list[dict]):
+    def __init__(self, tags: list[dict[str, Any]]):
         self._tags = tags
 
     def describe_tags(self, **_kwargs):
@@ -85,7 +86,7 @@ class _FakeSession:
 # ---------------------------------------------------------------------------
 
 
-def _detail(namespace: str = "", dimensions: list[dict] | None = None) -> dict:
+def _detail(namespace: str = "", dimensions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     dims = dimensions or []
     return {
         "configuration": {
@@ -103,15 +104,15 @@ def _detail(namespace: str = "", dimensions: list[dict] | None = None) -> dict:
     }
 
 
-def _lambda_detail(function_name: str = "my-func") -> dict:
+def _lambda_detail(function_name: str = "my-func") -> dict[str, Any]:
     return _detail("AWS/Lambda", [{"name": "FunctionName", "value": function_name}])
 
 
-def _sqs_detail(queue_name: str = "my-queue") -> dict:
+def _sqs_detail(queue_name: str = "my-queue") -> dict[str, Any]:
     return _detail("AWS/SQS", [{"name": "QueueName", "value": queue_name}])
 
 
-def _ecs_detail(cluster: str = "my-cluster", service: str = "my-svc") -> dict:
+def _ecs_detail(cluster: str = "my-cluster", service: str = "my-svc") -> dict[str, Any]:
     return _detail(
         "AWS/ECS",
         [
@@ -121,7 +122,7 @@ def _ecs_detail(cluster: str = "my-cluster", service: str = "my-svc") -> dict:
     )
 
 
-def _ec2_detail(instance_id: str = "i-0abc1234567890def") -> dict:
+def _ec2_detail(instance_id: str = "i-0abc1234567890def") -> dict[str, Any]:
     return _detail("AWS/EC2", [{"name": "InstanceId", "value": instance_id}])
 
 
@@ -273,7 +274,7 @@ def test_failing_client_does_not_raise_returns_other_source():
     # Did not raise
 
 
-def _detail_dict_dimensions(namespace: str, dimensions: dict[str, str]) -> dict:
+def _detail_dict_dimensions(namespace: str, dimensions: dict[str, str]) -> dict[str, Any]:
     """Detail with dimensions as a JSON object — the real EventBridge shape.
 
     Real "CloudWatch Alarm State Change" events carry ``dimensions`` as a

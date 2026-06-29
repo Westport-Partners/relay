@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 
@@ -20,17 +21,17 @@ from relay.core.model import Incident, Severity
 @dataclass
 class FakeHttp:
     status: int = 201
-    response: dict = field(default_factory=dict)
-    calls: list = field(default_factory=list)
+    response: dict[str, Any] = field(default_factory=dict)
+    calls: list[dict[str, Any]] = field(default_factory=list)
     raise_exc: Exception | None = None
 
     def __call__(
         self,
         method: str,
         url: str,
-        headers: dict,
+        headers: dict[str, str],
         body: bytes | None,
-    ) -> tuple[int, dict]:
+    ) -> tuple[int, dict[str, Any]]:
         if self.raise_exc:
             raise self.raise_exc
         self.calls.append({"method": method, "url": url, "headers": headers, "body": body})
@@ -584,9 +585,9 @@ class _SeqHttp:
     records the calls in order for assertions.
     """
 
-    def __init__(self, routes: dict[str, tuple[int, dict]]):
+    def __init__(self, routes: dict[str, tuple[int, dict[str, Any]]]):
         self._routes = routes
-        self.calls: list[dict] = []
+        self.calls: list[dict[str, Any]] = []
 
     def __call__(self, method, url, headers, body):
         self.calls.append({"method": method, "url": url, "headers": headers})

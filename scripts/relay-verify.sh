@@ -7,8 +7,11 @@
 #
 # Blocking gates (a failure exits non-zero):
 #   - ruff check        lint (matches CI: `ruff check .`)
-#   - mypy src          strict type check (the backlog was cleared to zero, so
-#                       this is now a hard gate — keep it at zero)
+#   - mypy              strict type check across the whole codebase (src, infra,
+#                       tools, tests). Run per-root because src/relay and infra
+#                       both contain top-level modules (e.g. app.py) that collide
+#                       under a single mypy invocation. The backlog is at zero —
+#                       keep it there.
 #   - pytest -q         full offline test suite (matches CI)
 #   - mkdocs --strict   docs site builds with no broken links/nav (only when
 #                       docs/ or mkdocs.yml changed, or --docs/--all is passed)
@@ -62,8 +65,15 @@ echo "-- ruff check"
 if run_tool ruff check src tests tools; then note_pass "ruff"; else note_block "ruff check"; fi
 
 # --- Types (blocking) ---
-echo "-- mypy src"
-if run_tool mypy src; then note_pass "mypy"; else note_block "mypy src"; fi
+# Per-root: src/relay and infra each have top-level modules (app.py, …) that
+# collide if mypy is handed all roots at once. Any root failing blocks.
+echo "-- mypy (src infra tools tests)"
+mypy_ok=1
+for _root in src infra tools tests; do
+  [ -d "$_root" ] || continue
+  if ! run_tool mypy "$_root"; then mypy_ok=0; fi
+done
+if [ "$mypy_ok" = 1 ]; then note_pass "mypy"; else note_block "mypy"; fi
 
 # --- Tests (blocking) ---
 echo "-- pytest -q"

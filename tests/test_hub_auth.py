@@ -10,7 +10,7 @@ import pytest
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_jwt(claims: dict) -> str:
+def _make_jwt(claims: dict[str, str]) -> str:
     """Build a minimal (unsigned) ALB-style JWT with the given payload claims."""
     header = base64.urlsafe_b64encode(b'{"alg":"ES256"}').rstrip(b"=").decode()
     payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()

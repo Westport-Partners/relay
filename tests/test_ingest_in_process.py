@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import threading
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -115,7 +115,7 @@ class FakeSSEPublisher:
     """Captures publish_delta calls."""
 
     def __init__(self) -> None:
-        self.deltas: list = []
+        self.deltas: list[Any] = []
 
     def publish_delta(self, tile) -> None:
         self.deltas.append(tile)
@@ -158,7 +158,7 @@ def test_on_local_incident_updates_tile_and_dispatches_lifecycle():
     sse = FakeSSEPublisher()
     hub_state = _make_hub_state()
 
-    lifecycle_calls: list[tuple] = []
+    lifecycle_calls: list[tuple[Any, ...]] = []
 
     class CapturingListener:
         def on_event(self, *, event, incident):
@@ -202,7 +202,7 @@ def test_on_local_incident_does_not_recheck_row_existence():
     sse = FakeSSEPublisher()
     hub_state = _make_hub_state()
 
-    lifecycle_calls: list = []
+    lifecycle_calls: list[Any] = []
 
     class CapturingListener:
         def on_event(self, *, event, incident):
@@ -246,7 +246,7 @@ def test_detection_pipeline_calls_on_incident_sink():
         class _T:
             old_phase = "IDLE"
             new_phase = "NOTIFIED"
-            contact_ids_to_page: list = []
+            contact_ids_to_page: list[str] = []
             note = "ok"
 
         def start(self, incident, policy):
@@ -304,7 +304,7 @@ def test_detection_pipeline_calls_on_incident_sink():
             return self.get()
 
     original = handler_mod.DualStreamDispatcher
-    handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore[assignment]
+    handler_mod.DualStreamDispatcher = FakeDispatcher
     try:
         from relay.node.handler import NodeHandler
 
@@ -322,7 +322,7 @@ def test_detection_pipeline_calls_on_incident_sink():
         pipeline = DetectionPipeline(handler)
         pipeline.handle_alarm({"source": "aws.cloudwatch"})
     finally:
-        handler_mod.DualStreamDispatcher = original  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = original
 
     # Sink must have been called exactly once.
     assert len(on_incident_calls) == 1, (
@@ -346,7 +346,7 @@ def test_detection_pipeline_on_incident_sink_failure_does_not_fail_alarm():
         class _T:
             old_phase = "IDLE"
             new_phase = "NOTIFIED"
-            contact_ids_to_page: list = []
+            contact_ids_to_page: list[str] = []
             note = "ok"
 
         def start(self, incident, policy):
@@ -402,7 +402,7 @@ def test_detection_pipeline_on_incident_sink_failure_does_not_fail_alarm():
             return self.get()
 
     original = handler_mod.DualStreamDispatcher
-    handler_mod.DualStreamDispatcher = FakeDispatcher  # type: ignore[assignment]
+    handler_mod.DualStreamDispatcher = FakeDispatcher
     try:
         from relay.node.handler import NodeHandler
 
@@ -421,7 +421,7 @@ def test_detection_pipeline_on_incident_sink_failure_does_not_fail_alarm():
         # Must NOT raise even though the sink raises.
         result = pipeline.handle_alarm({"source": "aws.cloudwatch"})
     finally:
-        handler_mod.DualStreamDispatcher = original  # type: ignore[assignment]
+        handler_mod.DualStreamDispatcher = original
 
     assert result.get("statusCode") == 200
 
@@ -443,7 +443,7 @@ def test_noop_timer_lets_escalation_start_without_scheduler():
 
     class FakeStateStore:
         def __init__(self) -> None:
-            self.saved = []
+            self.saved: list[Any] = []
 
         def load(self, incident_id):
             return None
@@ -484,7 +484,7 @@ def _make_processor_with_pipeline(pipeline):
 
 def test_handle_event_routes_cloudwatch_alarm_to_pipeline():
     """A raw 'CloudWatch Alarm State Change' event goes to pipeline.handle_alarm."""
-    calls: list = []
+    calls: list[Any] = []
 
     class FakePipeline:
         def handle_alarm(self, event):
@@ -527,7 +527,7 @@ def test_sqs_consumer_stops_on_shutdown_event():
 
 def test_handle_event_incident_event_still_uses_handle_incident():
     """A forwarded Incident event (not an alarm) must NOT go to the pipeline."""
-    alarm_calls: list = []
+    alarm_calls: list[Any] = []
 
     class FakePipeline:
         def handle_alarm(self, event):
@@ -578,7 +578,7 @@ def test_ingest_alarm_routes_to_pipeline_when_runtime_local_mock():
     """POST /ingest/alarm routes to the pipeline when runtime=local-mock."""
 
     class FakePipeline:
-        def handle_alarm(self, payload: dict) -> dict:
+        def handle_alarm(self, payload: dict[str, Any]) -> dict[str, Any]:
             return {"statusCode": 200, "correlation_id": "test-123", "from_fake": True}
 
     client = _hub_app_with_pipeline("local-mock", FakePipeline())
@@ -602,7 +602,7 @@ def test_ingest_alarm_allowed_via_env_override(monkeypatch):
     monkeypatch.setenv("RELAY_ALLOW_INGEST", "true")
 
     class FakePipeline:
-        def handle_alarm(self, payload: dict) -> dict:
+        def handle_alarm(self, payload: dict[str, Any]) -> dict[str, Any]:
             return {"statusCode": 200, "correlation_id": "env-override"}
 
     client = _hub_app_with_pipeline("fargate", FakePipeline())
@@ -616,7 +616,7 @@ def test_ingest_alarm_returns_400_on_value_error(monkeypatch):
     monkeypatch.setenv("RELAY_ALLOW_INGEST", "true")
 
     class FailingPipeline:
-        def handle_alarm(self, payload: dict) -> dict:
+        def handle_alarm(self, payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("bad event shape")
 
     client = _hub_app_with_pipeline("fargate", FailingPipeline())

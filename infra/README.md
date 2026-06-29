@@ -5,7 +5,7 @@ AWS CDK (Python, v2) infrastructure for Relay. Relay deploys as **independent, s
 | Stack | What it owns | Deploy cadence |
 |---|---|---|
 | **RelayDataStack** | DynamoDB table (+ `incident-status-index` GSI, stream) + paging SNS topics | Once; RETAIN |
-| **RelayComputeStack** | VPC (or BYOV), ECS cluster, always-on Fargate service + ALB, CloudWatch-alarm EventBridge rule → SQS ingress + DLQ, task + exec IAM roles | Every image change |
+| **RelayComputeStack** | VPC (or BYOV), ECS cluster, always-on Fargate service + ALB, CloudWatch-alarm EventBridge rule → SQS ingress + DLQ (+ DLQ-depth alarm → paging topic), task + exec IAM roles | Every image change |
 | **RelayFederationStack** | (federated-hub only) the `relay-hub` EventBridge bus + resource policy + ingest rule | Rarely |
 
 There are two **topologies**, selected by `relay:role`:
@@ -122,7 +122,7 @@ every DynamoDB client routes to the local endpoint. No code branches in the stor
 ## Prerequisites
 
 - Python 3.12+, Node.js 18+ (CDK CLI), `npm i -g aws-cdk` (or the bundled `npx`)
-- `pip install aws-cdk-lib constructs` in the venv
+- `pip install -e ".[infra]"` in the venv (bundled into `.[dev]`)
 - AWS credentials for the target account
 
 ## Useful CDK commands

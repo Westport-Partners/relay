@@ -18,6 +18,8 @@ Context keys consumed:
 
 from __future__ import annotations
 
+from typing import Any
+
 import aws_cdk as cdk
 from aws_cdk import (
     RemovalPolicy,
@@ -48,7 +50,7 @@ class RelayDataStack(Stack):
         construct_id: str,
         *,
         role: str = "team",
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 

@@ -23,6 +23,8 @@ relay.core.model for field names.
 from __future__ import annotations
 
 import textwrap
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 import yaml
@@ -107,7 +109,7 @@ class FakeSecretsManagerClient:
         self.token = token
         self.call_count = 0
 
-    def get_secret_value(self, *, SecretId: str) -> dict:  # noqa: N803
+    def get_secret_value(self, *, SecretId: str) -> dict[str, Any]:  # noqa: N803
         self.call_count += 1
         return {"SecretString": self.token}
 
@@ -115,7 +117,7 @@ class FakeSecretsManagerClient:
 def make_fetcher(
     escalation: str = ESCALATION_YAML,
     routing: str = ROUTING_YAML,
-) -> tuple[list[str], callable]:
+) -> tuple[list[str], Callable[..., Any]]:
     """Return (calls_log, fetcher) where fetcher returns YAML by filename.
 
     ``calls_log`` is mutated in place as the fetcher is called, allowing tests
@@ -283,7 +285,7 @@ def test_load_raises_runtime_error_on_secrets_manager_failure() -> None:
     """A Secrets Manager error must propagate as RuntimeError with a clear message."""
 
     class FailingSecretsClient:
-        def get_secret_value(self, *, SecretId: str) -> dict:  # noqa: N803
+        def get_secret_value(self, *, SecretId: str) -> dict[str, Any]:  # noqa: N803
             raise Exception("Access denied")
 
     _, fetcher = make_fetcher()
