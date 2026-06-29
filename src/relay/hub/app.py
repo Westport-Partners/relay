@@ -1948,7 +1948,7 @@ class HubApp:
         # ----------------------------------------------------------------
         @app.get("/incidents/history")
         def incidents_history() -> list[dict[str, Any]]:
-            if incident_store is None or not hasattr(incident_store, "list_incidents"):
+            if incident_store is None:
                 return []
             try:
                 incidents = incident_store.list_incidents()
@@ -1987,7 +1987,7 @@ class HubApp:
         @app.get("/metrics")
         def incident_metrics() -> dict[str, Any]:
             from relay.core.metrics import compute_metrics
-            if incident_store is None or not hasattr(incident_store, "list_incidents"):
+            if incident_store is None:
                 return compute_metrics([]).as_dict()
             try:
                 incidents = incident_store.list_incidents()

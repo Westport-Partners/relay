@@ -191,6 +191,14 @@ class IncidentStore(Protocol):
         """List all non-closed incidents, optionally filtered by account."""
         ...
 
+    def list_incidents(self, account_id: str | None = None) -> list[Incident]:
+        """List ALL incidents (open + terminal), optionally filtered by account.
+
+        Backs the history view and metrics rollups; callers slice or aggregate
+        the full set themselves.
+        """
+        ...
+
 
 @runtime_checkable
 class ConfigStore(Protocol):
