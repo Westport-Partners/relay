@@ -13,6 +13,14 @@ and creates nothing.
 > Lambda execution role, no EventBridge Scheduler invoke role, and no `PassRole` grant in the
 > task definition.
 
+> **`cdk deploy` itself needs `iam:PassRole`.** BYOR/BYOV remove *runtime* role and
+> VPC creation, but `cdk deploy` still passes the CDK bootstrap execution role to
+> CloudFormation. If your account denies `iam:PassRole`, deploy with
+> `scripts/relay-deploy-direct.sh` (synth → `aws cloudformation deploy` with your own
+> credentials) — see [deploy.md → Locked-down accounts](deploy.md#locked-down-accounts-iampassrole-denied).
+> To evaluate Relay without deploying ECS at all, `scripts/relay-provision-cli.sh`
+> creates just the data plane + alarm ingest with plain AWS CLI calls.
+
 ---
 
 ## BYOR — Bring-Your-Own-Role

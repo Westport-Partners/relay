@@ -185,6 +185,9 @@ can be re-verified against the repo, not taken on faith.
 | Hub auth modes: none (read-only) / alb (OIDC) / dev; writes gated | ✅ | `hub/auth.py` (`require_writer`) | |
 | BYOR — import pre-provisioned roles, emit inline-policy JSON | ✅ | `compute_stack.py` (`relay:ecs_{task,execution}_role_arn`; `_emit_byor_outputs`; new IAM gated on `byor_mode`) | Net IAM surface is one task role + one exec role (no Lambda exec, no Scheduler-invoke, no PassRole). |
 | BYOV — import a pre-provisioned VPC | ✅ | `compute_stack.py` (`relay:vpc_id` → `from_lookup`) | For accounts that forbid creating VPCs. |
+| Data-only deploy works before an image exists | ✅ | `scripts/relay-context.sh` (sets `relay:image_check=false` when `RelayComputeStack` not a target); `compute_stack.py` (guard error documents the escape hatch) | The documented "data plane first" step no longer trips the compute stack's real-image guard. |
+| Deploy without `iam:PassRole` (locked-down accounts) | ✅ | `scripts/relay-deploy-direct.sh` (cdk synth → `aws cloudformation deploy` with caller creds); `docs/deploy.md` (Locked-down accounts section) | No CDK assets, so synthesized templates deploy directly. Data plane creates zero roles/VPC → deploys in the most restricted accounts. |
+| Pure-CLI data-plane provisioning (no CDK/bootstrap) | ✅ | `scripts/relay-provision-cli.sh` | Creates DynamoDB (+GSIs/PITR/TTL/stream), SNS topics, SQS+DLQ, EventBridge alarm rule via plain `aws` calls for the run-locally-on-EC2 evaluation path. |
 
 ### 12. Integrations & config
 
