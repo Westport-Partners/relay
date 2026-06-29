@@ -111,10 +111,23 @@ DLQ_ARN="$(aws sqs get-queue-attributes --queue-url "${DLQ_URL}" \
   --attribute-names QueueArn --query 'Attributes.QueueArn' --output text)"
 echo "  SQS ${INGEST_DLQ}: ${DLQ_URL}" >&2
 
-REDRIVE_POLICY="{\"deadLetterTargetArn\":\"${DLQ_ARN}\",\"maxReceiveCount\":5}"
+# RedrivePolicy is itself a JSON string, so the whole --attributes value must be a
+# JSON document (file://). AWS CLI shorthand (Key=Value) cannot carry nested JSON.
+_ATTRS_TMP="$(mktemp)"
+trap 'rm -f "${_ATTRS_TMP}"' EXIT
+python3 -c "
+import json, sys
+print(json.dumps({
+  'VisibilityTimeout': '60',
+  'MessageRetentionPeriod': '345600',
+  'RedrivePolicy': json.dumps({'deadLetterTargetArn': sys.argv[1], 'maxReceiveCount': 5}),
+}))
+" "${DLQ_ARN}" > "${_ATTRS_TMP}"
 QUEUE_URL="$(aws sqs create-queue --queue-name "${INGEST_QUEUE}" \
-  --attributes "VisibilityTimeout=60,MessageRetentionPeriod=345600,RedrivePolicy=${REDRIVE_POLICY}" \
+  --attributes "file://${_ATTRS_TMP}" \
   --output text --query QueueUrl)"
+rm -f "${_ATTRS_TMP}"
+trap - EXIT
 QUEUE_ARN="$(aws sqs get-queue-attributes --queue-url "${QUEUE_URL}" \
   --attribute-names QueueArn --query 'Attributes.QueueArn' --output text)"
 echo "  SQS ${INGEST_QUEUE}: ${QUEUE_URL}" >&2
@@ -131,15 +144,42 @@ RULE_ARN="arn:aws:events:${AWS_REGION}:${ACCOUNT_ID}:rule/${ALARM_RULE}"
 echo "  EventBridge rule ${ALARM_RULE}: ${RULE_ARN}" >&2
 
 # Allow EventBridge to deliver to the queue (queue policy, scoped to this rule).
-QUEUE_POLICY="$(cat <<JSON
-{"Version":"2012-10-17","Statement":[{"Sid":"AllowEventBridgeToRelayIngest","Effect":"Allow","Principal":{"Service":"events.amazonaws.com"},"Action":"sqs:SendMessage","Resource":"${QUEUE_ARN}","Condition":{"ArnEquals":{"aws:SourceArn":"${RULE_ARN}"}}}]}
-JSON
-)"
+# Policy is a JSON string nested in --attributes, so pass the whole value as a
+# JSON document (file://) rather than shorthand.
+_POLICY_TMP="$(mktemp)"
+trap 'rm -f "${_POLICY_TMP}"' EXIT
+python3 -c "
+import json, sys
+queue_arn, rule_arn = sys.argv[1], sys.argv[2]
+policy = {
+  'Version': '2012-10-17',
+  'Statement': [{
+    'Sid': 'AllowEventBridgeToRelayIngest',
+    'Effect': 'Allow',
+    'Principal': {'Service': 'events.amazonaws.com'},
+    'Action': 'sqs:SendMessage',
+    'Resource': queue_arn,
+    'Condition': {'ArnEquals': {'aws:SourceArn': rule_arn}},
+  }],
+}
+print(json.dumps({'Policy': json.dumps(policy)}))
+" "${QUEUE_ARN}" "${RULE_ARN}" > "${_POLICY_TMP}"
 aws sqs set-queue-attributes --queue-url "${QUEUE_URL}" \
-  --attributes "Policy=$(printf '%s' "${QUEUE_POLICY}" | tr -d '\n')" >/dev/null
+  --attributes "file://${_POLICY_TMP}" >/dev/null
+rm -f "${_POLICY_TMP}"
+trap - EXIT
 
+# put-targets takes a list of JSON objects; pass it as a JSON document (file://).
+_TARGETS_TMP="$(mktemp)"
+trap 'rm -f "${_TARGETS_TMP}"' EXIT
+python3 -c "
+import json, sys
+print(json.dumps([{'Id': 'relay-ingest', 'Arn': sys.argv[1]}]))
+" "${QUEUE_ARN}" > "${_TARGETS_TMP}"
 aws events put-targets --rule "${ALARM_RULE}" \
-  --targets "Id=relay-ingest,Arn=${QUEUE_ARN}" >/dev/null
+  --targets "file://${_TARGETS_TMP}" >/dev/null
+rm -f "${_TARGETS_TMP}"
+trap - EXIT
 
 # ----------------------------------------------------------------------------
 # Summary — the env vars to export before running Relay locally.
