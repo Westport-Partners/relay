@@ -25,6 +25,7 @@ from __future__ import annotations
 import textwrap
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -364,7 +365,7 @@ def test_gitlab_url_contains_correct_components() -> None:
 
     assert len(fetched_urls) == 5  # 2 required + 3 optional files attempted
     for url in fetched_urls[:2]:
-        assert "gitlab.example.com" in url
+        assert urlsplit(url).hostname == "gitlab.example.com"
         # Project path must be URL-encoded
         assert "mygroup%2Fmyrepo" in url
         # Branch must appear as a query param

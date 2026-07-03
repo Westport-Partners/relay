@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -171,7 +172,9 @@ class TestGitLabConfig:
 
         sink.create_incident(incident)
 
-        assert fake.calls[0]["url"].startswith("https://mygitlab.example.com")
+        parts = urlsplit(fake.calls[0]["url"])
+        assert parts.scheme == "https"
+        assert parts.hostname == "mygitlab.example.com"
 
 
 class TestGitLabDora:
