@@ -141,14 +141,14 @@ All four actions require write access (auth mode `alb` or `dev`). In `none` mode
 
 ## Rules screen (Routing rules and Ignore rules)
 
-The **Rules** nav item opens the Rules management screen, which has two sections toggled by a tab at the top. **Routing rules** is the default.
+The **Rules** nav item opens the Rules management screen. It shows two labeled tables, reflecting the two runtime pipeline stages: an **Ignore rules** accordion first (collapsed by default — ignore rules drop matching alarms and override every routing rule, so they lead visually but stay low-profile), and a **Routing rules** accordion below (expanded by default — the list operators work with day to day). The single **+ New rule** button opens a form whose Type toggle picks routing or ignore.
 
 <figure class="screenshot" markdown="span">
-  ![The Rules screen showing the live routing-rules table with priority, match, severity, policy, streams, and match counts.](assets/screenshots/operate/S-RULES.png)
-  <figcaption>The Rules screen lists every live rule stored in DynamoDB with its match count, so you can see which rules are actually firing. The Download YAML button round-trips runtime rules back into <code>routing.yaml</code>.</figcaption>
+  ![The Rules screen showing the collapsed Ignore rules accordion above the expanded Routing rules table with priority, match, severity, policy, streams, and match counts.](assets/screenshots/operate/S-RULES.png)
+  <figcaption>The Rules screen lists every live rule stored in DynamoDB with its match count, so you can see which rules are actually firing. Ignore rules sit in a collapsed accordion whose header shows the rule count and aggregate alarms dropped; routing rules sit in the expanded table below. The Download YAML button round-trips runtime rules back into <code>routing.yaml</code>.</figcaption>
 </figure>
 
-### Routing rules section
+### Routing rules table
 
 Shows every live routing rule stored in DynamoDB. Columns:
 
@@ -163,14 +163,14 @@ Shows every live routing rule stored in DynamoDB. Columns:
 
 **Deviation banner.** When the live DynamoDB rules differ from the `routing.yaml` `rules:` baseline (the seed loaded at container boot), the screen shows a banner. Use the **Download YAML** button (`GET /routing-rules/download`) to get a regenerated `rules:` block you can paste back into `routing.yaml`.
 
-### Ignore rules section
+### Ignore rules table
 
-Shows every live ignore rule stored in DynamoDB with:
+Rendered in the collapsed-by-default accordion at the top; the header shows the rule count and the aggregate trigger count (total alarms dropped) so you can gauge suppression volume without expanding it. Ignore rules are binary — first match wins, no priority column. Shows every live ignore rule stored in DynamoDB with:
 
+- **Match criteria** — alarm name prefix/pattern, namespace, tags, source
+- **Outcome** — `drop`, plus the reason/note stored with the rule
 - **Trigger count** — how many times the rule has dropped a matching alarm since it was created
-- **Reason / note** — human-readable label stored with the rule
-- **Created by / created at** — audit fields set at rule creation
-- Filter, edit, and delete controls for each rule
+- Enabled state, edit, and delete controls for each rule
 
 **Deviation banner.** When the live DynamoDB rules differ from the `routing.yaml` `ignore:` baseline, the screen shows a banner. Use the **Download YAML** button (`GET /rules/download`) to get a regenerated `ignore:` block you can paste back into `routing.yaml`.
 

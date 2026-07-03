@@ -1,19 +1,24 @@
-// Rules view — unified table over both routing and ignore rule types.
-// Each row carries _type ('routing'|'ignore'); a Type column distinguishes
-// them. Both types share one DynamoDB table; this screen is the single place
-// to view/create/edit/delete either kind. New-rule defaults to a routing rule
-// but a Type toggle in the form switches to ignore.
-// Ported from dashboard_parts/32-view-rules.js.part (#33).
+// Rules view — two separate tables, one per rule type, reflecting the two
+// runtime stages. Ignore rules render FIRST in a collapsed-by-default accordion
+// (they override every routing rule by short-circuiting the pipeline, so the
+// section leads visually — but low-profile, since the drop-list is high-risk
+// but rarely browsed). Routing rules render below in an accordion that is
+// expanded by default (the common case operators work with).
+// Each row carries _type ('routing'|'ignore'); edit/delete/toggle handlers
+// dispatch by that tag. Both types share one DynamoDB table.
+// Ported from dashboard_parts/32-view-rules.js.part (#33); split per #62.
 
 import { esc } from './helpers.js';
 import { CAN_WRITE, escalationPolicies, setEscalationPolicies } from './state.js';
 import { routingRuleFormHtml, wireRoutingRuleForm, ignoreRuleFormHtml, wireIgnoreRuleForm } from './rule-forms.js';
 
 // Module-local state (single-module, NOT exported per module map D2).
-let rulesData = [];          // combined cached rows, each tagged with _type
+let routingData = [];        // routing-only cache (priority asc)
+let ignoreData = [];         // ignore-only cache (most-triggered first)
 let rulesFilterVal = '';     // current filter string
-let routingRulesData = [];   // routing-only cache (used by incident drawer)
 let newRuleType = 'routing'; // 'routing' | 'ignore' — type for the New rule form
+let ignoreOpen = false;      // accordion state — ignore collapsed by default
+let routingOpen = true;      // accordion state — routing expanded by default
 
 export async function loadRules() {
   const view = document.getElementById('view-rules');
@@ -40,18 +45,14 @@ export async function loadRules() {
 
   // Setter path — rules.js is a non-owner writer for escalationPolicies (state.js owns it).
   setEscalationPolicies(policies);
-  routingRulesData = routing.slice();
-  // Tag each row with its kind so the unified table can branch per row.
-  const combined = []
-    .concat(routing.map(r => Object.assign({ _type: 'routing' }, r)))
-    .concat(ignore.map(r  => Object.assign({ _type: 'ignore'  }, r)));
-  // Routing first (priority asc), then ignore (most-triggered first).
-  combined.sort((a, b) => {
-    if (a._type !== b._type) return a._type === 'routing' ? -1 : 1;
-    if (a._type === 'routing') return (a.priority || 0) - (b.priority || 0);
-    return (b.trigger_count || 0) - (a.trigger_count || 0);
-  });
-  rulesData = combined;
+  // Two independent caches — no cross-type sort. Routing by priority asc;
+  // ignore by most-triggered first (the drop-list's own precedence signal).
+  routingData = routing
+    .map(r => Object.assign({ _type: 'routing' }, r))
+    .sort((a, b) => (a.priority || 0) - (b.priority || 0));
+  ignoreData = ignore
+    .map(r => Object.assign({ _type: 'ignore' }, r))
+    .sort((a, b) => (b.trigger_count || 0) - (a.trigger_count || 0));
 
   renderRulesSection(routeDev, ignoreDev);
 }
@@ -84,10 +85,10 @@ export function renderRulesSection(routeDev, ignoreDev) {
     <div class="settings-card" style="max-width:none;">
       <div class="settings-card-title">About rules</div>
       <div class="info-banner">
-        <strong>Routing</strong> rules decide <em>how</em> an alarm pages — its severity, escalation policy, and streams (Team / Central).
+        <strong>Ignore</strong> rules run first as a short-circuit stage: a matched ignore rule drops the alarm entirely — never paged, never counted, no incident created — overriding every routing rule. They are binary (first match wins, no priority).
+        <strong>Routing</strong> rules decide <em>how</em> a non-ignored alarm pages — its severity, escalation policy, and streams (Team / Central).
         They are evaluated in priority order (lowest first); the first match wins. Alarms matching no routing rule use the default policy and a derived severity (shown as <span style="color:var(--amber);">catch-all</span> on the incident).
-        <strong>Ignore</strong> rules drop matching alarms entirely — never paged, never counted, no incident created.
-        Both live in one table; use the Type column to tell them apart.
+        The two stages are shown as separate tables below.
       </div>
     </div>
     ${devBanner}
@@ -153,107 +154,77 @@ export function renderNewRuleForm(formWrap) {
   if (it) it.addEventListener('click', () => { if (newRuleType !== 'ignore')  { newRuleType = 'ignore';  renderNewRuleForm(formWrap); } });
 }
 
-export function renderRulesTable() {
-  const wrap = document.getElementById('rules-table-wrap');
-  if (!wrap) return;
-  const q = rulesFilterVal.trim().toLowerCase();
-  const filtered = q
-    ? rulesData.filter(r =>
-        (r.app_name || '').toLowerCase().includes(q) ||
-        (r.alarm_name || '').toLowerCase().includes(q) ||
-        (r.alarm_name_prefix || '').toLowerCase().includes(q) ||
-        (r.alarm_name_regex || '').toLowerCase().includes(q) ||
-        (r.namespace_prefix || '').toLowerCase().includes(q) ||
-        (r.escalation_policy_id || '').toLowerCase().includes(q) ||
-        (r.note || '').toLowerCase().includes(q) ||
-        (r.environment || '').toLowerCase().includes(q))
-    : rulesData;
+// Match-chip HTML — shared across both tables (union of all matchers).
+function matchChipsHtml(rule) {
+  const matchParts = [];
+  if (rule.app_name)          matchParts.push(`<span class="tag-chip"><span class="tag-k">app</span><span class="tag-v">${esc(rule.app_name)}</span></span>`);
+  if (rule.alarm_name_prefix) matchParts.push(`<span class="tag-chip"><span class="tag-k">prefix</span><span class="tag-v">${esc(rule.alarm_name_prefix)}</span></span>`);
+  else if (rule.alarm_name)   matchParts.push(`<span class="tag-chip"><span class="tag-k">alarm</span><span class="tag-v">${esc(rule.alarm_name)}</span></span>`);
+  if (rule.alarm_name_regex)  matchParts.push(`<span class="tag-chip"><span class="tag-k">regex</span><span class="tag-v">${esc(rule.alarm_name_regex)}</span></span>`);
+  if (rule.namespace_prefix)  matchParts.push(`<span class="tag-chip"><span class="tag-k">ns</span><span class="tag-v">${esc(rule.namespace_prefix)}</span></span>`);
+  if (rule.environment)       matchParts.push(`<span class="tag-chip"><span class="tag-k">env</span><span class="tag-v">${esc(rule.environment)}</span></span>`);
+  if (rule.account_id)        matchParts.push(`<span class="tag-chip"><span class="tag-k">acct</span><span class="tag-v">${esc(rule.account_id)}</span></span>`);
+  const tagsObj = (rule.tag_filters && typeof rule.tag_filters === 'object') ? rule.tag_filters
+                : (rule.tags && typeof rule.tags === 'object') ? rule.tags : {};
+  Object.entries(tagsObj).forEach(([k, v]) =>
+    matchParts.push(`<span class="tag-chip"><span class="tag-k">${esc(k)}</span><span class="tag-v">${esc(String(v))}</span></span>`));
+  if (!matchParts.length) matchParts.push('<span style="color:var(--text-faint);font-size:11px;">any</span>');
+  return `<div class="tag-grid" style="margin:0;">${matchParts.join('')}</div>`;
+}
 
-  if (!filtered.length) {
-    wrap.innerHTML = '<div style="color:var(--text-dim);padding:20px 0;">' + (q ? 'No rules match the filter.' : 'No rules configured.') + '</div>';
-    return;
+function writeActionsHtml(rule) {
+  return CAN_WRITE
+    ? `<button class="btn-sm btn-edit-anyrule" data-rid="${esc(rule.rule_id)}" data-rtype="${esc(rule._type)}">Edit</button>
+       <button class="btn-sm btn-del-anyrule" data-rid="${esc(rule.rule_id)}" data-rtype="${esc(rule._type)}">Delete</button>`
+    : `<button class="btn-sm" disabled style="opacity:.4;">Edit</button>
+       <button class="btn-sm" disabled style="opacity:.4;">Delete</button>`;
+}
+
+function ruleMatchesFilter(r, q) {
+  return (r.app_name || '').toLowerCase().includes(q) ||
+    (r.alarm_name || '').toLowerCase().includes(q) ||
+    (r.alarm_name_prefix || '').toLowerCase().includes(q) ||
+    (r.alarm_name_regex || '').toLowerCase().includes(q) ||
+    (r.namespace_prefix || '').toLowerCase().includes(q) ||
+    (r.escalation_policy_id || '').toLowerCase().includes(q) ||
+    (r.note || '').toLowerCase().includes(q) ||
+    (r.environment || '').toLowerCase().includes(q);
+}
+
+// Routing table body — Priority · Match · Outcome · Count · Enabled · Actions.
+function routingTableHtml(rules) {
+  if (!rules.length) {
+    return `<div style="color:var(--text-dim);padding:16px 14px;">${rulesFilterVal.trim() ? 'No routing rules match the filter.' : 'No routing rules configured.'}</div>`;
   }
-
-  const rows = filtered.map(rule => {
-    const isRouting = rule._type === 'routing';
-    const typeChip = isRouting
-      ? '<span class="tag-chip" style="border-color:var(--teal);"><span class="tag-v" style="color:var(--teal-light);">routing</span></span>'
-      : '<span class="tag-chip" style="border-color:var(--amber);"><span class="tag-v" style="color:var(--amber);">ignore</span></span>';
-
-    // Match chips — union of both rule kinds' matchers.
-    const matchParts = [];
-    if (rule.app_name)          matchParts.push(`<span class="tag-chip"><span class="tag-k">app</span><span class="tag-v">${esc(rule.app_name)}</span></span>`);
-    if (rule.alarm_name_prefix) matchParts.push(`<span class="tag-chip"><span class="tag-k">prefix</span><span class="tag-v">${esc(rule.alarm_name_prefix)}</span></span>`);
-    else if (rule.alarm_name)   matchParts.push(`<span class="tag-chip"><span class="tag-k">alarm</span><span class="tag-v">${esc(rule.alarm_name)}</span></span>`);
-    if (rule.alarm_name_regex)  matchParts.push(`<span class="tag-chip"><span class="tag-k">regex</span><span class="tag-v">${esc(rule.alarm_name_regex)}</span></span>`);
-    if (rule.namespace_prefix)  matchParts.push(`<span class="tag-chip"><span class="tag-k">ns</span><span class="tag-v">${esc(rule.namespace_prefix)}</span></span>`);
-    if (rule.environment)       matchParts.push(`<span class="tag-chip"><span class="tag-k">env</span><span class="tag-v">${esc(rule.environment)}</span></span>`);
-    if (rule.account_id)        matchParts.push(`<span class="tag-chip"><span class="tag-k">acct</span><span class="tag-v">${esc(rule.account_id)}</span></span>`);
-    const tagsObj = (rule.tag_filters && typeof rule.tag_filters === 'object') ? rule.tag_filters
-                  : (rule.tags && typeof rule.tags === 'object') ? rule.tags : {};
-    Object.entries(tagsObj).forEach(([k, v]) =>
-      matchParts.push(`<span class="tag-chip"><span class="tag-k">${esc(k)}</span><span class="tag-v">${esc(String(v))}</span></span>`));
-    if (!matchParts.length) matchParts.push('<span style="color:var(--text-faint);font-size:11px;">any</span>');
-
-    // Priority (routing only)
-    const priorityHtml = isRouting
-      ? `<span style="font-family:var(--mono);">${esc(String(rule.priority ?? ''))}</span>`
-      : '<span style="color:var(--text-faint);">—</span>';
-
-    // Outcome column: routing → sev + policy + streams; ignore → "drop".
-    let outcomeHtml;
-    if (isRouting) {
-      const sevHtml = rule.severity_override
-        ? `<span class="inc-sev ${esc(rule.severity_override)}" style="font-size:11px;">${esc(rule.severity_override)}</span>`
-        : `<span style="color:var(--text-faint);font-size:11px;">derived sev</span>`;
-      const pol = escalationPolicies.find(p => p.policy_id === rule.escalation_policy_id);
-      const polHtml = pol
-        ? `<span style="font-size:12px;">${esc(pol.name)}</span>`
-        : `<span style="font-family:var(--mono);font-size:11px;color:var(--text-dim);">${esc(rule.escalation_policy_id || '—')}</span>`;
-      const streams = Array.isArray(rule.streams) ? rule.streams : [];
-      const streamsHtml = streams.map(s => `<span class="tag-chip"><span class="tag-v">${esc(s)}</span></span>`).join('');
-      outcomeHtml = `<div class="tag-grid" style="margin:0;align-items:center;">${sevHtml} ${polHtml} ${streamsHtml}</div>`;
-    } else {
-      const note = rule.note || '';
-      const noteTrunc = note.length > 50 ? note.slice(0, 50) + '…' : note;
-      outcomeHtml = `<span style="color:var(--amber);font-size:11px;">drop</span>`
-        + (note ? ` <span style="color:var(--text-dim);font-size:11px;font-family:var(--mono);" title="${esc(note)}">${esc(noteTrunc)}</span>` : '');
-    }
-
-    // Count column: routing match_count / ignore trigger_count.
-    const count = isRouting ? (rule.match_count || 0) : (rule.trigger_count || 0);
-
-    // Enabled toggle (routing has live enable/disable; ignore shows state only).
-    const enabledHtml = isRouting
-      ? `<button class="btn-sm btn-toggle-routing" data-rid="${esc(rule.rule_id)}" data-enabled="${rule.enabled ? '1' : '0'}"
-          style="min-width:44px;${rule.enabled ? '' : 'opacity:.55;'}" ${!CAN_WRITE ? 'disabled title="Read-only"' : ''}>${rule.enabled ? 'Yes' : 'No'}</button>`
-      : `<span style="color:var(--text-dim);font-size:11px;">${rule.enabled === false ? 'No' : 'Yes'}</span>`;
-
-    const writeActions = CAN_WRITE
-      ? `<button class="btn-sm btn-edit-anyrule" data-rid="${esc(rule.rule_id)}" data-rtype="${esc(rule._type)}">Edit</button>
-         <button class="btn-sm btn-del-anyrule" data-rid="${esc(rule.rule_id)}" data-rtype="${esc(rule._type)}">Delete</button>`
-      : `<button class="btn-sm" disabled style="opacity:.4;">Edit</button>
-         <button class="btn-sm" disabled style="opacity:.4;">Delete</button>`;
-
+  const rows = rules.map(rule => {
+    const sevHtml = rule.severity_override
+      ? `<span class="inc-sev ${esc(rule.severity_override)}" style="font-size:11px;">${esc(rule.severity_override)}</span>`
+      : `<span style="color:var(--text-faint);font-size:11px;">derived sev</span>`;
+    const pol = escalationPolicies.find(p => p.policy_id === rule.escalation_policy_id);
+    const polHtml = pol
+      ? `<span style="font-size:12px;">${esc(pol.name)}</span>`
+      : `<span style="font-family:var(--mono);font-size:11px;color:var(--text-dim);">${esc(rule.escalation_policy_id || '—')}</span>`;
+    const streams = Array.isArray(rule.streams) ? rule.streams : [];
+    const streamsHtml = streams.map(s => `<span class="tag-chip"><span class="tag-v">${esc(s)}</span></span>`).join('');
+    const outcomeHtml = `<div class="tag-grid" style="margin:0;align-items:center;">${sevHtml} ${polHtml} ${streamsHtml}</div>`;
+    const enabledHtml = `<button class="btn-sm btn-toggle-routing" data-rid="${esc(rule.rule_id)}" data-enabled="${rule.enabled ? '1' : '0'}"
+        style="min-width:44px;${rule.enabled ? '' : 'opacity:.55;'}" ${!CAN_WRITE ? 'disabled title="Read-only"' : ''}>${rule.enabled ? 'Yes' : 'No'}</button>`;
     return `<tr>
-      <td>${typeChip}</td>
-      <td style="font-family:var(--mono);font-size:12px;text-align:right;color:var(--text);">${priorityHtml}</td>
-      <td><div class="tag-grid" style="margin:0;">${matchParts.join('')}</div></td>
+      <td style="font-family:var(--mono);font-size:12px;text-align:right;color:var(--text);"><span style="font-family:var(--mono);">${esc(String(rule.priority ?? ''))}</span></td>
+      <td>${matchChipsHtml(rule)}</td>
       <td>${outcomeHtml}</td>
-      <td style="font-family:var(--mono);font-size:12px;text-align:right;color:var(--text);">${count}</td>
+      <td style="font-family:var(--mono);font-size:12px;text-align:right;color:var(--text);">${rule.match_count || 0}</td>
       <td>${enabledHtml}</td>
-      <td style="white-space:nowrap;"><div style="display:flex;gap:6px;">${writeActions}</div></td>
+      <td style="white-space:nowrap;"><div style="display:flex;gap:6px;">${writeActionsHtml(rule)}</div></td>
     </tr>
-    <tr id="anyrule-edit-row-${esc(rule._type)}-${esc(rule.rule_id)}" style="display:none;">
-      <td colspan="7" style="padding:0;"></td>
+    <tr id="anyrule-edit-row-routing-${esc(rule.rule_id)}" style="display:none;">
+      <td colspan="6" style="padding:0;"></td>
     </tr>`;
   }).join('');
-
-  wrap.innerHTML = `
+  return `
     <table class="contacts-table" style="width:100%;">
       <thead>
         <tr>
-          <th>Type</th>
           <th style="text-align:right;">Priority</th>
           <th>Match</th>
           <th>Outcome</th>
@@ -264,6 +235,88 @@ export function renderRulesTable() {
       </thead>
       <tbody>${rows}</tbody>
     </table>`;
+}
+
+// Ignore table body — Match · Outcome (drop + note) · Trigger count · Enabled · Actions.
+// No Priority column: ignore is binary, first-match-wins in cache order.
+function ignoreTableHtml(rules) {
+  if (!rules.length) {
+    return `<div style="color:var(--text-dim);padding:16px 14px;">${rulesFilterVal.trim() ? 'No ignore rules match the filter.' : 'No ignore rules configured.'}</div>`;
+  }
+  const rows = rules.map(rule => {
+    const note = rule.note || '';
+    const noteTrunc = note.length > 50 ? note.slice(0, 50) + '…' : note;
+    const outcomeHtml = `<span style="color:var(--amber);font-size:11px;">drop</span>`
+      + (note ? ` <span style="color:var(--text-dim);font-size:11px;font-family:var(--mono);" title="${esc(note)}">${esc(noteTrunc)}</span>` : '');
+    const enabledHtml = `<span style="color:var(--text-dim);font-size:11px;">${rule.enabled === false ? 'No' : 'Yes'}</span>`;
+    return `<tr>
+      <td>${matchChipsHtml(rule)}</td>
+      <td>${outcomeHtml}</td>
+      <td style="font-family:var(--mono);font-size:12px;text-align:right;color:var(--text);">${rule.trigger_count || 0}</td>
+      <td>${enabledHtml}</td>
+      <td style="white-space:nowrap;"><div style="display:flex;gap:6px;">${writeActionsHtml(rule)}</div></td>
+    </tr>
+    <tr id="anyrule-edit-row-ignore-${esc(rule.rule_id)}" style="display:none;">
+      <td colspan="5" style="padding:0;"></td>
+    </tr>`;
+  }).join('');
+  return `
+    <table class="contacts-table" style="width:100%;">
+      <thead>
+        <tr>
+          <th>Match</th>
+          <th>Outcome</th>
+          <th style="text-align:right;">Trigger count</th>
+          <th>Enabled</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+export function renderRulesTable() {
+  const wrap = document.getElementById('rules-table-wrap');
+  if (!wrap) return;
+  const q = rulesFilterVal.trim().toLowerCase();
+  const routingFiltered = q ? routingData.filter(r => ruleMatchesFilter(r, q)) : routingData;
+  const ignoreFiltered  = q ? ignoreData.filter(r => ruleMatchesFilter(r, q))  : ignoreData;
+
+  // Aggregate trigger count across ALL ignore rules (not just filtered) — the
+  // header advertises total suppression volume regardless of the filter box.
+  const ignoreTotalTriggers = ignoreData.reduce((sum, r) => sum + (r.trigger_count || 0), 0);
+  const ignoreCountLabel = `${ignoreData.length} rule${ignoreData.length === 1 ? '' : 's'} · ${ignoreTotalTriggers} alarm${ignoreTotalTriggers === 1 ? '' : 's'} dropped`;
+  const routingCountLabel = `${routingData.length} rule${routingData.length === 1 ? '' : 's'}`;
+
+  const chevron = open => `<span class="rules-acc-chevron">${open ? '▾' : '▸'}</span>`;
+
+  wrap.innerHTML = `
+    <div class="rules-acc" data-acc="ignore">
+      <button type="button" class="rules-acc-header" id="rules-acc-ignore-header" aria-expanded="${ignoreOpen}">
+        ${chevron(ignoreOpen)}
+        <span class="rules-acc-title" style="color:var(--amber);">Ignore rules</span>
+        <span class="rules-acc-count">${esc(ignoreCountLabel)}</span>
+      </button>
+      <div class="rules-acc-body" id="rules-acc-ignore-body" style="display:${ignoreOpen ? 'block' : 'none'};">
+        ${ignoreTableHtml(ignoreFiltered)}
+      </div>
+    </div>
+    <div class="rules-acc" data-acc="routing">
+      <button type="button" class="rules-acc-header" id="rules-acc-routing-header" aria-expanded="${routingOpen}">
+        ${chevron(routingOpen)}
+        <span class="rules-acc-title" style="color:var(--teal-light);">Routing rules</span>
+        <span class="rules-acc-count">${esc(routingCountLabel)}</span>
+      </button>
+      <div class="rules-acc-body" id="rules-acc-routing-body" style="display:${routingOpen ? 'block' : 'none'};">
+        ${routingTableHtml(routingFiltered)}
+      </div>
+    </div>`;
+
+  // Accordion toggles — re-render to swap chevron + body visibility.
+  const ignHeader = document.getElementById('rules-acc-ignore-header');
+  if (ignHeader) ignHeader.addEventListener('click', () => { ignoreOpen = !ignoreOpen; renderRulesTable(); });
+  const rtHeader = document.getElementById('rules-acc-routing-header');
+  if (rtHeader) rtHeader.addEventListener('click', () => { routingOpen = !routingOpen; renderRulesTable(); });
 
   // Routing enable/disable toggle
   wrap.querySelectorAll('.btn-toggle-routing').forEach(btn => {
@@ -311,7 +364,7 @@ export function renderRulesTable() {
       if (isOpen) { editRow.style.display = 'none'; return; }
       wrap.querySelectorAll('tr[id^="anyrule-edit-row-"]').forEach(r => { r.style.display = 'none'; });
       editRow.style.display = 'table-row';
-      const rule = rulesData.find(r => r.rule_id === rid && r._type === rtype);
+      const rule = (rtype === 'routing' ? routingData : ignoreData).find(r => r.rule_id === rid);
       const td = editRow.querySelector('td');
       if (!td || !rule) return;
       td.style.padding = '10px 14px';

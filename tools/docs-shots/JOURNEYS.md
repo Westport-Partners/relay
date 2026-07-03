@@ -36,7 +36,7 @@ Single-page app; hash routes drive the left-nav views. Two overlays (drawers).
 | Contacts | `#/contacts` | `GET /contacts` |
 | On-call | `#/oncall` | `GET /oncall` |
 | Schedule (week grid) | `#/schedule` | `GET /schedule?week=`, `GET /schedule/overrides` |
-| Rules (Routing / Ignore tabs) | `#/rules` | `GET /routing-rules`, `GET /rules`, `*/deviation` |
+| Rules (Ignore + Routing tables) | `#/rules` | `GET /routing-rules`, `GET /rules`, `*/deviation` |
 | Maintenance | `#/maintenance` | synthetic-incident + purge tools |
 | Settings | `#/settings` | `GET /settings` (secrets masked) |
 | Tile detail drawer | (overlay on tile click) | `GET /fleet/tile?account_id=&app_name=`, `GET /oncall` |
@@ -145,16 +145,16 @@ and, in Phase 4, a paced video (`V-*`).
 
 ### B6 — Manage routing & ignore rules  ★  (also config journey A16)
 - **Audience:** team lead, central SRE · **Doc:** `operate.md`, `configure.md`
-- **View:** `#/rules` (Routing tab default, Ignore tab).
-- **Steps:** open Rules → read routing table (priority/match/severity/policy/streams/
-  match count/enabled) → switch to Ignore tab (trigger count/reason/created-by) →
-  observe deviation banner → Download YAML.
+- **View:** `#/rules` (two accordions: Ignore collapsed-first, Routing expanded-below).
+- **Steps:** open Rules → Ignore accordion header shows rule count + aggregate alarms
+  dropped (collapsed by default) → read Routing table below (priority/match/severity/
+  policy/streams/match count/enabled) → observe deviation banner → Download YAML.
 - **Prereq state:** several live rules with non-zero counts (seed has 6 routing rules);
   a divergence from `routing.yaml` so the deviation banner shows (harness creates one
   rule via API to force deviation); write enabled.
-- **Reader learns:** runtime rules live in DynamoDB; counts show effectiveness; GitOps
-  round-trip via Download YAML.
-- **Screenshots:** `S-RULES`, `S-RULES-IGNORE-TAB`, `S-RULES-DEVIATION`.
+- **Reader learns:** ignore and routing are separate pipeline stages; runtime rules live
+  in DynamoDB; counts show effectiveness; GitOps round-trip via Download YAML.
+- **Screenshots:** `S-RULES`, `S-RULES-DEVIATION`.
 
 ### B7 — Set up a contact and availability
 - **Audience:** on-call (self-service), team lead · **Doc:** `scheduling.md`, `operate.md`
@@ -223,7 +223,7 @@ drop them into the matching page. Proposed mapping:
 | `S-INCIDENTS-LIST`, `S-INCIDENT-DETAIL`, `S-INCIDENT-ACK`, `S-INCIDENT-BRIEF` | operate.md | B3 |
 | `S-INCIDENT-IGNORE-FORM` | operate.md | B4 |
 | `S-INCIDENT-ROUTE-FORM` | operate.md | B5 |
-| `S-RULES`, `S-RULES-IGNORE-TAB`, `S-RULES-DEVIATION` | operate.md, configure.md | B6 / A16 |
+| `S-RULES`, `S-RULES-DEVIATION` | operate.md, configure.md | B6 / A16 |
 | `S-CONTACTS`, `S-CONTACT-AVAILABILITY` | scheduling.md | B7 |
 | `S-SCHEDULE`, `S-SCHEDULE-GAPS`, `S-ONCALL` | scheduling.md | B8 |
 | `S-METRICS`, `S-METRICS-PROD` | operate.md | B9 |
