@@ -1,0 +1,15 @@
+{
+  "name": "relay-docs-shots",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic Playwright capture of Relay documentation screenshots and how-to videos from the seeded demo container.",
+  "type": "module",
+  "scripts": {
+    "shots": "node capture.mjs",
+    "video": "node capture.mjs --video",
+    "seed": "node seed.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}
