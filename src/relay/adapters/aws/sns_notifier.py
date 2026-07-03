@@ -122,9 +122,9 @@ class SNSNotifier:
         try:
             self._sns.publish(PhoneNumber=phone_number, Message=message[:1600])
         except ClientError:
-            # Mask all but the last 4 digits — the number is PII.
-            masked = "***" + phone_number[-4:] if len(phone_number) >= 4 else "***"
-            logger.exception("SNS publish_direct failed for %s", masked)
+            # Don't log the phone number — it's PII. The exception carries the
+            # SNS-side error context needed to diagnose the failure.
+            logger.exception("SNS publish_direct failed")
             raise
 
     def publish_test(
