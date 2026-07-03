@@ -122,7 +122,9 @@ class SNSNotifier:
         try:
             self._sns.publish(PhoneNumber=phone_number, Message=message[:1600])
         except ClientError:
-            logger.exception("SNS publish_direct failed for %s", phone_number)
+            # Don't log the phone number — it's PII. The exception carries the
+            # SNS-side error context needed to diagnose the failure.
+            logger.exception("SNS publish_direct failed")
             raise
 
     def publish_test(
