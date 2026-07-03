@@ -4,8 +4,9 @@
 For the offline local-mock harness (collapsed-single-container plan §6). Reads
 ``RELAY_AWS_ENDPOINT_URL`` (e.g. http://localhost:8000 for DynamoDB-Local) and
 ``RELAY_TABLE_NAME`` (default ``relay-local``), creates the single table with the
-``incident-status-index`` GSI to match RelayDataStack, then seeds the test
-contacts so a fresh ``docker compose up`` can fire an incident and page someone.
+``incident-status-index`` and ``incident-all-index`` GSIs to match RelayDataStack,
+then seeds the test contacts so a fresh ``docker compose up`` can fire an incident
+and page someone.
 
 Idempotent: skips creation if the table already exists.
 
@@ -56,18 +57,31 @@ def main() -> None:
             AttributeDefinitions=[
                 {"AttributeName": "pk", "AttributeType": "S"},
                 {"AttributeName": "sk", "AttributeType": "S"},
-                {"AttributeName": "status", "AttributeType": "S"},
-                {"AttributeName": "opened_at", "AttributeType": "S"},
+                # GSI keys must mirror RelayDataStack (infra/stacks/data_stack.py):
+                # the store writes/queries gsi_open_pk / gsi_all_pk with a
+                # created_at sort key. Diverging here silently breaks the open
+                # incidents list, history, and metrics in the local harness.
+                {"AttributeName": "gsi_open_pk", "AttributeType": "S"},
+                {"AttributeName": "gsi_all_pk", "AttributeType": "S"},
+                {"AttributeName": "created_at", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
                     "IndexName": "incident-status-index",
                     "KeySchema": [
-                        {"AttributeName": "status", "KeyType": "HASH"},
-                        {"AttributeName": "opened_at", "KeyType": "RANGE"},
+                        {"AttributeName": "gsi_open_pk", "KeyType": "HASH"},
+                        {"AttributeName": "created_at", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
-                }
+                },
+                {
+                    "IndexName": "incident-all-index",
+                    "KeySchema": [
+                        {"AttributeName": "gsi_all_pk", "KeyType": "HASH"},
+                        {"AttributeName": "created_at", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
             ],
             BillingMode="PAY_PER_REQUEST",
         )
