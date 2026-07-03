@@ -172,6 +172,11 @@ Rendered in the collapsed-by-default accordion at the top; the header shows the 
 - **Trigger count** — how many times the rule has dropped a matching alarm since it was created
 - Enabled state, edit, and delete controls for each rule
 
+<figure class="screenshot" markdown="span">
+  ![The Rules screen with the Ignore rules accordion expanded, showing each ignore rule's match criteria, drop outcome with note, and trigger count.](assets/screenshots/operate/S-RULES-IGNORE.png)
+  <figcaption>Expanding the Ignore rules accordion reveals the drop list — each rule's match, its <code>drop</code> outcome and note, and how many alarms it has silently suppressed. There is no priority column: ignore rules are binary and first-match-wins.</figcaption>
+</figure>
+
 **Deviation banner.** When the live DynamoDB rules differ from the `routing.yaml` `ignore:` baseline, the screen shows a banner. Use the **Download YAML** button (`GET /rules/download`) to get a regenerated `ignore:` block you can paste back into `routing.yaml`.
 
 See `configure.md` for the full config schemas, the seed-vs-DynamoDB storage model for both rule types, and how ignore rules differ from `suppression:`.

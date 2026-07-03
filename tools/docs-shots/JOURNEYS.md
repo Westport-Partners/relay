@@ -148,13 +148,14 @@ and, in Phase 4, a paced video (`V-*`).
 - **View:** `#/rules` (two accordions: Ignore collapsed-first, Routing expanded-below).
 - **Steps:** open Rules → Ignore accordion header shows rule count + aggregate alarms
   dropped (collapsed by default) → read Routing table below (priority/match/severity/
-  policy/streams/match count/enabled) → observe deviation banner → Download YAML.
+  policy/streams/match count/enabled) → observe deviation banner → expand the Ignore
+  accordion to reveal its table (match/outcome/trigger count) → Download YAML.
 - **Prereq state:** several live rules with non-zero counts (seed has 6 routing rules);
   a divergence from `routing.yaml` so the deviation banner shows (harness creates one
   rule via API to force deviation); write enabled.
 - **Reader learns:** ignore and routing are separate pipeline stages; runtime rules live
   in DynamoDB; counts show effectiveness; GitOps round-trip via Download YAML.
-- **Screenshots:** `S-RULES`, `S-RULES-DEVIATION`.
+- **Screenshots:** `S-RULES`, `S-RULES-DEVIATION`, `S-RULES-IGNORE` (accordion expanded).
 
 ### B7 — Set up a contact and availability
 - **Audience:** on-call (self-service), team lead · **Doc:** `scheduling.md`, `operate.md`
@@ -223,7 +224,7 @@ drop them into the matching page. Proposed mapping:
 | `S-INCIDENTS-LIST`, `S-INCIDENT-DETAIL`, `S-INCIDENT-ACK`, `S-INCIDENT-BRIEF` | operate.md | B3 |
 | `S-INCIDENT-IGNORE-FORM` | operate.md | B4 |
 | `S-INCIDENT-ROUTE-FORM` | operate.md | B5 |
-| `S-RULES`, `S-RULES-DEVIATION` | operate.md, configure.md | B6 / A16 |
+| `S-RULES`, `S-RULES-IGNORE`, `S-RULES-DEVIATION` | operate.md, configure.md | B6 / A16 |
 | `S-CONTACTS`, `S-CONTACT-AVAILABILITY` | scheduling.md | B7 |
 | `S-SCHEDULE`, `S-SCHEDULE-GAPS`, `S-ONCALL` | scheduling.md | B8 |
 | `S-METRICS`, `S-METRICS-PROD` | operate.md | B9 |

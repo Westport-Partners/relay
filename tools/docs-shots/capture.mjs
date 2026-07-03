@@ -192,10 +192,23 @@ const JOURNEYS = [
       await page.goto(BASE, { waitUntil: 'domcontentloaded' });
       await gotoView(page, 'rules');
       await settle(page, 800);
+      // Default layout: ignore accordion collapsed (header shows count +
+      // aggregate dropped), routing table expanded below.
       await shot(page, 'operate', 'S-RULES');
       await beat(page);
       // Deviation banner (seed forces one). Capture whatever the rules view shows.
       await shot(page, 'configure', 'S-RULES-DEVIATION');
+
+      // Expand the ignore accordion so the ignore rules table is visible —
+      // otherwise it stays hidden and never appears in the docs.
+      const ignHeader = page.locator('#rules-acc-ignore-header');
+      if (await ignHeader.count()) {
+        await ignHeader.click();
+        await page.waitForSelector('#rules-acc-ignore-body table', { timeout: 10_000 });
+        await settle(page, 500);
+        await shot(page, 'operate', 'S-RULES-IGNORE');
+        await beat(page);
+      }
     },
   },
   {
