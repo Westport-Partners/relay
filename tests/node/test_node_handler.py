@@ -36,7 +36,7 @@ from relay.core.model import (
     Severity,
     SignalSource,
 )
-from relay.node.handler import NodeHandler
+import relay.node.handler as handler_mod
 
 # ---------------------------------------------------------------------------
 # Environment variable fixture
@@ -873,12 +873,10 @@ class TestRoutingProvenance:
             return None
 
     def _build_handler(self, incident: Incident, config: RelayConfig, store):  # noqa: F821
-        import relay.node.handler as handler_mod
-
         monkeypatch_dispatcher = handler_mod.DualStreamDispatcher
         handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
-            h = NodeHandler(
+            h = handler_mod.NodeHandler(
                 _config_loader=FakeConfigLoader(config),
                 _alarm_source=FakeAlarmSource(incident),
                 _notifier=MagicMock(),
