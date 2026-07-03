@@ -17,7 +17,7 @@ import { loadRules } from './rules.js';
 const TITLES = {
   fleet: 'Fleet Status', incidents: 'Incidents', metrics: 'Metrics',
   contacts: 'Contacts', oncall: 'On-Call', settings: 'Settings', schedule: 'Schedule',
-  maintenance: 'Maintenance', rules: 'Ignore Rules',
+  maintenance: 'Maintenance', rules: 'Rules',
 };
 
 // Only the top-level nav buttons carry data-view. Other .nav-btn elements

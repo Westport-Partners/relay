@@ -125,3 +125,8 @@ scripts/*.local.sh
 specs/_active/
 # spec-kit per-feature pointer (transient; set by setup-plan per active feature)
 .specify/feature.json
+
+# docs-shots capture harness
+tools/docs-shots/node_modules/
+tools/docs-shots/videos/
+tools/docs-shots/package-lock.json

@@ -1190,6 +1190,43 @@
   .maint-toggle-btn.active { background: var(--teal-deep); border-color: var(--teal); color: #fff; }
   .maint-toggle-btn:hover:not(.active) { background: var(--surface-2); color: var(--text); }
 
+  /* ===== Rules accordions (#62) ===================================== */
+  /* Ignore + Routing rules render as two labeled, collapsible sections. */
+  .rules-acc { margin-bottom: 12px; }
+  .rules-acc-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    color: var(--text);
+    cursor: pointer;
+    font-family: var(--sans);
+    text-align: left;
+  }
+  .rules-acc-header:hover { background: var(--surface-2); }
+  .rules-acc-chevron { color: var(--text-dim); font-size: 11px; width: 12px; flex: 0 0 auto; }
+  .rules-acc-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .rules-acc-count {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+  .rules-acc-body {
+    border: 1px solid var(--border);
+    border-top: 0;
+    border-bottom-left-radius: var(--radius);
+    border-bottom-right-radius: var(--radius);
+  }
+
   /* ===== Fleet env-container board (#43) ============================= */
   /* Environment is the outer container; the org hierarchy nests inside  */
   /* dynamically. Env blocks stack as rows (vertical flex). Children at  */

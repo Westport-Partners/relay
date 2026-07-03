@@ -30,6 +30,11 @@ The landing view is a tile grid — one tile per tracked deployment across your 
 
 The board is kept live by a server-sent events (SSE) stream (`GET /stream`). The container pushes fleet snapshots and deltas on roughly a 30-second cycle. Tiles update in place — no page reload needed.
 
+<figure class="screenshot" markdown="span">
+  ![The fleet big-board grouped by product line, product, and component, with tiles color-coded by severity.](assets/screenshots/operate/S-FLEET-ALL.png)
+  <figcaption>The big-board nests the org hierarchy — product line › product › component › deployment — inside the environment lens. Each tile shows the app's current severity, open-incident count, environment badge, owning team, and last-seen age.</figcaption>
+</figure>
+
 ### Liveness and signal loss
 
 Apps emit periodic heartbeats. Relay tracks each app's last-seen time:
@@ -48,6 +53,11 @@ The selection is remembered in your browser and stays applied as you move betwee
 
 This is a view lens over the data one hub already holds — it does not change which environments a hub is responsible for, and it is not a security boundary.
 
+<figure class="screenshot" markdown="span">
+  ![The fleet board with the "Incidents only" filter applied, hiding healthy tiles.](assets/screenshots/operate/S-FLEET-INCIDENTS-ONLY.png)
+  <figcaption>The "Incidents only" filter (top strip) collapses the board to just the deployments with open incidents — the environment lens and org grouping still apply on top.</figcaption>
+</figure>
+
 ---
 
 ## The Tile Detail Drawer
@@ -58,6 +68,11 @@ Click any tile to open a data-driven detail drawer for that deployment. Sections
 - **Org hierarchy / metadata** — product line, product, component, and deployment identifiers.
 - **AWS resource tags** — tags pulled from the deployment's registered resources.
 - **Open incidents** — list of active incidents with severity and age.
+
+<figure class="screenshot" markdown="span">
+  ![The tile detail drawer showing status, live on-call, org hierarchy, AWS metadata, and open incidents for one deployment.](assets/screenshots/operate/S-TILE-DRAWER.png)
+  <figcaption>One click on a tile opens a full context card: who is on call right now (primary / secondary / manager), the org hierarchy, AWS metadata and runbook link, and the deployment's open incidents.</figcaption>
+</figure>
 
 ---
 
@@ -70,6 +85,11 @@ Click an incident (from the tile drawer or the incidents list) to open its detai
 - **Actions** — Acknowledge, Resolve, Ignore (see below)
 - **AI briefing pack** — available when AI is enabled; a synthesized summary of the incident context
 - **AI after-action review (AAR)** — available post-resolution when AI is enabled
+
+<figure class="screenshot" markdown="span">
+  ![The Incidents list on the left with an incident detail drawer open on the right, showing properties, escalation flow, and timeline.](assets/screenshots/operate/S-INCIDENT-DETAIL.png)
+  <figcaption>Selecting an incident opens its detail drawer beside the list: severity, environment, triggering alarm, routed-by rule, the live escalation flow, and an append-only timeline. Acknowledge / Resolve / Add rule act in place.</figcaption>
+</figure>
 
 ### Incident states
 
@@ -103,7 +123,17 @@ TRIGGERED → ACKNOWLEDGED → (ESCALATED) → RESOLVED → CLOSED
 - Auto-resolves the triggering incident with an "ignored" timeline event
 - Causes all future alarms that match the rule to be **dropped at the Node** before they become incidents — no incident row, no page, no ticket, no federation, and no contribution to metrics
 
+<figure class="screenshot" markdown="span">
+  ![The Add rule panel on an incident, showing the Ignore form pre-filled from the triggering alarm.](assets/screenshots/operate/S-INCIDENT-IGNORE-FORM.png)
+  <figcaption>The <strong>Ignore</strong> form opens pre-filled from the triggering alarm — a precise match by default, which you can broaden to a prefix or the whole app/environment before saving.</figcaption>
+</figure>
+
 **Route** an incident from the detail view (the **Routing…** button, or `POST /incidents/{id}/route`). This opens a form pre-filled from the triggering alarm to create a routing rule on the fly. Unlike Ignore, creating a routing rule **does not** auto-resolve the incident — the current incident continues normally. The new rule only affects **future** alarms that match. You can adjust the priority, match criteria, severity, escalation policy, and streams before saving.
+
+<figure class="screenshot" markdown="span">
+  ![The Add rule panel toggled to the Route form, with priority, match, severity, escalation policy, and streams fields.](assets/screenshots/operate/S-INCIDENT-ROUTE-FORM.png)
+  <figcaption>The <strong>Route</strong> form (same panel, toggled from Ignore) creates a routing rule for future alarms — adjust priority, match, severity override, escalation policy, and streams. It does not resolve the current incident.</figcaption>
+</figure>
 
 All four actions require write access (auth mode `alb` or `dev`). In `none` mode the buttons are visible but the API returns 403.
 
@@ -111,9 +141,14 @@ All four actions require write access (auth mode `alb` or `dev`). In `none` mode
 
 ## Rules screen (Routing rules and Ignore rules)
 
-The **Rules** nav item opens the Rules management screen, which has two sections toggled by a tab at the top. **Routing rules** is the default.
+The **Rules** nav item opens the Rules management screen. It shows two labeled tables, reflecting the two runtime pipeline stages: an **Ignore rules** accordion first (collapsed by default — ignore rules drop matching alarms and override every routing rule, so they lead visually but stay low-profile), and a **Routing rules** accordion below (expanded by default — the list operators work with day to day). The single **+ New rule** button opens a form whose Type toggle picks routing or ignore.
 
-### Routing rules section
+<figure class="screenshot" markdown="span">
+  ![The Rules screen showing the collapsed Ignore rules accordion above the expanded Routing rules table with priority, match, severity, policy, streams, and match counts.](assets/screenshots/operate/S-RULES.png)
+  <figcaption>The Rules screen lists every live rule stored in DynamoDB with its match count, so you can see which rules are actually firing. Ignore rules sit in a collapsed accordion whose header shows the rule count and aggregate alarms dropped; routing rules sit in the expanded table below. The Download YAML button round-trips runtime rules back into <code>routing.yaml</code>.</figcaption>
+</figure>
+
+### Routing rules table
 
 Shows every live routing rule stored in DynamoDB. Columns:
 
@@ -128,14 +163,19 @@ Shows every live routing rule stored in DynamoDB. Columns:
 
 **Deviation banner.** When the live DynamoDB rules differ from the `routing.yaml` `rules:` baseline (the seed loaded at container boot), the screen shows a banner. Use the **Download YAML** button (`GET /routing-rules/download`) to get a regenerated `rules:` block you can paste back into `routing.yaml`.
 
-### Ignore rules section
+### Ignore rules table
 
-Shows every live ignore rule stored in DynamoDB with:
+Rendered in the collapsed-by-default accordion at the top; the header shows the rule count and the aggregate trigger count (total alarms dropped) so you can gauge suppression volume without expanding it. Ignore rules are binary — first match wins, no priority column. Shows every live ignore rule stored in DynamoDB with:
 
+- **Match criteria** — alarm name prefix/pattern, namespace, tags, source
+- **Outcome** — `drop`, plus the reason/note stored with the rule
 - **Trigger count** — how many times the rule has dropped a matching alarm since it was created
-- **Reason / note** — human-readable label stored with the rule
-- **Created by / created at** — audit fields set at rule creation
-- Filter, edit, and delete controls for each rule
+- Enabled state, edit, and delete controls for each rule
+
+<figure class="screenshot" markdown="span">
+  ![The Rules screen with the Ignore rules accordion expanded, showing each ignore rule's match criteria, drop outcome with note, and trigger count.](assets/screenshots/operate/S-RULES-IGNORE.png)
+  <figcaption>Expanding the Ignore rules accordion reveals the drop list — each rule's match, its <code>drop</code> outcome and note, and how many alarms it has silently suppressed. There is no priority column: ignore rules are binary and first-match-wins.</figcaption>
+</figure>
 
 **Deviation banner.** When the live DynamoDB rules differ from the `routing.yaml` `ignore:` baseline, the screen shows a banner. Use the **Download YAML** button (`GET /rules/download`) to get a regenerated `ignore:` block you can paste back into `routing.yaml`.
 
@@ -150,6 +190,11 @@ See `configure.md` for the full config schemas, the seed-vs-DynamoDB storage mod
 - **MTTR** — mean time to resolve, across a rolling window
 - **Time-to-ack** — mean time from trigger to first acknowledgement
 - **Incident counts** — by severity and by time period
+
+<figure class="screenshot" markdown="span">
+  ![The Metrics view showing MTTR, time-to-ack, and incident counts by severity.](assets/screenshots/operate/S-METRICS.png)
+  <figcaption>The Metrics view computes KPIs from resolved incidents. Switching the environment lens recomputes every figure for the in-scope environment.</figcaption>
+</figure>
 
 ---
 

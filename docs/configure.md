@@ -255,6 +255,11 @@ The dedup key is `account_id + app_name + alarm_name` — one logical alarm, reg
 
 **Primary management path.** Use the **Rules** screen in the dashboard. It lists all live ignore rules with per-rule trigger counts, reason/note, created_by, and created_at. From there you can create, edit, filter, and delete rules. The screen also shows a banner when the live rules differ from the `routing.yaml` baseline, and offers a YAML download (`GET /rules/download`) of a regenerated `ignore:` block you can paste back into `routing.yaml` to persist the changes.
 
+<figure class="screenshot" markdown="span">
+  ![The Rules screen showing a deviation banner because the live DynamoDB rules differ from the routing.yaml baseline.](assets/screenshots/configure/S-RULES-DEVIATION.png)
+  <figcaption>When the live DynamoDB rules drift from the <code>routing.yaml</code> seed, the Rules screen shows a deviation banner. Download YAML regenerates the block to paste back into Git and re-sync the two.</figcaption>
+</figure>
+
 The `ignore:` block in `routing.yaml` follows this schema (fields match the UI form):
 
 ```yaml

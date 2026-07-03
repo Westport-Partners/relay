@@ -34,6 +34,11 @@ Each contact sets:
 
 These settings are stored in DynamoDB and take effect immediately. They are not version-controlled config files.
 
+<figure class="screenshot" markdown="span">
+  ![The Contacts screen listing responders with their roles and availability.](assets/screenshots/scheduling/S-CONTACTS.png)
+  <figcaption>Contacts are self-service: each responder sets their own name, email, phone, role eligibility, availability grid, and OOO range — no Active Directory sync required.</figcaption>
+</figure>
+
 ---
 
 ## Auto-Schedule
@@ -49,6 +54,11 @@ You can trigger auto-schedule from the **Schedule** screen or directly via the A
 ### Gap highlighting
 
 After generation, any (day, shift, role) slot that has no assigned contact is flagged **red** in the schedule grid. A gap is a first-class operational warning — it means an alarm in that window would have no one to page for that role. Gaps should be resolved before the week starts, either by expanding availability or adding a manual override.
+
+<figure class="screenshot" markdown="span">
+  ![The weekly schedule grid with per-role tabs, the current shift marked NOW, and two uncovered slots flagged as red GAP cells.](assets/screenshots/scheduling/S-SCHEDULE.png)
+  <figcaption>The generated week for the Primary role — the coverage counter (<code>19/21 · 2 gaps</code>) and the red <strong>GAP</strong> cells surface uncovered shifts at a glance. The current shift is marked <code>NOW</code>. Secondary and Manager have their own tabs.</figcaption>
+</figure>
 
 ---
 
@@ -69,6 +79,11 @@ Overrides are respected by paging resolution — when Relay resolves who is on c
 ## Who Is On Call Now
 
 `GET /oncall` returns the currently on-call contact for each role, resolved against the active schedule and any overrides, in local time (`RELAY_TZ`).
+
+<figure class="screenshot" markdown="span">
+  ![The On-call view showing who currently holds the primary, secondary, and manager roles.](assets/screenshots/scheduling/S-ONCALL.png)
+  <figcaption>The On-call view answers "who is paged right now?" for each role, resolved live from the active schedule and any overrides.</figcaption>
+</figure>
 
 The **tile detail drawer** (click any fleet tile) also shows the on-call snapshot for that deployment's owning team. For a federated hub this snapshot is pushed by the team's Node and is updated with each heartbeat.
 

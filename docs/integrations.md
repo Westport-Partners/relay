@@ -10,6 +10,13 @@ Relay emits a lifecycle event for each state change in an incident — `TRIGGERE
 
 Every integration lives in its own folder and is auto-discovered at startup. Adding a new integration means dropping a folder with the required adapter interface — no changes to core are needed. Contributors should start from the adapter template in the repo (`adapters/_template/`).
 
+Integration credentials are entered at runtime on the **Settings** screen — no redeploy, and no secret to pre-create. Values are stored server-side (encrypted in DynamoDB) and masked on read.
+
+<figure class="screenshot" markdown="span">
+  ![The Settings screen with fields for the Teams webhook, GitLab token, and ServiceNow credentials, each with a Test button.](assets/screenshots/integrations/S-SETTINGS.png)
+  <figcaption>The Settings screen is where operators wire integrations at runtime — Teams webhook, GitLab token, ServiceNow credentials — each with a Test button. Stored values are masked when read back.</figcaption>
+</figure>
+
 ---
 
 ## GitLab — Issue Tracking & DORA ⏳ pending validation

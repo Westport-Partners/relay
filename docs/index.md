@@ -8,6 +8,11 @@ AWS Systems Manager Incident Manager is end-of-life (closed to new customers 202
 
 Relay runs as **one always-on container.** A CloudWatch alarm flows in, and the whole life of the incident — classify → page the on-call → escalate → turn the dashboard tile red → file a ticket — happens in that one process, visible in one log stream.
 
+<figure class="screenshot" markdown="span">
+  ![The Relay fleet big-board: every tracked deployment on one live grid, color-coded by severity and grouped by org hierarchy.](assets/screenshots/operate/S-FLEET-ALL.png)
+  <figcaption>The fleet big-board — every deployment across the org on one live grid, color-coded by severity. A quiet-but-healthy app stays green; a silent one turns red.</figcaption>
+</figure>
+
 ---
 
 ## Why Relay?
