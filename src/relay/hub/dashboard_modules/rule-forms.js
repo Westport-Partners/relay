@@ -5,7 +5,6 @@
 
 import { esc } from './helpers.js';
 import { CAN_WRITE, escalationPolicies } from './state.js';
-import { renderNewRuleForm, renderRulesTable } from './rules.js';
 
 //
 // DE-DUPLICATION ANALYSIS (Phase 1 finding):

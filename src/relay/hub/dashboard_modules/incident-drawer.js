@@ -225,7 +225,6 @@ export function renderIncident(inc, flow = null) {
           if (updated.ok) renderIncident(await updated.json(), await fetchFlow(inc.correlation_id));
           if (activeView === 'incidents') loadIncidents();
         } else {
-          const body = await r.json().catch(() => ({}));
           const msgs = { 403: 'Not authorised to resolve.', 404: 'Incident not found.' };
           errEl.innerHTML = '<div class="drawer-inline-err">' + esc(msgs[r.status] || ('Error ' + r.status)) + '</div>';
           resolveBtn.disabled = false;
@@ -308,7 +307,6 @@ export function renderIncident(inc, flow = null) {
     function matchPreview(preset, appName, alarmVal, env) {
       // Client-side AND-match replicating server ignore logic:
       // account_id exact + app_name exact + alarm/prefix/none + env exact.
-      const incAcct = inc.account_id || '';
       const incApp  = inc.app_name  || '';
       const incAlarm= inc.alarm_name|| '';
       const incEnv  = inc.environment || '';

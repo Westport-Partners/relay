@@ -462,9 +462,8 @@ def test_shipped_config_drops_aws_autoscaling_alarms():
     Asserts on ``routing.example.yaml`` (the version-controlled artifact); the
     live ``routing.yaml`` is gitignored and absent in a fresh checkout.
     """
-    cfg = RoutingConfig.model_validate(
-        yaml.safe_load(open("config/routing.example.yaml"))
-    )
+    with open("config/routing.example.yaml") as fh:
+        cfg = RoutingConfig.model_validate(yaml.safe_load(fh))
     assert cfg.ignore is not None and cfg.ignore.enabled is True
 
     real_alarm = (

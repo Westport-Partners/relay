@@ -7,7 +7,6 @@ import { CAN_WRITE } from './state.js';
 import { SCHED_ROLES, SCHED_ROLE_LABELS, getThisMonday } from './schedule.js';
 
 // Module-local state (single writer, never read across modules).
-let editingContactId = null;
 let contactSort = { key: 'name', dir: 1 }; // dir: 1 asc, -1 desc
 // Client-side directory filters (applied over already-loaded data).
 let contactFilter = { text: '', role: '', availOnly: false };

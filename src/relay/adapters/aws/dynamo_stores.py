@@ -43,7 +43,6 @@ _SENTINEL_SK_COUNTER = "COUNTER"
 # Escalation deadline lifecycle states (stored on the DEADLINE item).
 _DEADLINE_PENDING = "PENDING"
 _DEADLINE_FIRED = "FIRED"
-_DEADLINE_CANCELLED = "CANCELLED"
 
 # Incident listing GSIs (see specs/_active/0042-incident-listing-gsi).
 # Two single-partition indices serve the two read patterns with one Query each:

@@ -5,7 +5,7 @@
 // on topology.
 // Ported from dashboard_parts/25-drawer-fleet-tile-detail.js.part (#33).
 
-import { esc, fmtAge, fmtTime, fmtDetail, metaValueHtml } from './helpers.js';
+import { esc, fmtAge, fmtTime, metaValueHtml } from './helpers.js';
 import { STATUS_LABEL, MARKER } from './constants.js';
 import { drawer, drawerOverlay, closeDrawer, openIncident } from './incident-drawer.js';
 
