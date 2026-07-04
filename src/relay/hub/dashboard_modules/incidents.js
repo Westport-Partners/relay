@@ -2,7 +2,7 @@
 // the shared incident store (incident-store.js).  No direct fetching here.
 // Ported from dashboard_parts/23-view-incidents.js.part (#33).
 
-import { esc, fmtAge, abbrAccount, metaValueHtml } from './helpers.js';
+import { esc, fmtAge, abbrAccount } from './helpers.js';
 import { openIncident } from './incident-drawer.js';
 import { refresh, getOpen, getHistory, subscribe } from './incident-store.js';
 import { matchesEnv } from './env-filter.js';

@@ -88,6 +88,15 @@ from relay.hub.health import (
 
 logger = logging.getLogger(__name__)
 
+
+def _scrub(value: object) -> str:
+    """Neutralize CRLF in user-controlled values before they reach a log line.
+
+    Prevents log-forging: a caller-supplied id/subject containing newlines
+    could otherwise inject forged log records.
+    """
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
 # Map an incident's persisted state to the lifecycle event dispatched when the
 # Hub sees a genuine transition into that state over the bus. ACKNOWLEDGED and
 # RESOLVED are driven from their API endpoints (the Hub owns those transitions),
@@ -651,7 +660,7 @@ class SSEPublisher:
                 try:
                     q.put_nowait(msg)
                 except Exception:
-                    pass
+                    pass  # Dead subscriber; will be cleaned up on disconnect.
 
 
 # ---------------------------------------------------------------------------
@@ -1285,7 +1294,7 @@ class SQSConsumer:
             if len(parts) >= 3 and parts[0] == "sqs":
                 return parts[1]
         except (IndexError, AttributeError):
-            pass
+            pass  # Malformed queue URL; fall back to the default region.
         return None
 
     def run_forever(self) -> None:
@@ -1452,9 +1461,9 @@ def _emit_rule_change(
     """
     logger.info(
         "relay.rule-change action=%s rule_id=%s actor=%s",
-        action,
-        rule_id,
-        actor,
+        _scrub(action),
+        _scrub(rule_id),
+        _scrub(actor),
     )
 
 
@@ -2011,7 +2020,9 @@ class HubApp:
             try:
                 incident = incident_store.get_incident(correlation_id)
             except Exception:
-                logger.warning("get_incident failed for %s", correlation_id, exc_info=True)
+                logger.warning(
+                    "get_incident failed for %s", _scrub(correlation_id), exc_info=True
+                )
                 incident = None
             if incident is None:
                 raise HTTPException(
@@ -2220,9 +2231,15 @@ class HubApp:
                     )
                 except Exception:
                     logger.warning(
-                        "ACKNOWLEDGED dispatch failed for %s", correlation_id, exc_info=True
+                        "ACKNOWLEDGED dispatch failed for %s",
+                        _scrub(correlation_id),
+                        exc_info=True,
                     )
-            logger.info("Incident %s acknowledged by %s via UI", correlation_id, ident.subject)
+            logger.info(
+                "Incident %s acknowledged by %s via UI",
+                _scrub(correlation_id),
+                _scrub(ident.subject),
+            )
             _recompute_incident_tile(incident)
             return {"ok": True, "state": incident.state, "acknowledged_by": ident.subject}
 
@@ -2316,9 +2333,15 @@ class HubApp:
                     processor.dispatch_event(IncidentLifecycleEvent.RESOLVED, incident)
                 except Exception:
                     logger.warning(
-                        "RESOLVED dispatch failed for %s", correlation_id, exc_info=True
+                        "RESOLVED dispatch failed for %s",
+                        _scrub(correlation_id),
+                        exc_info=True,
                     )
-            logger.info("Incident %s resolved by %s via UI", correlation_id, ident.subject)
+            logger.info(
+                "Incident %s resolved by %s via UI",
+                _scrub(correlation_id),
+                _scrub(ident.subject),
+            )
             _recompute_incident_tile(incident)
             return {"ok": True, "state": incident.state}
 
@@ -3028,7 +3051,9 @@ class HubApp:
             ignore_rule_store.put_rule(updated, rule_id=rule_id)
             _emit_rule_change("updated", rule_id, actor=ident.subject, rule=updated)
             logger.info(
-                "Ignore rule %s updated by %s via UI", rule_id, ident.subject
+                "Ignore rule %s updated by %s via UI",
+                _scrub(rule_id),
+                _scrub(ident.subject),
             )
             return {"ok": True, "rule_id": rule_id}
 
@@ -3044,7 +3069,9 @@ class HubApp:
             ignore_rule_store.delete_rule(rule_id)
             _emit_rule_change("deleted", rule_id, actor=ident.subject)
             logger.info(
-                "Ignore rule %s deleted by %s via UI", rule_id, ident.subject
+                "Ignore rule %s deleted by %s via UI",
+                _scrub(rule_id),
+                _scrub(ident.subject),
             )
             return {"ok": True, "deleted": rule_id}
 
@@ -3120,16 +3147,16 @@ class HubApp:
                 except Exception:
                     logger.warning(
                         "RESOLVED dispatch failed for ignored incident %s",
-                        correlation_id,
+                        _scrub(correlation_id),
                         exc_info=True,
                     )
 
             _emit_rule_change("ignored", rule_id, actor=ident.subject, rule=rule)
             logger.info(
                 "Incident %s ignored by %s via UI; rule_id=%s",
-                correlation_id,
-                ident.subject,
-                rule_id,
+                _scrub(correlation_id),
+                _scrub(ident.subject),
+                _scrub(rule_id),
             )
             _recompute_incident_tile(incident)
             return {"ok": True, "rule_id": rule_id, "state": incident.state}
@@ -3343,7 +3370,9 @@ class HubApp:
             routing_rule_store.put_rule(updated, rule_id=rule_id, enabled=enabled)
             _emit_rule_change("updated", rule_id, actor=ident.subject, rule=updated)
             logger.info(
-                "Routing rule %s updated by %s via UI", rule_id, ident.subject
+                "Routing rule %s updated by %s via UI",
+                _scrub(rule_id),
+                _scrub(ident.subject),
             )
             return {"ok": True, "rule_id": rule_id}
 
@@ -3359,7 +3388,9 @@ class HubApp:
             routing_rule_store.delete_rule(rule_id)
             _emit_rule_change("deleted", rule_id, actor=ident.subject)
             logger.info(
-                "Routing rule %s deleted by %s via UI", rule_id, ident.subject
+                "Routing rule %s deleted by %s via UI",
+                _scrub(rule_id),
+                _scrub(ident.subject),
             )
             return {"ok": True, "deleted": rule_id}
 
@@ -3434,7 +3465,9 @@ class HubApp:
             _emit_rule_change("created", stored_id, actor=ident.subject, rule=rule)
             logger.info(
                 "Routing rule %s created from incident %s by %s via UI",
-                stored_id, correlation_id, ident.subject,
+                _scrub(stored_id),
+                _scrub(correlation_id),
+                _scrub(ident.subject),
             )
             # NOTE: incident state is NOT modified — routing rules only affect future alarms.
             return {"ok": True, "rule_id": stored_id}

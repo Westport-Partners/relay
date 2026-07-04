@@ -168,7 +168,6 @@ const MARK = {red:'●',degraded:'▲',green:'●',grey:'?'};
 const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const fmtAge = iso => { if(!iso) return '—'; const s=Math.round((Date.now()-new Date(iso))/1000);
   if(s<60) return s+'s'; const m=(s/60)|0; if(m<60) return m+'m'; return ((m/60)|0)+'h'; };
-const acct = id => id&&id.length>4 ? '…'+id.slice(-4):id;
 
 // Group at deepest non-leaf node (same rule as production fleet-groups.js)
 function gi(p){ return p.length>=2 ? p.length-2 : 0; }
