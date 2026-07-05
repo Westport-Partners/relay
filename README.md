@@ -48,23 +48,20 @@ Relay runs as **one always-on container** (ECS Fargate in AWS, or anywhere you c
 container). An incident's entire life happens in that one process and is visible in one log
 stream:
 
-```
-  CloudWatch alarm
-        │   one EventBridge rule (every alarm, no per-alarm wiring)
-        ▼
-     SQS queue ──► relay container ───────────────────────────────────┐
-                     │  parse → resolve tags → classify (SEV1–4)       │
-                     │  → persist → page on-call (SNS) → tile red      │
-                     │  → dispatch to GitLab / ServiceNow / Teams      │
-                     │                                                 │
-                     │  escalation = durable DynamoDB deadlines,       │
-                     │  fired by a 30s sweep loop (survives restarts)  │
-                     └─────────────────────────────────────────────────┘
-                                       │
-                                 ┌─────▼─────┐
-                                 │ DynamoDB  │  incidents, escalation deadlines,
-                                 │relay-<team>│  contacts, schedule, fleet tiles
-                                 └───────────┘
+```mermaid
+flowchart TB
+    CW["CloudWatch alarm"] -->|"one EventBridge rule<br/>(every alarm, no per-alarm wiring)"| SQS["SQS queue"]
+
+    subgraph RELAY["relay container — one process, one log stream"]
+        direction TB
+        P["parse → resolve tags → classify (SEV1–4)"]
+        --> ACT["persist · page on-call (SNS) · tile red<br/>dispatch to GitLab / ServiceNow / Teams"]
+        ESC["escalation = durable DynamoDB deadlines<br/>fired by a 30s sweep loop (survives restarts)"]
+    end
+
+    SQS --> P
+    ACT --> DDB[("DynamoDB relay-&lt;team&gt;<br/>incidents · escalation deadlines<br/>contacts · schedule · fleet tiles")]
+    ESC <-->|"read / fire deadlines"| DDB
 ```
 
 There is no cross-process hop on the hot path — detecting an incident and turning its dashboard

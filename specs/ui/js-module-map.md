@@ -252,28 +252,73 @@ requirement — but listing them here keeps the init inventory complete.
 
 Arrows = "imports from". `helpers` and `constants` are the sinks (import nothing).
 
-```
-constants ◄── helpers ◄──────────────────────────┐
-   ▲             ▲    ▲    ▲   ▲   ▲   ▲   ▲   ▲   │
-   │             │    │    │   │   │   │   │   │   │
- fleet         (every view + both drawers + rule-forms import helpers)
-   │
-state ◄── auth, stream, fleet, router, incidents, incident-drawer,
-          contacts, oncall, settings, maintenance, schedule, rules, rule-forms
-          (state imports NOTHING — pure leaf)
+```mermaid
+flowchart TB
+    main["main (init only)"]
+    router
+    metrics
+    oncall
+    fleet
+    stream
+    tiledrawer["tile-drawer"]
+    incidentdrawer["incident-drawer"]
+    incidents
+    contacts
+    schedule
+    rules
+    ruleforms["rule-forms"]
+    helpers
+    constants
 
-router ──► (loaders of) incidents, incident-drawer, contacts, metrics,
-           oncall, settings, maintenance, schedule, rules
-metrics ──► router (navTo)        oncall ──► router (navTo)
-fleet ──► tile-drawer (openTile)
-tile-drawer ──► incident-drawer (openIncident, drawer, closeDrawer)
-incident-drawer ──► fleet (renderAll), incidents (loadIncidents), rule-forms
-incidents ──► incident-drawer (openIncident)
-contacts ──► schedule (SCHED_ROLES, SCHED_ROLE_LABELS, getThisMonday)
-rules ──► rule-forms ;  rule-forms ──► rules (renderNewRuleForm/renderRulesTable, escalationPolicies)
-stream ──► fleet (renderAll)
-main ──► everything (init only)
+    main -->|init only| router
+
+    router -->|loaders of| incidents
+    router --> incidentdrawer
+    router --> contacts
+    router --> metrics
+    router --> oncall
+    router --> schedule
+    router --> rules
+
+    metrics -->|navTo| router
+    oncall -->|navTo| router
+    fleet -->|openTile| tiledrawer
+    tiledrawer -->|openIncident, drawer, closeDrawer| incidentdrawer
+    incidentdrawer -->|renderAll| fleet
+    incidentdrawer -->|loadIncidents| incidents
+    incidentdrawer --> ruleforms
+    incidents -->|openIncident| incidentdrawer
+    contacts -->|SCHED_ROLES, getThisMonday| schedule
+    rules --> ruleforms
+    ruleforms -->|renderRulesTable, escalationPolicies| rules
+    stream -->|renderAll| fleet
+
+    %% helpers/constants are the sinks (import nothing); state is a pure leaf.
+    fleet --> helpers
+    incidents --> helpers
+    incidentdrawer --> helpers
+    ruleforms --> helpers
+    helpers --> constants
+
+    state["state (imports NOTHING — pure leaf)"]
+    auth --> state
+    stream --> state
+    fleet --> state
+    router --> state
+    incidents --> state
+    incidentdrawer --> state
+    contacts --> state
+    oncall --> state
+    settings --> state
+    maintenance --> state
+    schedule --> state
+    rules --> state
+    ruleforms --> state
 ```
+
+> Arrows = "imports from". `helpers` and `constants` are the sinks (import
+> nothing); every view, both drawers, and `rule-forms` import `helpers`. `state`
+> imports nothing — a pure leaf that the rest of the app imports from.
 
 ### Cycles (all CALL-TIME, none init-time → all safe under ESM)
 
