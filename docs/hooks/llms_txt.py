@@ -30,13 +30,11 @@ skipped.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from mkdocs.config.defaults import MkDocsConfig
-    from mkdocs.structure.files import Files
     from mkdocs.structure.pages import Page
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -94,7 +92,7 @@ _state = _State()
 # Hook entry points
 # ──────────────────────────────────────────────────────────────────────────────
 
-def on_config(config: "MkDocsConfig") -> None:
+def on_config(config: MkDocsConfig) -> None:
     """Capture site-level config for use in post-build."""
     _state.site_dir = config["site_dir"]
     _state.site_name = config.get("site_name", "Relay")
@@ -106,7 +104,7 @@ def on_config(config: "MkDocsConfig") -> None:
     _state.pages = []
 
 
-def on_page_content(html: str, page: "Page", config: "MkDocsConfig", **kwargs) -> str:
+def on_page_content(html: str, page: Page, config: MkDocsConfig, **kwargs: object) -> str:
     """
     Called after each page is rendered to HTML.  We grab the raw Markdown here
     (page.markdown is set by this point) and stash it for post-build.
@@ -124,7 +122,7 @@ def on_page_content(html: str, page: "Page", config: "MkDocsConfig", **kwargs) -
     return html
 
 
-def on_post_build(config: "MkDocsConfig") -> None:
+def on_post_build(config: MkDocsConfig) -> None:
     """Write per-page .md files, llms.txt, and llms-full.txt into the site dir."""
     site_dir = Path(_state.site_dir)
 
