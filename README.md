@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/Westport-Partners/relay/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Westport-Partners/relay/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://westport-partners.github.io/relay/"><img alt="Docs" src="https://img.shields.io/badge/docs-relay-005b6d.svg"></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache_2.0-005b6d.svg"></a>
   <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-007489.svg">
   <img alt="IaC: AWS CDK v2" src="https://img.shields.io/badge/IaC-AWS_CDK_v2-218993.svg">
@@ -33,7 +34,8 @@ and no SaaS contract — it's Apache-2.0 open source.
 > constraints regulated and government environments actually have (account isolation, locked-down
 > IAM, network segmentation).
 
-**Docs:** [Architecture](docs/architecture.md) · [Install](docs/install.md) ·
+**Docs:** **[relay docs site →](https://westport-partners.github.io/relay/)** ·
+[Architecture](docs/architecture.md) · [Install](docs/install.md) ·
 [Deploy](docs/deploy.md) · [Locked-down / BYOR](docs/byor.md) · [Configure](docs/configure.md) ·
 [Operate](docs/operate.md) · [Scheduling](docs/scheduling.md) ·
 [Integrations & AI](docs/integrations.md) · [Feature status](docs/status.md)
