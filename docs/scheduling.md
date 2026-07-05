@@ -127,24 +127,16 @@ Step 3: page role=manager
 
 The full flow from alarm to page:
 
-```
-Alarm received
-    │
-    ▼
-Routing rule (routing.yaml)
-    │  picks: severity tier + escalation policy name
-    ▼
-Escalation policy (escalation.yaml)
-    │  step 1: page role=primary
-    ▼
-Schedule + overrides
-    │  resolve: primary role → contact name + channel
-    ▼
-Page sent (Teams, SMS, etc.)
-    │
-    ├── Acknowledged within timeout → escalation stops
-    │
-    └── Timeout elapsed → advance to step 2 → repeat
+```mermaid
+flowchart TB
+    A["Alarm received"] --> R["Routing rule (routing.yaml)<br/><i>picks: severity tier + escalation policy name</i>"]
+    R --> E["Escalation policy (escalation.yaml)<br/><i>step 1: page role=primary</i>"]
+    E --> S["Schedule + overrides<br/><i>resolve: primary role → contact name + channel</i>"]
+    S --> P["Page sent (Teams, SMS, etc.)"]
+    P --> ACK{"Acknowledged<br/>within timeout?"}
+    ACK -->|Yes| STOP["Escalation stops"]
+    ACK -->|"No — timeout elapsed"| NEXT["Advance to step 2"]
+    NEXT --> E
 ```
 
 **Severity tiers** (SEV1–SEV4) are assigned by the routing rule and influence default paging urgency. A SEV1 routing rule typically points to a policy with short timeouts; a SEV4 may use a policy that only pages primary with a longer window.

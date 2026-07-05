@@ -8,34 +8,23 @@ Relay is a self-hosted, AWS-native incident management platform that replaces AW
 
 The entire hot path runs in-process inside a single container. There is no second network hop between detection and paging.
 
-```
-                         ┌─────────────────────────────────────────────────────────────┐
-                         │                  Relay Container (ECS Fargate)              │
-                         │                                                             │
-  CloudWatch Alarm       │   SQS Consumer       In-Process Detection Pipeline         │
-  (state → ALARM)        │   ─────────────   ──────────────────────────────────────   │
-       │                 │       │           parse alarm                               │
-       ▼                 │       │               │                                     │
-  EventBridge rule       │       │           resolve resource/alarm tags (in-acct)     │
-  (all alarms,           │       │               │                                     │
-   one rule)  ──────────►│──SQS──►           classify → severity (SEV1–SEV4)          │
-                         │                       │         + escalation policy         │
-  POST /ingest/alarm ───►│                       │                                     │
-  (local / test inject)  │                   persist to DynamoDB                       │
-                         │                       │                                     │
-                         │              ┌────────┴────────┐                            │
-                         │              ▼                  ▼                           │
-                         │         page on-call       update fleet tile               │
-                         │         (SNS email/SMS)    (goes red)                       │
-                         │                             + dispatch integrations         │
-                         │                               (GitLab / Teams / ServiceNow)│
-                         │                                                             │
-                         │   ┌─────────────────────────────────────────────────┐      │
-                         │   │  Escalation sweep loop (every 30 s)             │      │
-                         │   │  Reads DynamoDB deadlines → fires next step     │      │
-                         │   │  when ack window passes. Survives restarts.     │      │
-                         │   └─────────────────────────────────────────────────┘      │
-                         └─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    CW["CloudWatch Alarm<br/>(state → ALARM)"] --> EB["EventBridge rule<br/>(all alarms, one rule)"]
+    EB -->|SQS| SQS["SQS Consumer"]
+    INJ["POST /ingest/alarm<br/>(local / test inject)"] --> SQS
+
+    subgraph RELAY["Relay Container (ECS Fargate)"]
+        direction TB
+        SQS --> PARSE["parse alarm"]
+        PARSE --> TAGS["resolve resource/alarm tags (in-acct)"]
+        TAGS --> CLASS["classify → severity (SEV1–SEV4)<br/>+ escalation policy"]
+        CLASS --> PERSIST["persist to DynamoDB"]
+        PERSIST --> PAGE["page on-call<br/>(SNS email/SMS)"]
+        PERSIST --> TILE["update fleet tile (goes red)<br/>+ dispatch integrations<br/>(GitLab / Teams / ServiceNow)"]
+
+        SWEEP["Escalation sweep loop (every 30s)<br/>Reads DynamoDB deadlines → fires next step<br/>when ack window passes. Survives restarts."]
+    end
 ```
 
 **Routing classification** (Step 2) now reads rules from a DB-backed store (`DynamoRoutingRuleStore`) seeded from `routing.yaml` on first boot. The Node classifier caches the live rules with a short TTL and **fails open** to the `routing.yaml` config on any DynamoDB error or empty store — paging is never broken by a store outage. Rules are edited live via the Rules screen without a redeploy.
@@ -54,21 +43,13 @@ The entire hot path runs in-process inside a single container. There is no secon
 
 Relay ships as three independent CDK stacks. Deploy them in order; each has a distinct lifecycle.
 
-```
-  ┌──────────────────────┐     ┌──────────────────────┐     ┌────────────────────────┐
-  │   RelayDataStack     │     │  RelayComputeStack   │     │ RelayFederationStack   │
-  │  (deploy once,       │     │  (redeploy on every  │     │  (federated-hub        │
-  │   RETAIN on delete)  │     │   image change)      │     │   topology only)       │
-  │                      │     │                      │     │                        │
-  │  • DynamoDB table    │     │  • VPC / imported    │     │  • EventBridge bus     │
-  │    (single-table,    │     │  • ECS cluster       │     │  • Org policy so       │
-  │     pk/sk + GSI)     │     │  • Fargate service   │     │    team containers     │
-  │  • SNS paging        │     │    (min 2, scale ≤8) │     │    can forward         │
-  │    topics            │     │  • ALB               │     │    SEV1/SEV2 up        │
-  │                      │     │  • EventBridge rule  │     │                        │
-  │                      │     │    → SQS + DLQ       │     │                        │
-  │                      │     │  • Task + exec roles │     │                        │
-  └──────────────────────┘     └──────────────────────┘     └────────────────────────┘
+```mermaid
+flowchart LR
+    DATA["<b>RelayDataStack</b><br/>deploy once · RETAIN on delete<br/>———<br/>• DynamoDB table<br/>&nbsp;&nbsp;(single-table, pk/sk + GSI)<br/>• SNS paging topics"]
+    COMPUTE["<b>RelayComputeStack</b><br/>redeploy on every image change<br/>———<br/>• VPC / imported<br/>• ECS cluster<br/>• Fargate service (min 2, scale ≤8)<br/>• ALB<br/>• EventBridge rule → SQS + DLQ<br/>• Task + exec roles"]
+    FED["<b>RelayFederationStack</b><br/>federated-hub topology only<br/>———<br/>• EventBridge bus<br/>• Org policy so team containers<br/>&nbsp;&nbsp;can forward SEV1/SEV2 up"]
+
+    DATA --> COMPUTE --> FED
 ```
 
 | Stack | When to deploy | What changes trigger a redeploy |
@@ -87,31 +68,27 @@ The DynamoDB table is a **single table per deployment** and holds incidents, esc
 
 One container and one table in the team's own AWS account. Detection, paging, escalation, and the full fleet dashboard all run there. No cross-account infrastructure required.
 
-```
-  [Team AWS Account]
-  ┌──────────────────────────────────────┐
-  │  RelayDataStack + RelayComputeStack  │
-  │  • detects alarms                   │
-  │  • pages on-call                    │
-  │  • serves the fleet dashboard       │
-  └──────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph ACCT["Team AWS Account"]
+        RELAY["RelayDataStack + RelayComputeStack<br/>• detects alarms<br/>• pages on-call<br/>• serves the fleet dashboard"]
+    end
 ```
 
 ### federated-hub
 
 The same container image is run a second time as an org-wide aggregator (NOC big-board). Team deployments forward SEV1/SEV2 incidents up to it over the federation bus (RelayFederationStack). The federated hub stores **no static catalog** — it builds the org hierarchy dynamically from the registration and heartbeat data that teams push up, so there is no central catalog to keep in sync.
 
-```
-  [Team Account A]          [Team Account B]          [Team Account C]
-  ┌─────────────┐           ┌─────────────┐           ┌─────────────┐
-  │ Relay Node  │──SEV1/2──►│             │◄──SEV1/2──│ Relay Node  │
-  └─────────────┘           │  Relay Hub  │           └─────────────┘
-                            │  (org NOC)  │
-  [Team Account D]          │  big-board  │
-  ┌─────────────┐           │  built from │
-  │ Relay Node  │──SEV1/2──►│  heartbeats │
-  └─────────────┘           └─────────────┘
-                            [Hub Account]
+```mermaid
+flowchart LR
+    A["Relay Node<br/>Team Account A"] -->|SEV1/2| HUB
+    B["Relay Node<br/>Team Account B"] -->|SEV1/2| HUB
+    C["Relay Node<br/>Team Account C"] -->|SEV1/2| HUB
+    D["Relay Node<br/>Team Account D"] -->|SEV1/2| HUB
+
+    subgraph HUBACCT["Hub Account"]
+        HUB["<b>Relay Hub</b> (org NOC)<br/>big-board built from heartbeats"]
+    end
 ```
 
 A future roadmap item re-splits detection into a lightweight per-team component and a central aggregator, recovering the original distributed model at scale. That work is deferred, not abandoned.
