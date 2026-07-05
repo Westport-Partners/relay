@@ -737,7 +737,9 @@ class DynamoDeadlineTimer:
     human escalation windows measured in minutes.
 
     ``TimerPort`` stays an interface and ``SchedulerTimerPort`` remains in the tree
-    as re-split insurance (plan §8).
+    as re-split insurance: if detection is ever moved into a serverless router so
+    the container can scale to zero, escalation runs off Scheduler->Lambda callbacks
+    instead of this sweep loop (see docs/architecture.md, Topologies).
     """
 
     def __init__(

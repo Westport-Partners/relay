@@ -91,7 +91,7 @@ flowchart LR
     end
 ```
 
-A future roadmap item re-splits detection into a lightweight per-team component and a central aggregator, recovering the original distributed model at scale. That work is deferred, not abandoned.
+A future roadmap item **re-splits the always-on container from the detection/routing decision**. The container serves human-facing work — building rules, editing the schedule, managing contacts, rendering the board — none of which needs to run when no one is interacting and no incident is live, so it could scale to zero. The only genuinely 24/7 piece is a small serverless router that applies the team-authored ignore rules and decides, per alarm, whether to drop it or forward an incident onward. That router publishes real incidents to an SNS topic; team and central hubs each subscribe a queue, so fan-out is event-driven with no cross-process state to synchronize. DynamoDB remains the single source of truth for incident state, and escalation runs off `SchedulerTimerPort` (EventBridge Scheduler → Lambda callback) instead of the container's sweep loop — which is exactly why that port is kept live in the tree today. The benefit is operational cost, not central correlation: because teams suppress noise at the edge, a central aggregator should only ever see already-filtered incidents. That work is deferred, not abandoned.
 
 ---
 
