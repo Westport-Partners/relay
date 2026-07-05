@@ -175,7 +175,7 @@ PagerDuty-style war rooms.
 
 | AWS Incident Manager | Relay | Notes |
 |---|---|---|
-| Tag resources; default tags on incidents; tag-based access | 🟡 | Incidents carry tags (from alarms + routing rules) used in routing match. No full tag-resource API or tag-based RBAC. |
+| Tag resources; default tags on incidents; tag-based access | 🟡 | **Different mechanism, by design.** AWS IM tags are manual labels for a shared central service, used to categorize resources and scope IAM access by tag. Relay instead treats resource tags as an **automatic classification signal**: `AlarmTagResolver` fetches them from the alarming resource (alarm events carry none), and they drive routing/ignore matches (`tag_filters`) and incident metadata enrichment (`${tag:...}` templates). The two AWS sub-features Relay omits only make sense in a centralized model — a **tag-resource API** (nothing to hand-label; config is GitOps, incidents are your own DynamoDB rows) and **tag-based RBAC** (isolation comes from AWS account boundaries, since each team's incidents live in that team's own account). |
 
 ## 14. Integrations 🟡
 
