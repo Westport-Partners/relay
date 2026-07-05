@@ -2,12 +2,13 @@
 
 Covers:
 - POST /incidents/{id}/ignore → creates a rule + auto-resolves the incident
-- POST /rules validation (no matcher → 422)
-- POST /rules + GET /rules round-trip; PUT updates; DELETE removes
-- GET /rules/deviation reports deviation after a UI-created rule
-- GET /rules/download returns YAML with ignore block + attachment header
+- POST /ignore-rules validation (no matcher → 422)
+- POST /ignore-rules + GET /ignore-rules round-trip; PUT updates; DELETE removes
+- GET /ignore-rules/deviation reports deviation after a UI-created rule
+- GET /ignore-rules/download returns YAML with ignore block + attachment header
 - Seeding: empty store → seeds from config; non-empty → DB wins
 - Writer gating (POST/PUT/DELETE → 403 without auth)
+- Deprecated /rules aliases still work and emit a WARNING log
 """
 
 from __future__ import annotations
@@ -176,18 +177,18 @@ def _clear_auth_env(monkeypatch):
 
 def test_create_rule_requires_auth():
     c = _client()
-    r = c.post("/rules", json={"app_name": "my-svc"})
+    r = c.post("/ignore-rules", json={"app_name": "my-svc"})
     assert r.status_code == 403
 
 
 def test_update_rule_requires_auth():
     c = _client()
-    assert c.put("/rules/some-id", json={"note": "x"}).status_code == 403
+    assert c.put("/ignore-rules/some-id", json={"note": "x"}).status_code == 403
 
 
 def test_delete_rule_requires_auth():
     c = _client()
-    assert c.delete("/rules/some-id").status_code == 403
+    assert c.delete("/ignore-rules/some-id").status_code == 403
 
 
 def test_ignore_incident_requires_auth():
@@ -196,7 +197,7 @@ def test_ignore_incident_requires_auth():
 
 
 # ---------------------------------------------------------------------------
-# Tests: POST /rules validation
+# Tests: POST /ignore-rules validation
 # ---------------------------------------------------------------------------
 
 
@@ -204,14 +205,14 @@ def test_create_rule_no_matcher_422(monkeypatch):
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
     c = _client()
     # Only non-matcher fields → 422
-    r = c.post("/rules", json={"name": "bad-rule", "note": "no matcher"})
+    r = c.post("/ignore-rules", json={"name": "bad-rule", "note": "no matcher"})
     assert r.status_code == 422
 
 
 def test_create_rule_empty_body_422(monkeypatch):
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
     c = _client()
-    r = c.post("/rules", json={})
+    r = c.post("/ignore-rules", json={})
     assert r.status_code == 422
 
 
@@ -225,15 +226,15 @@ def test_create_and_list_rules(monkeypatch):
     monkeypatch.setenv("RELAY_DEV_USER", "alice")
     c = _client()
     # Start empty
-    assert c.get("/rules").json()["rules"] == []
+    assert c.get("/ignore-rules").json()["rules"] == []
     # Create
-    r = c.post("/rules", json={"app_name": "my-svc", "note": "test rule"})
+    r = c.post("/ignore-rules", json={"app_name": "my-svc", "note": "test rule"})
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is True
     rule_id = body["rule_id"]
     # List — should appear
-    rules = c.get("/rules").json()["rules"]
+    rules = c.get("/ignore-rules").json()["rules"]
     assert len(rules) == 1
     assert rules[0]["rule_id"] == rule_id
     assert rules[0]["app_name"] == "my-svc"
@@ -244,11 +245,11 @@ def test_update_rule(monkeypatch):
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
     c = _client()
     # Create first
-    rid = c.post("/rules", json={"app_name": "svc-a"}).json()["rule_id"]
+    rid = c.post("/ignore-rules", json={"app_name": "svc-a"}).json()["rule_id"]
     # Update note
-    r = c.put(f"/rules/{rid}", json={"note": "updated note"})
+    r = c.put(f"/ignore-rules/{rid}", json={"note": "updated note"})
     assert r.status_code == 200
-    rules = c.get("/rules").json()["rules"]
+    rules = c.get("/ignore-rules").json()["rules"]
     assert rules[0]["note"] == "updated note"
     assert rules[0]["app_name"] == "svc-a"  # unchanged
 
@@ -256,23 +257,23 @@ def test_update_rule(monkeypatch):
 def test_update_missing_rule_404(monkeypatch):
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
     c = _client()
-    assert c.put("/rules/no-such-id", json={"note": "x"}).status_code == 404
+    assert c.put("/ignore-rules/no-such-id", json={"note": "x"}).status_code == 404
 
 
 def test_delete_rule(monkeypatch):
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
     c = _client()
-    rid = c.post("/rules", json={"app_name": "svc-b"}).json()["rule_id"]
-    r = c.delete(f"/rules/{rid}")
+    rid = c.post("/ignore-rules", json={"app_name": "svc-b"}).json()["rule_id"]
+    r = c.delete(f"/ignore-rules/{rid}")
     assert r.status_code == 200
     assert r.json()["deleted"] == rid
-    assert c.get("/rules").json()["rules"] == []
+    assert c.get("/ignore-rules").json()["rules"] == []
 
 
 def test_delete_missing_rule_404(monkeypatch):
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
     c = _client()
-    assert c.delete("/rules/ghost").status_code == 404
+    assert c.delete("/ignore-rules/ghost").status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +296,7 @@ def test_ignore_incident_creates_rule_and_resolves(monkeypatch):
     rule_id = body["rule_id"]
 
     # Rule must exist in the store
-    rules = c.get("/rules").json()["rules"]
+    rules = c.get("/ignore-rules").json()["rules"]
     assert len(rules) == 1
     assert rules[0]["rule_id"] == rule_id
     assert rules[0]["app_name"] == "checkout-api"
@@ -321,7 +322,7 @@ def test_ignore_incident_with_prefix_override(monkeypatch):
     r = c.post("/incidents/c-123/ignore", json={"alarm_name_prefix": "prod-checkout-"})
     assert r.status_code == 200
 
-    rules = c.get("/rules").json()["rules"]
+    rules = c.get("/ignore-rules").json()["rules"]
     assert len(rules) == 1
     assert rules[0]["alarm_name_prefix"] == "prod-checkout-"
     # Exact alarm_name should NOT be set (prefix is the broader match)
@@ -335,13 +336,13 @@ def test_ignore_missing_incident_404(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Tests: GET /rules/deviation
+# Tests: GET /ignore-rules/deviation
 # ---------------------------------------------------------------------------
 
 
 def test_deviation_empty_baseline_no_rules():
     c = _client(ignore_baseline=[])
-    body = c.get("/rules/deviation").json()
+    body = c.get("/ignore-rules/deviation").json()
     assert body["deviates"] is False
     assert body["db_count"] == 0
     assert body["baseline_count"] == 0
@@ -355,8 +356,8 @@ def test_deviation_added_rule(monkeypatch):
     rule_store = _FakeIgnoreRuleStore()
     c = _client(ignore_rule_store=rule_store, ignore_baseline=[])
     # Add a rule via the API
-    c.post("/rules", json={"app_name": "new-svc"})
-    body = c.get("/rules/deviation").json()
+    c.post("/ignore-rules", json={"app_name": "new-svc"})
+    body = c.get("/ignore-rules/deviation").json()
     assert body["deviates"] is True
     assert body["db_count"] == 1
     assert body["baseline_count"] == 0
@@ -374,7 +375,7 @@ def test_deviation_baseline_matches_db(monkeypatch):
     rule_store = _FakeIgnoreRuleStore()
     rule_store.put_rule(baseline_rule)
     c = _client(ignore_rule_store=rule_store, ignore_baseline=[baseline_rule])
-    body = c.get("/rules/deviation").json()
+    body = c.get("/ignore-rules/deviation").json()
     assert body["deviates"] is False
 
 
@@ -385,20 +386,20 @@ def test_deviation_removed_rule(monkeypatch):
     baseline_rule = IgnoreRule(app_name="svc-y", note="gone")
     # Empty store (rule was deleted) but baseline has the rule.
     c = _client(ignore_rule_store=_FakeIgnoreRuleStore(), ignore_baseline=[baseline_rule])
-    body = c.get("/rules/deviation").json()
+    body = c.get("/ignore-rules/deviation").json()
     assert body["deviates"] is True
     assert len(body["removed"]) == 1
     assert body["removed"][0]["app_name"] == "svc-y"
 
 
 # ---------------------------------------------------------------------------
-# Tests: GET /rules/download
+# Tests: GET /ignore-rules/download
 # ---------------------------------------------------------------------------
 
 
 def test_download_rules_empty(monkeypatch):
     c = _client(ignore_rule_store=_FakeIgnoreRuleStore())
-    r = c.get("/rules/download")
+    r = c.get("/ignore-rules/download")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/yaml")
     assert "attachment" in r.headers.get("content-disposition", "")
@@ -412,8 +413,8 @@ def test_download_rules_with_content(monkeypatch):
     monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
     rule_store = _FakeIgnoreRuleStore()
     c = _client(ignore_rule_store=rule_store)
-    c.post("/rules", json={"app_name": "svc-download", "note": "export me"})
-    r = c.get("/rules/download")
+    c.post("/ignore-rules", json={"app_name": "svc-download", "note": "export me"})
+    r = c.get("/ignore-rules/download")
     assert r.status_code == 200
     text = r.text
     assert "svc-download" in text
@@ -493,3 +494,117 @@ def test_seed_config_no_ignore_block():
     baseline, seeded = _seed_ignore_rules(store, _FakeConfig())
     assert baseline == []
     assert seeded is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: deprecated /rules alias endpoints
+# ---------------------------------------------------------------------------
+
+
+def test_deprecated_list_rules_alias_works(monkeypatch, caplog):
+    """GET /rules still returns data and emits a deprecation warning."""
+    import logging
+
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    monkeypatch.setenv("RELAY_DEV_USER", "alice")
+    rule_store = _FakeIgnoreRuleStore()
+    c = _client(ignore_rule_store=rule_store)
+    # Seed a rule via the canonical path so there's data to verify
+    c.post("/ignore-rules", json={"app_name": "alias-svc"})
+
+    with caplog.at_level(logging.WARNING):
+        r = c.get("/rules")
+
+    assert r.status_code == 200
+    rules = r.json()["rules"]
+    assert len(rules) == 1
+    assert rules[0]["app_name"] == "alias-svc"
+    # Deprecation response header
+    assert r.headers.get("deprecation") == "true"
+    # Deprecation warning in logs
+    depr_records = [
+        rec for rec in caplog.records
+        if rec.levelno == logging.WARNING and "Deprecated" in rec.message
+    ]
+    assert depr_records, "Expected at least one deprecation WARNING log record"
+    assert "/ignore-rules" in depr_records[0].message
+
+
+def test_deprecated_create_rule_alias_works(monkeypatch, caplog):
+    """POST /rules still creates a rule and emits a deprecation warning."""
+    import logging
+
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    c = _client()
+
+    with caplog.at_level(logging.WARNING):
+        r = c.post("/rules", json={"app_name": "alias-create-svc"})
+
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert r.headers.get("deprecation") == "true"
+    depr_records = [
+        rec for rec in caplog.records
+        if rec.levelno == logging.WARNING and "Deprecated" in rec.message
+    ]
+    assert depr_records, "Expected at least one deprecation WARNING log record"
+    assert "/ignore-rules" in depr_records[0].message
+    # Rule is accessible via the canonical path
+    rules = c.get("/ignore-rules").json()["rules"]
+    assert any(r2["app_name"] == "alias-create-svc" for r2 in rules)
+
+
+def test_deprecated_deviation_alias_works(monkeypatch, caplog):
+    """GET /rules/deviation still works and emits a deprecation warning."""
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        r = _client(ignore_baseline=[]).get("/rules/deviation")
+
+    assert r.status_code == 200
+    assert r.json()["deviates"] is False
+    assert r.headers.get("deprecation") == "true"
+    depr_records = [
+        rec for rec in caplog.records
+        if rec.levelno == logging.WARNING and "Deprecated" in rec.message
+    ]
+    assert depr_records
+
+
+def test_deprecated_download_alias_works(monkeypatch, caplog):
+    """GET /rules/download still returns YAML and emits a deprecation warning."""
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        r = _client(ignore_rule_store=_FakeIgnoreRuleStore()).get("/rules/download")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/yaml")
+    assert r.headers.get("deprecation") == "true"
+    depr_records = [
+        rec for rec in caplog.records
+        if rec.levelno == logging.WARNING and "Deprecated" in rec.message
+    ]
+    assert depr_records
+
+
+def test_deprecated_delete_alias_works(monkeypatch, caplog):
+    """DELETE /rules/{id} still deletes the rule and emits a deprecation warning."""
+    import logging
+
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    c = _client()
+    rid = c.post("/ignore-rules", json={"app_name": "alias-del-svc"}).json()["rule_id"]
+
+    with caplog.at_level(logging.WARNING):
+        r = c.delete(f"/rules/{rid}")
+
+    assert r.status_code == 200
+    assert r.json()["deleted"] == rid
+    assert r.headers.get("deprecation") == "true"
+    depr_records = [
+        rec for rec in caplog.records
+        if rec.levelno == logging.WARNING and "Deprecated" in rec.message
+    ]
+    assert depr_records
+    assert c.get("/ignore-rules").json()["rules"] == []

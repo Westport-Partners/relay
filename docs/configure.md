@@ -253,7 +253,7 @@ The dedup key is `account_id + app_name + alarm_name` — one logical alarm, reg
 
 **Storage model.** The optional `ignore:` block in `routing.yaml` is a **startup seed only**. On first boot, if the DynamoDB rules store is empty, Relay populates it from `routing.yaml`; thereafter DynamoDB is the runtime source of truth. The UI edits DynamoDB directly — changes are instant and require no config file change or redeploy. A changed `routing.yaml` on restart does **not** clobber live UI edits ("DB wins").
 
-**Primary management path.** Use the **Rules** screen in the dashboard. It lists all live ignore rules with per-rule trigger counts, reason/note, created_by, and created_at. From there you can create, edit, filter, and delete rules. The screen also shows a banner when the live rules differ from the `routing.yaml` baseline, and offers a YAML download (`GET /rules/download`) of a regenerated `ignore:` block you can paste back into `routing.yaml` to persist the changes.
+**Primary management path.** Use the **Rules** screen in the dashboard. It lists all live ignore rules with per-rule trigger counts, reason/note, created_by, and created_at. From there you can create, edit, filter, and delete rules. The screen also shows a banner when the live rules differ from the `routing.yaml` baseline, and offers a YAML download (`GET /ignore-rules/download`) of a regenerated `ignore:` block you can paste back into `routing.yaml` to persist the changes.
 
 <figure class="screenshot" markdown="span">
   ![The Rules screen showing a deviation banner because the live DynamoDB rules differ from the routing.yaml baseline.](assets/screenshots/configure/S-RULES-DEVIATION.png)
