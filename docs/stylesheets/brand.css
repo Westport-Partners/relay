@@ -88,3 +88,89 @@
 [data-md-color-scheme="slate"] .md-typeset figure.screenshot figcaption {
   color: #8fb3ba;
 }
+
+/* ── AI-first "Copy / View as Markdown" toolbar ──────────────────────────── */
+
+.relay-ai-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.5rem 0 1.25rem;
+  flex-wrap: wrap;
+}
+
+/* Shared base for button and link */
+.relay-ai-copy-btn,
+.relay-ai-view-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+  border-radius: 4px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+
+/* Copy button */
+.relay-ai-copy-btn {
+  background-color: transparent;
+  color: #007489;
+  border: 1px solid #007489;
+}
+
+.relay-ai-copy-btn:hover {
+  background-color: #007489;
+  color: #fff;
+}
+
+.relay-ai-copy-btn--success {
+  background-color: #218993;
+  color: #fff;
+  border-color: #218993;
+}
+
+/* View link */
+.relay-ai-view-link {
+  background-color: transparent;
+  color: #5a7a82;
+  border: 1px solid rgba(90, 122, 130, 0.45);
+}
+
+.relay-ai-view-link:hover {
+  color: #007489;
+  border-color: #007489;
+  background-color: transparent;
+}
+
+/* Dark mode */
+[data-md-color-scheme="slate"] .relay-ai-copy-btn {
+  color: #7a9fa7;
+  border-color: #7a9fa7;
+}
+
+[data-md-color-scheme="slate"] .relay-ai-copy-btn:hover {
+  background-color: #218993;
+  color: #fff;
+  border-color: #218993;
+}
+
+[data-md-color-scheme="slate"] .relay-ai-copy-btn--success {
+  background-color: #218993;
+  color: #fff;
+  border-color: #218993;
+}
+
+[data-md-color-scheme="slate"] .relay-ai-view-link {
+  color: #7a9fa7;
+  border-color: rgba(122, 159, 167, 0.35);
+}
+
+[data-md-color-scheme="slate"] .relay-ai-view-link:hover {
+  color: #7a9fa7;
+  border-color: #7a9fa7;
+}

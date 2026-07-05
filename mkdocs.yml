@@ -10,10 +10,12 @@ docs_dir: docs
 # validating Relay's coverage) — kept in-repo but excluded from the built site.
 exclude_docs: |
   aws_incident-manager/
+  fleet-team-mockup.md
 
 theme:
   name: material
-  logo: assets/westport-mark.png
+  # White wordmark for the teal header bar — the teal mark is invisible on the teal background.
+  logo: assets/westport-mark-white.png
   favicon: assets/westport-mark.png
   palette:
     - scheme: default
@@ -35,8 +37,14 @@ theme:
     - navigation.tabs
     - search.suggest
 
+hooks:
+  - docs/hooks/llms_txt.py
+
 extra_css:
   - stylesheets/brand.css
+
+extra_javascript:
+  - javascripts/copy-page.js
 
 markdown_extensions:
   - admonition
