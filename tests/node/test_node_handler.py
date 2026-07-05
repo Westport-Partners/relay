@@ -25,6 +25,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import relay.node.handler as handler_mod
 from relay.config.schema import (
     EscalationConfig,
     RelayConfig,
@@ -36,7 +37,6 @@ from relay.core.model import (
     Severity,
     SignalSource,
 )
-from relay.node.handler import NodeHandler
 
 # ---------------------------------------------------------------------------
 # Environment variable fixture
@@ -216,7 +216,7 @@ def _make_handler(
     incident: Incident | None = None,
     ttl: float | None = None,
     monkeypatch=None,
-) -> tuple[NodeHandler, FakeConfigLoader]:
+) -> tuple[handler_mod.NodeHandler, FakeConfigLoader]:
     """Construct a NodeHandler with all AWS collaborators faked out.
 
     Returns (handler, fake_config_loader) for inspection.
@@ -251,7 +251,7 @@ def _make_handler(
     handler_mod.DualStreamDispatcher = FakeDispatcher
 
     try:
-        h = NodeHandler(
+        h = handler_mod.NodeHandler(
             _config_loader=loader,
             _alarm_source=alarm_source,
             _notifier=MagicMock(),
@@ -300,7 +300,7 @@ class TestConfigTTLRefresh:
             alarm_source = FakeAlarmSource(inc)
             handler_mod.DualStreamDispatcher = FakeDispatcher
 
-            h = NodeHandler(
+            h = handler_mod.NodeHandler(
                 _config_loader=loader,
                 _alarm_source=alarm_source,
                 _notifier=MagicMock(),
@@ -345,7 +345,7 @@ class TestConfigTTLRefresh:
             alarm_source = FakeAlarmSource(inc)
             handler_mod.DualStreamDispatcher = FakeDispatcher
 
-            h = NodeHandler(
+            h = handler_mod.NodeHandler(
                 _config_loader=loader,
                 _alarm_source=alarm_source,
                 _notifier=MagicMock(),
@@ -390,7 +390,7 @@ class TestConfigTTLRefresh:
             alarm_source = FakeAlarmSource(inc)
             handler_mod.DualStreamDispatcher = FakeDispatcher
 
-            h = NodeHandler(
+            h = handler_mod.NodeHandler(
                 _config_loader=loader,
                 _alarm_source=alarm_source,
                 _notifier=MagicMock(),
@@ -439,7 +439,7 @@ class TestConfigTTLRefresh:
             alarm_source = FakeAlarmSource(inc)
             handler_mod.DualStreamDispatcher = FakeDispatcher
 
-            h = NodeHandler(
+            h = handler_mod.NodeHandler(
                 _config_loader=loader,
                 _alarm_source=alarm_source,
                 _notifier=MagicMock(),
@@ -493,7 +493,7 @@ class TestRoleResolverWiring:
         original_dispatcher = handler_mod.DualStreamDispatcher
         handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
-            return NodeHandler(
+            return handler_mod.NodeHandler(
                 _config_loader=loader,
                 _alarm_source=FakeAlarmSource(_make_incident()),
                 _notifier=MagicMock(),
@@ -531,7 +531,7 @@ class TestRoleResolverWiring:
 
 class TestHeartbeat:
 
-    def _make_heartbeat_handler(self, monkeypatch) -> NodeHandler:
+    def _make_heartbeat_handler(self, monkeypatch) -> handler_mod.NodeHandler:
         """Build a NodeHandler with all AWS collaborators faked, env set explicitly."""
         import relay.node.handler as handler_mod
 
@@ -540,7 +540,7 @@ class TestHeartbeat:
         original_dispatcher = handler_mod.DualStreamDispatcher
         handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
-            h = NodeHandler(
+            h = handler_mod.NodeHandler(
                 _config_loader=loader,
                 _alarm_source=FakeAlarmSource(_make_incident()),
                 _notifier=MagicMock(),
@@ -657,7 +657,7 @@ class TestHeartbeat:
         original = handler_mod.DualStreamDispatcher
         handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
-            h = NodeHandler(
+            h = handler_mod.NodeHandler(
                 _config_loader=loader,
                 _alarm_source=FakeAlarmSource(_make_incident()),
                 _notifier=MagicMock(),
@@ -689,7 +689,7 @@ class TestHeartbeat:
 class TestHeartbeatOrgPath:
     """Tests for _resolve_org_path() and the org_path kwarg passed to emit_heartbeat."""
 
-    def _make_handler(self, monkeypatch) -> NodeHandler:
+    def _make_handler(self, monkeypatch) -> handler_mod.NodeHandler:
         """Build a NodeHandler with all AWS collaborators faked."""
         import relay.node.handler as handler_mod
 
@@ -698,7 +698,7 @@ class TestHeartbeatOrgPath:
         original_dispatcher = handler_mod.DualStreamDispatcher
         handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
-            h = NodeHandler(
+            h = handler_mod.NodeHandler(
                 _config_loader=loader,
                 _alarm_source=FakeAlarmSource(_make_incident()),
                 _notifier=MagicMock(),
@@ -806,7 +806,7 @@ class TestTimeoutMarksEscalated:
 
         store = self._StoringIncidentStore(incident)
         monkeypatch.setattr(handler_mod, "DualStreamDispatcher", FakeDispatcher)
-        h = NodeHandler(
+        h = handler_mod.NodeHandler(
             _config_loader=FakeConfigLoader(make_relay_config()),
             _alarm_source=FakeAlarmSource(incident),
             _notifier=MagicMock(),
@@ -873,12 +873,10 @@ class TestRoutingProvenance:
             return None
 
     def _build_handler(self, incident: Incident, config: RelayConfig, store):  # noqa: F821
-        import relay.node.handler as handler_mod
-
         monkeypatch_dispatcher = handler_mod.DualStreamDispatcher
         handler_mod.DualStreamDispatcher = FakeDispatcher
         try:
-            h = NodeHandler(
+            h = handler_mod.NodeHandler(
                 _config_loader=FakeConfigLoader(config),
                 _alarm_source=FakeAlarmSource(incident),
                 _notifier=MagicMock(),
