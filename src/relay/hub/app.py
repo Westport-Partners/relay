@@ -2866,8 +2866,9 @@ class HubApp:
 
         # ----------------------------------------------------------------
         # Ignore rules — CRUD + ignore action + deviation + download
+        # Canonical paths: /ignore-rules  (old /rules paths are deprecated aliases)
         # ----------------------------------------------------------------
-        @app.get("/rules")
+        @app.get("/ignore-rules")
         def list_rules() -> dict[str, Any]:
             if ignore_rule_store is None:
                 return {"rules": []}
@@ -2883,7 +2884,7 @@ class HubApp:
                 ]
             }
 
-        @app.get("/rules/deviation")
+        @app.get("/ignore-rules/deviation")
         def rules_deviation() -> dict[str, Any]:
             """Report whether the live DB rule set deviates from the config baseline."""
             if ignore_rule_store is None:
@@ -2897,7 +2898,7 @@ class HubApp:
             try:
                 db_rows = ignore_rule_store.list_rules()
             except Exception:
-                logger.warning("list_rules failed in /rules/deviation", exc_info=True)
+                logger.warning("list_rules failed in /ignore-rules/deviation", exc_info=True)
                 db_rows = []
 
             def _rule_key(r: Any) -> str:
@@ -2948,7 +2949,7 @@ class HubApp:
                 "removed": [_summary(baseline_keys[k]) for k in sorted(removed_keys)],
             }
 
-        @app.get("/rules/download")
+        @app.get("/ignore-rules/download")
         def download_rules() -> Any:
             """Download current DB rules as a routing.yaml ignore block."""
             from fastapi.responses import Response as _Response
@@ -2963,7 +2964,7 @@ class HubApp:
                         for (_, rule, _) in db_rows
                     ]
                 except Exception:
-                    logger.warning("list_rules failed in /rules/download", exc_info=True)
+                    logger.warning("list_rules failed in /ignore-rules/download", exc_info=True)
                     rules_list = []
 
             block = {"ignore": {"enabled": True, "rules": rules_list}}
@@ -2979,7 +2980,7 @@ class HubApp:
                 headers={"Content-Disposition": "attachment; filename=routing.yaml"},
             )
 
-        @app.post("/rules")
+        @app.post("/ignore-rules")
         def create_rule(payload: dict[str, Any], request: Request) -> dict[str, Any]:
             from fastapi import HTTPException
             from pydantic import ValidationError
@@ -3026,7 +3027,7 @@ class HubApp:
             )
             return {"ok": True, "rule_id": rule_id}
 
-        @app.put("/rules/{rule_id}")
+        @app.put("/ignore-rules/{rule_id}")
         def update_rule(
             rule_id: str, payload: dict[str, Any], request: Request
         ) -> dict[str, Any]:
@@ -3057,7 +3058,7 @@ class HubApp:
             )
             return {"ok": True, "rule_id": rule_id}
 
-        @app.delete("/rules/{rule_id}")
+        @app.delete("/ignore-rules/{rule_id}")
         def delete_rule(rule_id: str, request: Request) -> dict[str, Any]:
             from fastapi import HTTPException
 
@@ -3074,6 +3075,61 @@ class HubApp:
                 _scrub(ident.subject),
             )
             return {"ok": True, "deleted": rule_id}
+
+        # ----------------------------------------------------------------
+        # Deprecated aliases — /rules/* → /ignore-rules/*
+        # These aliases will be removed in a future release.
+        # ----------------------------------------------------------------
+        _DEPR_MSG = (
+            "Deprecated route /rules called; use /ignore-rules instead. "
+            "This alias will be removed in a future release."
+        )
+
+        @app.get("/rules")
+        def list_rules_deprecated() -> Any:
+            logger.warning(_DEPR_MSG)
+            from fastapi.responses import JSONResponse
+            result = list_rules()
+            return JSONResponse(content=result, headers={"Deprecation": "true"})
+
+        @app.get("/rules/deviation")
+        def rules_deviation_deprecated() -> Any:
+            logger.warning(_DEPR_MSG)
+            from fastapi.responses import JSONResponse
+            result = rules_deviation()
+            return JSONResponse(content=result, headers={"Deprecation": "true"})
+
+        @app.get("/rules/download")
+        def download_rules_deprecated() -> Any:
+            logger.warning(_DEPR_MSG)
+            response = download_rules()
+            response.headers["Deprecation"] = "true"
+            return response
+
+        @app.post("/rules")
+        def create_rule_deprecated(
+            payload: dict[str, Any], request: Request
+        ) -> Any:
+            logger.warning(_DEPR_MSG)
+            from fastapi.responses import JSONResponse
+            result = create_rule(payload, request)
+            return JSONResponse(content=result, headers={"Deprecation": "true"})
+
+        @app.put("/rules/{rule_id}")
+        def update_rule_deprecated(
+            rule_id: str, payload: dict[str, Any], request: Request
+        ) -> Any:
+            logger.warning(_DEPR_MSG)
+            from fastapi.responses import JSONResponse
+            result = update_rule(rule_id, payload, request)
+            return JSONResponse(content=result, headers={"Deprecation": "true"})
+
+        @app.delete("/rules/{rule_id}")
+        def delete_rule_deprecated(rule_id: str, request: Request) -> Any:
+            logger.warning(_DEPR_MSG)
+            from fastapi.responses import JSONResponse
+            result = delete_rule(rule_id, request)
+            return JSONResponse(content=result, headers={"Deprecation": "true"})
 
         @app.post("/incidents/{correlation_id}/ignore")
         def ignore_incident(

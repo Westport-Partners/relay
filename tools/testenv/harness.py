@@ -237,7 +237,7 @@ def seed_rules(hub: Hub) -> None:
         "note": "Dev-account synthetic noise — never page.",
         "enabled": True,
     }
-    r = hub.post("/rules", ignore)
+    r = hub.post("/ignore-rules", ignore)
     flag = "ok" if r.status_code == 200 else f"{r.status_code} {r.text[:80]}"
     print(f"  ignore-rule {ignore['name']!r}: {flag}")
 

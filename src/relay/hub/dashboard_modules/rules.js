@@ -28,10 +28,10 @@ export async function loadRules() {
   try {
     const [rr, ig, rp, rd, id] = await Promise.all([
       fetch('/routing-rules'),
-      fetch('/rules'),
+      fetch('/ignore-rules'),
       fetch('/escalation-policies'),
       fetch('/routing-rules/deviation'),
-      fetch('/rules/deviation'),
+      fetch('/ignore-rules/deviation'),
     ]);
     if (rr.ok) { const d = await rr.json(); routing = d.rules || []; }
     if (ig.ok) { const d = await ig.json(); ignore  = d.rules || []; }
@@ -69,7 +69,7 @@ export function renderRulesSection(routeDev, ignoreDev) {
     devParts.push(`Routing rules differ from baseline (DB ${esc(String(routeDev.db_count ?? '?'))}, file ${esc(String(routeDev.baseline_count ?? '?'))}) — <a href="/routing-rules/download" style="color:var(--teal-light);text-decoration:underline;" download>download routing-rules.yaml</a>`);
   }
   if (ignoreDev && ignoreDev.deviates) {
-    devParts.push(`Ignore rules differ from baseline (DB ${esc(String(ignoreDev.db_count ?? '?'))}, file ${esc(String(ignoreDev.baseline_count ?? '?'))}) — <a href="/rules/download" style="color:var(--teal-light);text-decoration:underline;" download>download routing.yaml</a>`);
+    devParts.push(`Ignore rules differ from baseline (DB ${esc(String(ignoreDev.db_count ?? '?'))}, file ${esc(String(ignoreDev.baseline_count ?? '?'))}) — <a href="/ignore-rules/download" style="color:var(--teal-light);text-decoration:underline;" download>download routing.yaml</a>`);
   }
   const devBanner = devParts.length
     ? `<div class="info-banner" style="border-left-color:var(--amber);margin-bottom:14px;">&#9888; ${devParts.join('<br>')} to persist the current rule set to your repository.</div>`
@@ -145,7 +145,7 @@ export function renderNewRuleForm(formWrap) {
     formWrap.innerHTML = toggle;
     formWrap.appendChild(inner);
     wireIgnoreRuleForm(inner, null, async (body) => {
-      return fetch('/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return fetch('/ignore-rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     }, () => { formWrap.style.display = 'none'; loadRules(); });
   }
   const rt = document.getElementById('newrule-type-routing');
@@ -342,7 +342,7 @@ export function renderRulesTable() {
       const rtype = btn.dataset.rtype;
       const label = rtype === 'routing' ? 'routing' : 'ignore';
       if (!confirm('Delete this ' + label + ' rule? This cannot be undone.')) return;
-      const endpoint = rtype === 'routing' ? '/routing-rules/' : '/rules/';
+      const endpoint = rtype === 'routing' ? '/routing-rules/' : '/ignore-rules/';
       btn.disabled = true;
       btn.textContent = 'Deleting…';
       try {
@@ -376,7 +376,7 @@ export function renderRulesTable() {
       } else {
         td.innerHTML = ignoreRuleFormHtml(rule);
         wireIgnoreRuleForm(td, rule, async (body) => {
-          return fetch('/rules/' + encodeURIComponent(rid), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          return fetch('/ignore-rules/' + encodeURIComponent(rid), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         }, () => { editRow.style.display = 'none'; loadRules(); });
       }
     });

@@ -177,7 +177,7 @@ Rendered in the collapsed-by-default accordion at the top; the header shows the 
   <figcaption>Expanding the Ignore rules accordion reveals the drop list — each rule's match, its <code>drop</code> outcome and note, and how many alarms it has silently suppressed. There is no priority column: ignore rules are binary and first-match-wins.</figcaption>
 </figure>
 
-**Deviation banner.** When the live DynamoDB rules differ from the `routing.yaml` `ignore:` baseline, the screen shows a banner. Use the **Download YAML** button (`GET /rules/download`) to get a regenerated `ignore:` block you can paste back into `routing.yaml`.
+**Deviation banner.** When the live DynamoDB rules differ from the `routing.yaml` `ignore:` baseline, the screen shows a banner. Use the **Download YAML** button (`GET /ignore-rules/download`) to get a regenerated `ignore:` block you can paste back into `routing.yaml`.
 
 See `configure.md` for the full config schemas, the seed-vs-DynamoDB storage model for both rule types, and how ignore rules differ from `suppression:`.
 
@@ -271,12 +271,14 @@ All endpoints are served by the container. The base URL is the same as the dashb
 
 | Method | Path | Purpose | Write? |
 |--------|------|---------|--------|
-| GET | `/rules` | List all live ignore rules (with trigger counts) | |
-| POST | `/rules` | Create an ignore rule | Yes |
-| PUT | `/rules/{rule_id}` | Update an ignore rule | Yes |
-| DELETE | `/rules/{rule_id}` | Delete an ignore rule | Yes |
-| GET | `/rules/deviation` | Check whether live rules differ from routing.yaml baseline | |
-| GET | `/rules/download` | Download regenerated `ignore:` YAML block | |
+| GET | `/ignore-rules` | List all live ignore rules (with trigger counts) | |
+| POST | `/ignore-rules` | Create an ignore rule | Yes |
+| PUT | `/ignore-rules/{rule_id}` | Update an ignore rule | Yes |
+| DELETE | `/ignore-rules/{rule_id}` | Delete an ignore rule | Yes |
+| GET | `/ignore-rules/deviation` | Check whether live rules differ from routing.yaml baseline | |
+| GET | `/ignore-rules/download` | Download regenerated `ignore:` YAML block | |
+
+> **Deprecated aliases:** The old `/rules`, `/rules/{rule_id}`, `/rules/deviation`, and `/rules/download` paths still work but are deprecated. They will be removed in a future release. Callers should migrate to `/ignore-rules` equivalents.
 
 ### Metrics
 
