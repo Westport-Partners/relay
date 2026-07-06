@@ -8,6 +8,10 @@ For the offline local-mock harness (collapsed-single-container plan §6). Reads
 then seeds the test contacts so a fresh ``docker compose up`` can fire an incident
 and page someone.
 
+The GSI key schema here MUST stay in lockstep with the CDK stack, the Terraform
+module, and relay-provision-cli.sh; tests/infra/test_terraform_parity.py enforces
+this across all four sources (drift here silently blanks the demo screens).
+
 Idempotent: skips creation if the table already exists.
 
 Usage (inside the harness; AWS_* dummies + endpoint are set by docker-compose):

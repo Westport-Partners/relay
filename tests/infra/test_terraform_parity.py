@@ -28,6 +28,7 @@ DATA_PLANE_TF = TF_ROOT / "modules" / "data-plane" / "main.tf"
 COMPUTE_TF = TF_ROOT / "modules" / "compute" / "main.tf"
 CLI_PROVISIONER = REPO_ROOT / "scripts" / "relay-provision-cli.sh"
 CDK_DATA_STACK = REPO_ROOT / "infra" / "stacks" / "data_stack.py"
+LOCAL_BOOTSTRAP = REPO_ROOT / "scripts" / "relay-local-bootstrap.py"
 
 
 @pytest.fixture(scope="module")
@@ -45,6 +46,11 @@ def cdk_data_stack() -> str:
     return CDK_DATA_STACK.read_text()
 
 
+@pytest.fixture(scope="module")
+def local_bootstrap() -> str:
+    return LOCAL_BOOTSTRAP.read_text()
+
+
 # ---------------------------------------------------------------------------
 # Data-plane parity — the invariants that MUST match across all three sources.
 # ---------------------------------------------------------------------------
@@ -60,12 +66,23 @@ def cdk_data_stack() -> str:
     ],
 )
 def test_gsi_definitions_match_across_sources(
-    needle: str, data_plane_tf: str, cli_provisioner: str, cdk_data_stack: str
+    needle: str,
+    data_plane_tf: str,
+    cli_provisioner: str,
+    cdk_data_stack: str,
+    local_bootstrap: str,
 ) -> None:
-    """Both incident-listing GSIs and their key attributes appear in all three."""
+    """Both incident-listing GSIs and their key attributes appear in all four.
+
+    The local DynamoDB-Local bootstrap is the fourth source and the one that
+    drifted in 8bcddaf — a stale status/opened_at key schema there silently
+    blanked the Incidents/History/Metrics screens in the offline demo while
+    production (CDK/TF) was fine. It must stay in lockstep with the rest.
+    """
     assert needle in data_plane_tf, f"{needle} missing from data-plane TF"
     assert needle in cli_provisioner, f"{needle} missing from CLI provisioner"
     assert needle in cdk_data_stack, f"{needle} missing from CDK data stack"
+    assert needle in local_bootstrap, f"{needle} missing from local bootstrap"
 
 
 def test_ttl_attribute_is_ttl(
