@@ -29,6 +29,6 @@ echo "Synthesizing: ${RELAY_STACKS}" >&2
 # time, where it matters. relay-deploy.sh re-synthesizes fresh, so a guard-free
 # synth artifact can never leak a placeholder into a deploy.
 # shellcheck disable=SC2086
-relay_cdk synth ${RELAY_STACKS} ${RELAY_CDK_CONTEXT} -c relay:image_check=false >/dev/null
+relay_cdk synth ${RELAY_STACKS} ${RELAY_CDK_CONTEXT} -c relay:image_check=false "$@" >/dev/null
 echo "Synthesized templates in ${RELAY_ROOT}/cdk.out:" >&2
 ls -1 "${RELAY_ROOT}"/cdk.out/*.template.json >&2 2>/dev/null || true

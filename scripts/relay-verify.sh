@@ -96,7 +96,15 @@ fi
 # --- Infra synth (blocking, conditional) ---
 if [ "$FORCE_INFRA" = 1 ] || changed_match '^infra/|^scripts/relay-(context|synth|deploy)'; then
   echo "-- relay-synth.sh (cdk synth, no AWS writes)"
-  if [ -x "${RELAY_ROOT}/scripts/relay-synth.sh" ] && "${RELAY_ROOT}/scripts/relay-synth.sh" >/dev/null 2>&1; then
+  # This gate only validates that the CDK app synthesizes; it is not a real
+  # deploy, so it must not require the developer to have deploy env vars set.
+  # Supply placeholder identity inputs when unset (relay-context.sh needs a
+  # team/org name to build context) — a real deploy always sets these itself.
+  if [ -x "${RELAY_ROOT}/scripts/relay-synth.sh" ] \
+    && RELAY_DEPLOY_TYPE="${RELAY_DEPLOY_TYPE:-team}" \
+       RELAY_TEAM_NAME="${RELAY_TEAM_NAME:-verify}" \
+       RELAY_ORG_ID="${RELAY_ORG_ID:-verify}" \
+       "${RELAY_ROOT}/scripts/relay-synth.sh" >/dev/null 2>&1; then
     note_pass "cdk synth"
   else
     note_block "relay-synth.sh"

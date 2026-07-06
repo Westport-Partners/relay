@@ -108,15 +108,20 @@ account administrator or your internal service catalog.
 RELAY_DEPLOY_TYPE=team \
 RELAY_TEAM_NAME=<team> \
 RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
-./scripts/relay-synth.sh -- \
+./scripts/relay-synth.sh \
   -c relay:ecs_task_role_arn=arn:aws:iam::<account>:role/<task-role> \
   -c relay:ecs_execution_role_arn=arn:aws:iam::<account>:role/<exec-role> \
   -c relay:vpc_id=vpc-<id>
 ```
 
-Arguments after `--` are forwarded verbatim to `cdk synth`. The synth writes templates to
-`cdk.out/` — no AWS writes occur. Stack outputs appear in the synth output; use `cdk diff`
-if you want to review before committing.
+Trailing `-c relay:*` flags are forwarded verbatim to `cdk synth`. Do **not** insert a `--`
+before them — CDK's arg parser treats everything after `--` as positional and silently
+ignores it. The synth writes templates to `cdk.out/` — no AWS writes occur. Inspect the
+emitted policy outputs with:
+
+```bash
+cat cdk.out/RelayComputeStack.template.json | jq '.Outputs'
+```
 
 ### 3. An admin applies the policies
 
@@ -134,7 +139,7 @@ Have an account administrator:
 RELAY_DEPLOY_TYPE=team \
 RELAY_TEAM_NAME=<team> \
 RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
-./scripts/relay-deploy.sh -- \
+./scripts/relay-deploy.sh \
   -c relay:ecs_task_role_arn=arn:aws:iam::<account>:role/<task-role> \
   -c relay:ecs_execution_role_arn=arn:aws:iam::<account>:role/<exec-role> \
   -c relay:vpc_id=vpc-<id>
@@ -153,7 +158,7 @@ RELAY_DEPLOY_TYPE=team \
 RELAY_TEAM_NAME=<team> \
 RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
 RELAY_STACK_SELECTOR=compute \
-./scripts/relay-deploy.sh -- \
+./scripts/relay-deploy.sh \
   -c relay:ecs_task_role_arn=<task-role-arn> \
   -c relay:ecs_execution_role_arn=<exec-role-arn> \
   -c relay:vpc_id=<vpc-id>

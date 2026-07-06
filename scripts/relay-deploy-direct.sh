@@ -49,7 +49,7 @@ cd "${RELAY_ROOT}"
 # 1. Synthesize the selected stacks to cdk.out (no AWS writes).
 echo "Synthesizing (no AWS writes): ${RELAY_STACKS}" >&2
 # shellcheck disable=SC2086
-relay_cdk synth ${RELAY_STACKS} ${RELAY_CDK_CONTEXT} >/dev/null
+relay_cdk synth ${RELAY_STACKS} ${RELAY_CDK_CONTEXT} "$@" >/dev/null
 
 # 2. Deploy each synthesized template directly via CloudFormation, using the
 #    caller's credentials. No PassRole, no bootstrap execution role.
