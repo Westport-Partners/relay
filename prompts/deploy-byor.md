@@ -66,13 +66,13 @@ VPC_ID=vpc-<id>
 RELAY_DEPLOY_TYPE=team \
 RELAY_TEAM_NAME=<team> \
 RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
-./scripts/relay-synth.sh -- \
+./scripts/relay-synth.sh \
   -c relay:ecs_task_role_arn=$TASK_ROLE_ARN \
   -c relay:ecs_execution_role_arn=$EXEC_ROLE_ARN \
   -c relay:vpc_id=$VPC_ID
 ```
 
-Arguments after `--` are forwarded verbatim to `cdk synth`. Templates land in `cdk.out/`.
+Trailing `-c relay:*` flags are forwarded verbatim to `cdk synth`. Templates land in `cdk.out/`. Do **not** insert a `--` before the flags — CDK's arg parser treats everything after `--` as positional and silently ignores it.
 
 **Extract the policy outputs:**
 
@@ -121,7 +121,7 @@ RELAY_DEPLOY_TYPE=team \
 RELAY_TEAM_NAME=<team> \
 RELAY_STACK_SELECTOR=compute \
 RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
-./scripts/relay-deploy-direct.sh -- \
+./scripts/relay-deploy-direct.sh \
   -c relay:ecs_task_role_arn=$TASK_ROLE_ARN \
   -c relay:ecs_execution_role_arn=$EXEC_ROLE_ARN \
   -c relay:vpc_id=$VPC_ID
@@ -133,7 +133,7 @@ RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
 RELAY_DEPLOY_TYPE=team \
 RELAY_TEAM_NAME=<team> \
 RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
-./scripts/relay-deploy.sh -- \
+./scripts/relay-deploy.sh \
   -c relay:ecs_task_role_arn=$TASK_ROLE_ARN \
   -c relay:ecs_execution_role_arn=$EXEC_ROLE_ARN \
   -c relay:vpc_id=$VPC_ID
@@ -160,7 +160,7 @@ RELAY_DEPLOY_TYPE=team \
 RELAY_TEAM_NAME=<team> \
 RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
 RELAY_STACK_SELECTOR=compute \
-./scripts/relay-deploy-direct.sh -- \
+./scripts/relay-deploy-direct.sh \
   -c relay:ecs_task_role_arn=$TASK_ROLE_ARN \
   -c relay:ecs_execution_role_arn=$EXEC_ROLE_ARN \
   -c relay:vpc_id=$VPC_ID
