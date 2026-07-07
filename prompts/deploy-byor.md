@@ -221,7 +221,9 @@ RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
 
 - **Default is `STANDARD`** — omit `RELAY_CFN_MODE` and behavior is unchanged.
 - **Requires AWS CLI ≥ 2.35** (the version that added `--deployment-config`). The
-  script fails fast with a clear message on older CLIs.
+  script fails fast with a clear message on older CLIs, and `relay-preflight.sh`
+  flags it as the `aws-cli-express` WARN. To upgrade, follow
+  [`prompts/upgrade-aws-cli.md`](upgrade-aws-cli.md).
 - **"Success" ≠ "serving traffic."** The command returns before the ECS service is
   healthy. If you need to gate on readiness, poll:
   `aws ecs wait services-stable --cluster relay-hub --services relay-hub`.
