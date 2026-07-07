@@ -88,6 +88,23 @@ one-line reason grounded in the actual diff:
    exists and the issue has no spec-archive comment yet. N/A for changes with no
    spec dir (small fixes, docs-only, etc.).
 
+9. **Fails loud, not silent.** If the diff touches a delivery / side-effect path
+   (paging, SNS/SES publish, ticket create, federation emit, config seed), verify
+   that a misconfiguration or permission denial surfaces — a log `error`/`warning`,
+   a non-2xx, or a readiness signal — rather than a silent success. A handler that
+   returns `{"ok": true}` while delivering nothing (the exact shape of the BYOR
+   test-page and unseeded-config bugs) is NEEDS-ACTION. N/A for pure read/UI/docs
+   changes.
+
+10. **Off-happy-path considered.** Our sandbox is permissive and our build arch
+    usually matches the target, so whole classes of blocker hide until a real
+    locked-down / cross-arch / fresh-install deploy. For infra/deploy/IAM/container
+    changes, state how the change behaves under BYOR (`iam:CreateRole` /
+    `ec2:CreateVpc` denied), a non-x86 build host, and a fresh unseeded install —
+    or why those axes don't apply. Prefer an automated guard (a pure `resolve_*`
+    unit test, a synth assertion) over prose; where it can't be automated, confirm
+    an issue is filed. N/A for pure read/UI/docs changes.
+
 ## Step 4 — Git hygiene
 
 - Confirm the work is on a **feature branch**, not committed directly to `main`
