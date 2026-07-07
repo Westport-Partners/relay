@@ -46,6 +46,9 @@ Context keys consumed (see also README):
   relay:auth_allowed_users — comma-separated usernames allowed when access control
                              is on (passed as RELAY_AUTH_ALLOWED_USERS)
   relay:dev_user / relay:config_source / relay:tz / relay:log_level
+  relay:cpu_arch           — X86_64 (default) | ARM64. Must match the pushed
+                             image's architecture; relay-context.sh auto-detects
+                             the build host and sets it (override: RELAY_CPU_ARCH)
   Node self-identity (the container now owns these — were on the Node Lambda):
   relay:app_name / relay:deployment_id / relay:environment / relay:service_path /
   relay:org_path
@@ -164,6 +167,26 @@ def resolve_internal_alb(explicit: str | None) -> bool:
     Either way the ECS tasks themselves remain private.
     """
     return (explicit or "true").strip().lower() != "false"
+
+
+def resolve_cpu_architecture(explicit: str | None) -> str:
+    """Resolve the Fargate task CPU architecture from ``relay:cpu_arch``.
+
+    Returns the normalized sentinel ``"ARM64"`` or ``"X86_64"`` (the caller maps
+    it to ``ecs.CpuArchitecture`` — the CDK enum members are jsii proxies that
+    are not identity- or value-comparable, so this helper stays a plain string
+    for unit-testability).
+
+    Fargate defaults a task def with no ``runtime_platform`` to X86_64; an ARM64
+    image (built on an aarch64 host) then fails at launch with "exec format
+    error". ``relay-context.sh`` auto-detects the build-host arch and passes
+    ``relay:cpu_arch`` so ARM64 hosts deploy ARM64 tasks with no operator action.
+
+    Only an explicit ``ARM64`` (case-insensitive, whitespace-trimmed) selects
+    ARM64; anything else (unset, ``X86_64``, junk) stays X86_64 — the safe
+    default that matches Fargate's own.
+    """
+    return "ARM64" if (explicit or "").strip().upper() == "ARM64" else "X86_64"
 
 
 def resolve_certificate(
@@ -475,8 +498,15 @@ class RelayComputeStack(Stack):
                     sid="RelayHubDirectSms",
                     effect=iam.Effect.ALLOW,
                     actions=["sns:Publish"],
+                    # Direct-to-phone SMS: Publish(PhoneNumber=...) with no topic
+                    # ARN, so the resource is "*". Scope by region rather than by
+                    # sns:Protocol — sns:Protocol is a Subscribe-only condition key
+                    # and is absent from a Publish request context, so gating on it
+                    # here would fail closed and silently break direct paging.
                     resources=["*"],
-                    conditions={"StringEquals": {"sns:Protocol": "sms"}},
+                    conditions={
+                        "StringEquals": {"aws:RequestedRegion": self.region}
+                    },
                 )
             )
         if ai_uses_bedrock and not byor_mode:
@@ -568,10 +598,25 @@ class RelayComputeStack(Stack):
         # ------------------------------------------------------------------
         # Task definition + container.
         # ------------------------------------------------------------------
+        # CPU architecture of the pushed image. Fargate defaults a task def with
+        # no runtime_platform to X86_64; an ARM64 image (built on an aarch64 host)
+        # then fails at launch with "exec format error". relay-context.sh
+        # auto-detects the build host arch and passes relay:cpu_arch so ARM64
+        # hosts deploy ARM64 tasks with no operator action. X86_64 is the default.
+        _cpu_arch = (
+            ecs.CpuArchitecture.ARM64
+            if resolve_cpu_architecture(self.node.try_get_context("relay:cpu_arch"))
+            == "ARM64"
+            else ecs.CpuArchitecture.X86_64
+        )
         task_def = ecs.FargateTaskDefinition(
             self, "RelayHubTaskDef", family="relay-hub",
             cpu=1024, memory_limit_mib=2048,
             execution_role=execution_role, task_role=task_role,
+            runtime_platform=ecs.RuntimePlatform(
+                cpu_architecture=_cpu_arch,
+                operating_system_family=ecs.OperatingSystemFamily.LINUX,
+            ),
         )
 
         # UI auth mode. An explicit relay:auth_mode always wins. When it is unset
@@ -642,7 +687,13 @@ class RelayComputeStack(Stack):
             container_env["RELAY_DEV_USER"] = (
                 self.node.try_get_context("relay:dev_user") or "operator"
             )
-        if config_source == "local":
+        # Default to the bundled local config when no source is specified: the
+        # image always ships config/*.yaml at /app/config, and without this the
+        # container starts with RELAY_CONFIG_SOURCE unset → no config loaded → the
+        # routing/ignore seeds (incl. the TargetTracking- ignore rule that keeps
+        # autoscaling alarms from paging) never reach DynamoDB. An explicit
+        # relay:config_source (e.g. "gitlab") still wins.
+        if config_source in ("local", ""):
             container_env["RELAY_CONFIG_SOURCE"] = "local"
             container_env["RELAY_CONFIG_DIR"] = "/app/config"
         if resolved_scope == "local-federated" and central_hub_bus_arn:
@@ -870,8 +921,10 @@ class RelayComputeStack(Stack):
                 "Sid": "RelayHubDirectSms",
                 "Effect": "Allow",
                 "Action": ["sns:Publish"],
+                # See the non-BYOR grant above: direct-to-phone Publish carries no
+                # sns:Protocol context key, so scope by region, not protocol.
                 "Resource": "*",
-                "Condition": {"StringEquals": {"sns:Protocol": "sms"}},
+                "Condition": {"StringEquals": {"aws:RequestedRegion": self.region}},
             })
         if ai_uses_bedrock:
             task_statements.append({

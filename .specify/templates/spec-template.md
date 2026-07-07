@@ -103,6 +103,39 @@
 - **[Entity 1]**: [What it represents, key attributes without implementation]
 - **[Entity 2]**: [What it represents, relationships to other entities]
 
+## Documentation Impact *(mandatory)*
+
+<!--
+  ACTION REQUIRED: Map every surface this feature changes to the doc(s) that must
+  be reconciled in the SAME PR, per the DoD doc-ownership map in CONTRIBUTING.md.
+  Include a docs/status.md row check. Mark each row Done / Gap so the PR closes
+  every Gap. This is the single most-often-missed DoD item.
+-->
+
+| Changed surface | Doc(s) | Status |
+|---|---|---|
+| [e.g. new env var / HTTP route / IAM output] | [e.g. docs/deploy.md] | Gap / Done |
+| `docs/status.md` rows | `docs/status.md` | Gap / Done |
+
+## Bug-Prevention (this class must not recur) *(mandatory)*
+
+<!--
+  ACTION REQUIRED: For each risk this feature introduces or touches, say how a
+  regression would be caught. Prefer an automated guard (a pure resolve_* unit
+  test, a synth assertion, a readiness check) over prose; where a measure can't
+  be automated now, file a tracking issue and link it. Two axes bite this project
+  repeatedly — address them explicitly or state why N/A:
+
+  1. FAILS LOUD, NOT SILENT — any delivery/side-effect path (paging, publish,
+     ticket, federation emit, config seed) surfaces misconfig/permission denial
+     (log error, non-2xx, readiness signal), never a silent {"ok": true}.
+  2. OFF-HAPPY-PATH — behavior under BYOR (denied CreateRole/CreateVpc), a non-x86
+     build host, and a fresh unseeded install; our permissive sandbox hides these.
+-->
+
+1. [Risk] → [guard: test / assertion / readiness check, or filed issue #NNN]
+2. [Risk] → [guard]
+
 ## Success Criteria *(mandatory)*
 
 <!--

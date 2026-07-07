@@ -235,6 +235,25 @@ def _resolve_now_on_call(
         return None
 
 
+def _resolve_paging_topic_arn() -> str:
+    """Resolve the SNS topic the Hub pages through (team topic, not federation).
+
+    Operators subscribe to the TEAM paging topic; the central/federation topic
+    has no human subscribers. RELAY_SNS_TOPIC_ARN and RELAY_PAGING_TOPIC_ARN both
+    carry the team topic (set by the compute stack); RELAY_CENTRAL_PAGING_TOPIC_ARN
+    is the federation topic and is only a last-resort fallback so a mis-wired task
+    def still pages somewhere rather than dropping silently. This matches the Node
+    handler (node/handler.py), which reads RELAY_SNS_TOPIC_ARN directly. Preferring
+    the central topic here previously sent test pages — and the in-process
+    dispatcher's pages — to a topic nobody listens to (first-deploy Issue 11).
+    """
+    return (
+        os.environ.get("RELAY_SNS_TOPIC_ARN")
+        or os.environ.get("RELAY_PAGING_TOPIC_ARN")
+        or os.environ.get("RELAY_CENTRAL_PAGING_TOPIC_ARN", "")
+    ).strip()
+
+
 def _load_hub_config() -> Any | None:
     """Load Relay config (escalation + routing + federation) for the Hub.
 
@@ -251,9 +270,21 @@ def _load_hub_config() -> Any | None:
             "RELAY_CONFIG_SOURCE",
             "local" if os.environ.get("RELAY_CONFIG_DIR") else "",
         )
+        # Defensive fallback for deployments that predate the stack default:
+        # when no source is configured and no GitLab repo is set, load the
+        # config the image always bundles at /app/config. Without this the Hub
+        # boots with no baseline, so the routing/ignore seeds (incl. the
+        # TargetTracking- ignore rule) never populate DynamoDB. Guarded on
+        # RELAY_GITLAB_REPO so it never shadows a GitLab-backed config source.
+        if (
+            not cfg_source
+            and not os.environ.get("RELAY_GITLAB_REPO")
+            and os.path.isdir("/app/config")
+        ):
+            cfg_source = "local"
         if cfg_source == "local":
             return LocalConfigLoader(
-                os.environ.get("RELAY_CONFIG_DIR", "config")
+                os.environ.get("RELAY_CONFIG_DIR", "/app/config")
             ).get()
         if os.environ.get("RELAY_GITLAB_REPO"):
             return GitLabConfigLoader(
@@ -1483,10 +1514,8 @@ class HubApp:
             or "relay-hub-fleet"
         )
         queue_url: str = os.environ.get("RELAY_SQS_QUEUE_URL", "").strip()
-        sns_topic_arn: str = os.environ.get(
-            "RELAY_CENTRAL_PAGING_TOPIC_ARN",
-            os.environ.get("RELAY_SNS_TOPIC_ARN", ""),
-        ).strip()
+        # Paging notifier resolves the TEAM topic (operators subscribe here).
+        sns_topic_arn: str = _resolve_paging_topic_arn()
         # Secret fetcher injected into adapter from_env() — keeps boto3 out of
         # the adapter modules. Returns "" (integration disabled) on any failure.
         def _safe_secret(name: str) -> str:
@@ -1575,8 +1604,8 @@ class HubApp:
                 )
             else:
                 logger.info(
-                    "HubApp: DynamoDB already has ignore rules — skipping seed "
-                    "(baseline=%d rules from config)",
+                    "HubApp: not seeding ignore rules — store already populated "
+                    "or no config rules to seed (baseline=%d rules from config)",
                     len(self._ignore_baseline),
                 )
         except Exception:
@@ -1601,8 +1630,8 @@ class HubApp:
                 )
             else:
                 logger.info(
-                    "HubApp: DynamoDB already has routing rules — skipping seed "
-                    "(baseline=%d rules from config)",
+                    "HubApp: not seeding routing rules — store already populated "
+                    "or no config rules to seed (baseline=%d rules from config)",
                     len(self._routing_baseline),
                 )
         except Exception:

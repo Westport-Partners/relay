@@ -33,6 +33,9 @@
 #   RELAY_ECS_EXECUTION_ROLE_ARN  BYOR: pre-provisioned ECS execution role ARN
 #                       (BYOR activates only when BOTH role ARNs are set)
 #   RELAY_VPC_ID        BYOV: existing VPC id to import (else a VPC is created)
+#   RELAY_CPU_ARCH      X86_64 | ARM64 — override the auto-detected build-host
+#                       arch used for the Fargate RuntimePlatform (default: match
+#                       the host running the build, via uname -m)
 #
 # Build-time-only env vars (NOT passed as CDK context flags):
 #   RELAY_CONFIG_DIR    path to a team's live local config directory
@@ -214,6 +217,17 @@ relay_build_context() {
   [ -n "${RELAY_ENABLE_DIRECT_SMS:-}" ] && ctx="${ctx} -c relay:enable_direct_sms=${RELAY_ENABLE_DIRECT_SMS}"
   # Container log level (LOG_LEVEL in the container). Default INFO in the stack.
   [ -n "${RELAY_LOG_LEVEL:-}" ] && ctx="${ctx} -c relay:log_level=${RELAY_LOG_LEVEL}"
+  # CPU architecture of the built image. relay-build-hub-image.sh builds a native
+  # image for the build host; the Fargate task def must declare a matching
+  # RuntimePlatform or an ARM64 image fails at launch with "exec format error".
+  # Auto-detect from the build host (uname -m); RELAY_CPU_ARCH overrides (e.g. to
+  # deploy an x86 image built via buildx on an arm host, or vice versa).
+  _detected_arch="$(uname -m 2>/dev/null || echo x86_64)"
+  case "${_detected_arch}" in
+    aarch64|arm64) _cpu_arch_default="ARM64" ;;
+    *)             _cpu_arch_default="X86_64" ;;
+  esac
+  ctx="${ctx} -c relay:cpu_arch=${RELAY_CPU_ARCH:-${_cpu_arch_default}}"
   # ALB exposure: unset => stack default (internal). Pass through only when set so
   # the stack's internal-by-default behavior stays authoritative for everyone else.
   [ -n "${RELAY_INTERNAL_ALB:-}" ] && ctx="${ctx} -c relay:internal_alb=${RELAY_INTERNAL_ALB}"

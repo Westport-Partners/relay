@@ -18,6 +18,7 @@ For architecture, guardrails, and the config/PII split, read [`AGENTS.md`](../AG
 | [`deploy-byor.md`](deploy-byor.md) | You are deploying into a locked-down account that prohibits creating IAM roles or VPCs — you supply pre-provisioned role + VPC ARNs. |
 | [`configure.md`](configure.md) | You need to edit routing/escalation config, add contacts, build the on-call schedule, wire a GitLab config source, or set up OIDC auth. |
 | [`troubleshoot-deploy.md`](troubleshoot-deploy.md) | A deploy is failing or the deployed service is unhealthy and you need to diagnose it without making things worse. |
+| [`upgrade-aws-cli.md`](upgrade-aws-cli.md) | Preflight warns the AWS CLI is too old, or you want the opt-in `RELAY_CFN_MODE=EXPRESS` fast deploy (needs AWS CLI ≥ 2.35). Detect → upgrade → verify. |
 | [`operate-incident.md`](operate-incident.md) | A live incident is in progress and you need to work the dashboard, HTTP API, or integration settings. |
 | [`author-adapter.md`](author-adapter.md) | You are adding a new external integration (ticketing, chat, etc.) following the auto-discovery adapter convention. |
 | [`author-skill.md`](author-skill.md) | You are adding a new AI investigation skill pack (a read-only `probe.sh` + `SKILL.md`) to the `skills/` runtime pack. |

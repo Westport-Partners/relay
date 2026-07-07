@@ -107,6 +107,19 @@ and then walks the judgment items below against the actual diff.
 
 - [ ] **Adjacent bugs:** anything broken near your change that you didn't fix is
       filed or flagged, not silently absorbed.
+- [ ] **Fails loud, not silent:** if the change touches a delivery/side-effect
+      path (paging, SNS/SES publish, ticket create, federation emit, config
+      seed), a misconfiguration or permission denial must surface — a log
+      `error`/`warning`, a non-2xx, or a readiness signal — not a silent success.
+      A handler that returns `{"ok": true}` while delivering nothing is the
+      failure mode this project has been bitten by; call it out explicitly.
+- [ ] **Off-happy-path considered:** our sandbox accounts are permissive and our
+      build arch usually matches the target, so blockers hide until a real
+      locked-down / cross-arch deploy. For infra/deploy/IAM/container changes,
+      state how it behaves under BYOR (denied `iam:CreateRole`/`ec2:CreateVpc`),
+      a non-x86 build host, and a fresh (unseeded) install — or why those don't
+      apply. Where a check can be automated (a `resolve_*` unit test, a synth
+      assertion), add it; where it can't, file an issue.
 
 ## What makes a good PR
 

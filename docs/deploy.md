@@ -61,6 +61,17 @@ To bake in your team's config files instead of the in-repo defaults, set `RELAY_
 to the directory that holds your `*.yaml` files before running the script. The originals
 are restored automatically after the build even if the build fails.
 
+The build uses Docker's default bridge network. On WSL2, VPNs, and locked-down corporate
+networks the bridge often can't resolve DNS during `RUN` steps (e.g. `apt-get`) even when
+the host has connectivity; set `DOCKER_BUILD_NETWORK=host` to build against the host's
+network stack instead. It only affects build-time steps; the pushed image is identical.
+
+**CPU architecture.** The image is built for the build host's architecture. The deploy
+scripts auto-detect it (`relay-context.sh` → `relay:cpu_arch`) and set the Fargate task's
+`RuntimePlatform` to match, so an aarch64 host deploys ARM64 tasks with no operator action
+— otherwise the task dies at launch with `exec format error`. Override with `RELAY_CPU_ARCH`
+(`X86_64` | `ARM64`), e.g. when cross-building.
+
 `RelayComputeStack` **fails fast at synth** if `RELAY_HUB_IMAGE_URI` is unset or contains
 `amazonlinux`/`PLACEHOLDER`. Build the image first; never skip this step.
 
@@ -381,6 +392,14 @@ reference.
 | `RELAY_HUB_SCOPE` | `local` (team) / `central` (fed-hub) | `local` \| `local-federated` \| `central` |
 | `RELAY_UPSTREAM_HUB_BUS_ARN` | — | Federated bus ARN; required when `RELAY_HUB_SCOPE=local-federated`. |
 
+### Image build (`relay-build-hub-image.sh`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `IMAGE_TAG` | git short SHA | Image tag. A new tag is what triggers an ECS roll; rebuilding the same tag does not. |
+| `DOCKER_BUILD_NETWORK` | — | Value forwarded to `docker build --network=<v>`. Unset uses Docker's default bridge; set `host` to work around WSL2/VPN/locked-down bridge networks that can't resolve DNS during `RUN` steps. |
+| `RELAY_CPU_ARCH` | auto (`uname -m`) | Override the detected build-host arch (`X86_64` \| `ARM64`). Sets the Fargate task `RuntimePlatform` via `relay:cpu_arch` so the task matches the image; a mismatch fails at launch with `exec format error`. |
+
 ### Networking
 
 | Variable | Default | Description |
@@ -397,7 +416,7 @@ reference.
 | `RELAY_LOG_LEVEL` | `INFO` | Container log level |
 | `RELAY_UI_AUTH_MODE` | `none` | UI auth: `none` (public read-only) \| `alb` \| `dev` |
 | `RELAY_UI_DEV_USER` | — | Dev username when `RELAY_UI_AUTH_MODE=dev` |
-| `RELAY_CONFIG_SOURCE` | — | Set to `local` to bake the bundled `config/` into the image |
+| `RELAY_CONFIG_SOURCE` | `local` | Config source. Defaults to `local` (bundled `config/` at `/app/config`) so a fresh hub seeds its routing/ignore rules on first boot; set to `gitlab` for a GitLab config source |
 
 ### Node self-identity (tile key)
 

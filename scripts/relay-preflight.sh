@@ -114,13 +114,18 @@ _install_cmd() {
 }
 
 # AWS CLI v2 official curl-installer URL, arch-aware.
+#   _aws_install_cmd            → fresh install (`./aws/install`)
+#   _aws_install_cmd --update   → upgrade in place (`./aws/install --update`),
+#                                 which is required when a v2 is already present
+#                                 (a plain install aborts with "already exists").
 _aws_install_cmd() {
-  local zip_name
+  local zip_name update_flag=""
+  [ "${1:-}" = "--update" ] && update_flag=" --update"
   case "${_ARCH}" in
     aarch64|arm64) zip_name="awscli-exe-linux-aarch64.zip" ;;
     *)             zip_name="awscli-exe-linux-x86_64.zip" ;;
   esac
-  echo "curl -fsSL https://awscli.amazonaws.com/${zip_name} -o /tmp/awscliv2.zip && unzip /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install"
+  echo "curl -fsSL https://awscli.amazonaws.com/${zip_name} -o /tmp/awscliv2.zip && unzip -o /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install${update_flag}"
 }
 
 # ---------------------------------------------------------------------------
@@ -207,6 +212,19 @@ if _aws_ver_line="$(aws --version 2>&1)"; then
   if [ "${_aws_maj:-0}" -ge 2 ]; then
     _record PASS "aws-cli" "aws-cli ${_aws_ver} (v2)"
     _progress "  aws CLI ${_aws_ver}"
+    # CloudFormation Express Mode (--deployment-config) landed in aws-cli 2.35.
+    # It powers the opt-in RELAY_CFN_MODE=EXPRESS fast path in
+    # relay-deploy-direct.sh, so this is a WARN (feature unavailable), not a FAIL:
+    # the default STANDARD deploy works on any v2. See prompts/upgrade-aws-cli.md.
+    if _ver_ge "${_aws_ver}" 2 35; then
+      _record PASS "aws-cli-express" "aws-cli ${_aws_ver} supports CloudFormation Express Mode (>= 2.35)"
+      _progress "  aws CLI ${_aws_ver}: Express Mode supported"
+    else
+      _record WARN "aws-cli-express" \
+        "aws-cli ${_aws_ver} predates CloudFormation Express Mode (need >= 2.35)" \
+        "Optional: to use the faster RELAY_CFN_MODE=EXPRESS deploy path, upgrade the AWS CLI. Run the AI runbook prompts/upgrade-aws-cli.md, or: $(_aws_install_cmd --update). The default STANDARD deploy works without this."
+      _progress "  aws CLI ${_aws_ver}: no Express Mode (< 2.35) — WARN (optional)"
+    fi
   else
     _record FAIL "aws-cli" "aws-cli ${_aws_ver} (v1 — v2 required)" "$(_aws_install_cmd)"
     _progress "  aws CLI ${_aws_ver}: v1 detected — FAIL"
