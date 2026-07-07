@@ -844,10 +844,10 @@ class RelayComputeStack(Stack):
         # BYOR inline-policy outputs (paste onto pre-provisioned roles).
         if byor_mode:
             self._emit_byor_outputs(
-                fleet_table=fleet_table,
-                ingest_queue=ingest_queue,
-                central_paging_topic=central_paging_topic,
-                paging_topic_arn=paging_topic_arn,
+                team_name=team_name,
+                role=role,
+                task_role_arn=ecs_task_role_arn,
+                region=self.node.try_get_context("relay:aws_region") or self.region,
                 resolved_scope=resolved_scope,
                 central_hub_bus_arn=central_hub_bus_arn,
                 enable_direct_sms=enable_direct_sms,
@@ -866,10 +866,10 @@ class RelayComputeStack(Stack):
     def _emit_byor_outputs(
         self,
         *,
-        fleet_table: dynamodb.ITable,
-        ingest_queue: sqs.IQueue,
-        central_paging_topic: sns.ITopic,
-        paging_topic_arn: str,
+        team_name: str,
+        role: str,
+        task_role_arn: str,
+        region: str,
         resolved_scope: str,
         central_hub_bus_arn: str,
         enable_direct_sms: bool,
@@ -877,10 +877,55 @@ class RelayComputeStack(Stack):
         ai_api_key_secret_name: str,
         resolve_alarm_tags: bool,
     ) -> None:
-        """Emit inline-policy + trust JSON for the two pre-provisioned ECS roles."""
+        """Emit inline-policy + trust JSON for the two pre-provisioned ECS roles.
+
+        The Resource ARNs are built as LITERAL strings, NOT from construct
+        ``.arn`` token attributes. Two things would otherwise leave the output
+        unpasteable:
+
+        - A cross-stack construct ARN (the imported data-stack table, the
+          same-stack ingest queue) serializes as an ``Fn::ImportValue`` /
+          ``Fn::GetAtt`` intrinsic.
+        - ``self.partition`` / ``self.account`` / ``self.region`` are themselves
+          CDK *tokens* (``{"Ref": "AWS::Partition"}`` …) in an env-agnostic
+          synth — they only resolve at deploy time, so ``json.dumps`` on them
+          also yields intrinsics.
+
+        Both would land in the CfnOutput as CloudFormation JSON an administrator
+        cannot paste into the IAM console. Instead we derive the partition +
+        account from the BYOR task-role ARN (always a concrete literal the
+        operator supplied) and take the region from context, so the emitted
+        policy is a plain, fully-resolved JSON string. The names below mirror
+        data_stack.py (table/topics) and the ingest queue name in this stack.
+        """
+        # Partition + account come from the operator-supplied task-role ARN,
+        # which is always a literal: arn:<partition>:iam::<account>:role/<name>.
+        _arn_parts = task_role_arn.split(":")
+        partition = _arn_parts[1] if len(_arn_parts) > 4 else "aws"
+        account = _arn_parts[4] if len(_arn_parts) > 4 else self.account
+
+        # Deterministic resource names (mirror data_stack.py + this stack).
+        table_name = "relay-hub-fleet" if role == "federated-hub" else f"relay-{team_name}"
+        paging_topic_name = f"relay-{team_name}-paging"
+        central_paging_topic_name = (
+            "relay-hub-central-paging"
+            if role == "federated-hub"
+            else f"relay-{team_name}-central-paging"
+        )
+        table_arn = (
+            f"arn:{partition}:dynamodb:{region}:{account}:table/{table_name}"
+        )
+        paging_topic_arn_literal = (
+            f"arn:{partition}:sns:{region}:{account}:{paging_topic_name}"
+        )
+        central_paging_topic_arn_literal = (
+            f"arn:{partition}:sns:{region}:{account}:{central_paging_topic_name}"
+        )
+        ingest_queue_arn = (
+            f"arn:{partition}:sqs:{region}:{account}:relay-hub-ingest"
+        )
         log_group_arn = (
-            f"arn:{self.partition}:logs:{self.region}:{self.account}:"
-            "log-group:/relay/hub:*"
+            f"arn:{partition}:logs:{region}:{account}:log-group:/relay/hub:*"
         )
         task_statements: list[dict[str, Any]] = [
             {
@@ -891,13 +936,13 @@ class RelayComputeStack(Stack):
                     "dynamodb:Query", "dynamodb:DeleteItem", "dynamodb:Scan",
                     "dynamodb:BatchWriteItem", "dynamodb:BatchGetItem",
                 ],
-                "Resource": [fleet_table.table_arn, f"{fleet_table.table_arn}/index/*"],
+                "Resource": [table_arn, f"{table_arn}/index/*"],
             },
             {
                 "Sid": "RelayHubPaging",
                 "Effect": "Allow",
                 "Action": ["sns:Publish"],
-                "Resource": [central_paging_topic.topic_arn, paging_topic_arn],
+                "Resource": [central_paging_topic_arn_literal, paging_topic_arn_literal],
             },
             {
                 # Contacts screen subscription state + Subscribe button (#78): the
@@ -907,7 +952,7 @@ class RelayComputeStack(Stack):
                 "Sid": "RelayHubPagingSubscriptions",
                 "Effect": "Allow",
                 "Action": ["sns:ListSubscriptionsByTopic", "sns:Subscribe"],
-                "Resource": [paging_topic_arn],
+                "Resource": [paging_topic_arn_literal],
             },
             {
                 "Sid": "RelayHubIngestConsume",
@@ -916,7 +961,7 @@ class RelayComputeStack(Stack):
                     "sqs:ReceiveMessage", "sqs:DeleteMessage",
                     "sqs:GetQueueAttributes", "sqs:GetQueueUrl",
                 ],
-                "Resource": ingest_queue.queue_arn,
+                "Resource": ingest_queue_arn,
             },
         ]
         if resolve_alarm_tags:
@@ -941,7 +986,7 @@ class RelayComputeStack(Stack):
                 # See the non-BYOR grant above: direct-to-phone Publish carries no
                 # sns:Protocol context key, so scope by region, not protocol.
                 "Resource": "*",
-                "Condition": {"StringEquals": {"aws:RequestedRegion": self.region}},
+                "Condition": {"StringEquals": {"aws:RequestedRegion": region}},
             })
         if ai_uses_bedrock:
             task_statements.append({
@@ -949,8 +994,8 @@ class RelayComputeStack(Stack):
                 "Effect": "Allow",
                 "Action": ["bedrock:InvokeModel", "bedrock:Converse"],
                 "Resource": [
-                    f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
-                    "arn:aws:bedrock:*::foundation-model/*",
+                    f"arn:{partition}:bedrock:*:{account}:inference-profile/*",
+                    f"arn:{partition}:bedrock:*::foundation-model/*",
                 ],
             })
         if ai_api_key_secret_name:
@@ -959,8 +1004,8 @@ class RelayComputeStack(Stack):
                 "Effect": "Allow",
                 "Action": ["secretsmanager:GetSecretValue"],
                 "Resource": (
-                    f"arn:{self.partition}:secretsmanager:{self.region}:"
-                    f"{self.account}:secret:{ai_api_key_secret_name}*"
+                    f"arn:{partition}:secretsmanager:{region}:"
+                    f"{account}:secret:{ai_api_key_secret_name}*"
                 ),
             })
         task_policy = {"Version": "2012-10-17", "Statement": task_statements}
@@ -989,7 +1034,7 @@ class RelayComputeStack(Stack):
                 "Effect": "Allow",
                 "Principal": {"Service": "ecs-tasks.amazonaws.com"},
                 "Action": "sts:AssumeRole",
-                "Condition": {"StringEquals": {"aws:SourceAccount": self.account}},
+                "Condition": {"StringEquals": {"aws:SourceAccount": account}},
             }],
         }
         cdk.CfnOutput(self, "ByorTaskRoleInlinePolicy", value=json.dumps(task_policy),

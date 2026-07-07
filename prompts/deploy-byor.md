@@ -50,11 +50,16 @@ There is no Lambda role, no EventBridge Scheduler role, and no `iam:PassRole` gr
 
 ---
 
-## `cdk deploy` vs. `relay-deploy-direct.sh`
+## The only deploy path on locked-down accounts: `relay-deploy-direct.sh`
 
-`cdk deploy` passes the CDK bootstrap execution role to CloudFormation via `iam:PassRole`. Many regulated accounts deny this, so `cdk deploy` fails immediately.
+On this path you deploy **exclusively** with `scripts/relay-deploy-direct.sh`. Do
+**not** use `cdk deploy` (nor `relay-deploy.sh`, which wraps it): `cdk deploy`
+passes the CDK bootstrap execution role to CloudFormation via `iam:PassRole`,
+which locked-down accounts deny — so it fails immediately.
 
-Use **`scripts/relay-deploy-direct.sh`** instead. It synthesizes templates locally (no AWS writes), then submits them with `aws cloudformation deploy` using your own credentials — CloudFormation acts as the caller, no execution role is passed:
+`relay-deploy-direct.sh` synthesizes templates locally (no AWS writes), then
+submits them with `aws cloudformation deploy` using your own credentials.
+CloudFormation acts as the caller — **no bootstrap execution role is passed**:
 
 ```bash
 # Data plane first — creates zero IAM roles and zero VPC
@@ -64,7 +69,71 @@ RELAY_STACK_SELECTOR=data \
 ./scripts/relay-deploy-direct.sh
 ```
 
-> CDK bootstrap is **not required** for this path. `relay-deploy-direct.sh` never calls the bootstrap execution role.
+> CDK bootstrap is **not required** for this path. The stacks synth with the
+> bootstrap-version rule suppressed, so the templates carry no `/cdk-bootstrap`
+> SSM lookup and `relay-deploy-direct.sh` never touches the bootstrap role.
+
+> **`iam:PassRole` is still required — but narrowly.** "No bootstrap role is
+> passed" is *not* the same as "no PassRole at all." Registering the ECS task
+> definition requires the **deploy identity** to `iam:PassRole` the task role and
+> execution role to `ecs-tasks.amazonaws.com` — this is intrinsic to ECS and no
+> deploy method avoids it. Locked-down accounts handle this by allowing
+> `iam:PassRole` **scoped to exactly those two role ARNs** with an
+> `iam:PassedToService = ecs-tasks.amazonaws.com` condition, while denying broad
+> PassRole. See **Deploy-identity permissions** below. If your account denies
+> `iam:PassRole` outright with no scoped exception, the ECS/Fargate path is not
+> possible — run the released container directly instead
+> ([`docs/local-dev.md`](../docs/local-dev.md), "Run on EC2 against real AWS").
+
+---
+
+## Deploy-identity permissions
+
+BYOR covers the two **runtime** roles (task + execution) via the synth-emitted
+inline policies below. Separately, the **deploy identity** — the principal that
+runs `relay-deploy-direct.sh` (an instance profile on the deploy box, or your
+CLI credentials) — needs permission to create the stacks' resources. In a
+locked-down account an administrator attaches this as an inline policy on your
+pre-provisioned deploy/instance role:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RelayDirectDeploy",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:*", "dynamodb:*", "sns:*", "sqs:*", "logs:*",
+        "events:*", "ecr:*", "ecs:*", "elasticloadbalancing:*",
+        "application-autoscaling:*", "cloudwatch:*",
+        "ec2:Describe*", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress", "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress", "ec2:RevokeSecurityGroupEgress",
+        "ec2:CreateTags", "ec2:DeleteTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RelayPassRuntimeRolesToEcs",
+      "Effect": "Allow",
+      "Action": ["iam:PassRole"],
+      "Resource": [
+        "arn:aws:iam::<account>:role/<task-role>",
+        "arn:aws:iam::<account>:role/<execution-role>"
+      ],
+      "Condition": {
+        "StringEquals": {"iam:PassedToService": "ecs-tasks.amazonaws.com"}
+      }
+    }
+  ]
+}
+```
+
+The `RelayPassRuntimeRolesToEcs` statement is the one locked-down accounts most
+often miss — without it the compute deploy rolls back at
+`AWS::ECS::TaskDefinition` with an `iam:PassRole` `AccessDenied`. (`ec2:CreateVpc`
+is **not** needed — the VPC is imported via BYOV.)
 
 ---
 
@@ -128,7 +197,9 @@ Both roles need `ecs-tasks.amazonaws.com` as a trusted principal. The `ByorEcsRo
 
 ## Step 4 — Deploy with the same context keys
 
-**If `iam:PassRole` is denied** — use `relay-deploy-direct.sh`:
+Deploy the data stack first (no IAM, no VPC), then the compute stack with the
+BYOR/BYOV context. Always use `relay-deploy-direct.sh` on this path — never
+`relay-deploy.sh`/`cdk deploy` (see the path note above).
 
 ```bash
 # Data stack first (no IAM, no VPC)
@@ -148,17 +219,9 @@ RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
   -c relay:vpc_id=$VPC_ID
 ```
 
-**If only `iam:CreateRole` / `ec2:CreateVpc` are denied (but `iam:PassRole` is allowed)** — use `relay-deploy.sh`:
-
-```bash
-RELAY_DEPLOY_TYPE=team \
-RELAY_TEAM_NAME=<team> \
-RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
-./scripts/relay-deploy.sh \
-  -c relay:ecs_task_role_arn=$TASK_ROLE_ARN \
-  -c relay:ecs_execution_role_arn=$EXEC_ROLE_ARN \
-  -c relay:vpc_id=$VPC_ID
-```
+The deploy identity needs the inline policy from **Deploy-identity permissions**
+above (including the scoped `iam:PassRole`); the compute step fails at the ECS
+task definition without it.
 
 ---
 

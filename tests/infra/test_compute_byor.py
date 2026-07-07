@@ -119,12 +119,16 @@ def _synth_compute_permissive(extra_context: dict[str, str] | None = None) -> as
 
 
 def _flatten_fn_join(value: Any) -> str:
-    """Flatten a CloudFormation ``Fn::Join`` value to a string.
+    """Return an inline-policy output as a searchable string.
 
-    Cross-stack token fragments (dicts) are skipped; only literal string
-    fragments contribute to the result.  This is sufficient for asserting
-    that well-known Sid strings are present in an inline-policy output.
+    BYOR inline-policy outputs are now emitted as plain, fully-resolved JSON
+    strings (see ``test_byor_task_policy_is_literal_json_no_intrinsics``), so a
+    string is returned as-is. The legacy ``Fn::Join`` dict form is still handled
+    (literal fragments concatenated, token dicts skipped) so the helper stays
+    robust if any output regresses to intrinsics.
     """
+    if isinstance(value, str):
+        return value
     parts: list[str] = []
     for fragment in value.get("Fn::Join", ["", []])[1]:
         if isinstance(fragment, str):
@@ -193,6 +197,42 @@ def test_byor_task_policy_contains_required_sids() -> None:
         "RelayHubIngestConsume",
     ):
         assert sid in text, f"Required Sid '{sid}' missing from ByorTaskRoleInlinePolicy"
+
+
+def test_byor_task_policy_is_literal_json_no_intrinsics() -> None:
+    """ByorTaskRoleInlinePolicy must be a plain, pasteable JSON string.
+
+    An administrator copies this output verbatim into the IAM console. If the
+    value is built from CDK construct ``.arn`` token attributes, cross-stack
+    references serialize as ``Fn::ImportValue`` / ``Fn::GetAtt`` intrinsics and
+    the output is a CloudFormation object the admin cannot paste. The resource
+    ARNs must instead be literal strings built from account/region + the
+    deterministic resource names, so the CfnOutput value is a plain JSON string
+    that parses and carries fully-resolved ARNs.
+    """
+    template = _synth_compute()
+    outputs = template.find_outputs("*")
+    value = outputs["ByorTaskRoleInlinePolicy"]["Value"]
+
+    assert isinstance(value, str), (
+        "ByorTaskRoleInlinePolicy must be a plain JSON string, not a "
+        f"CloudFormation intrinsic ({type(value).__name__}). It embeds "
+        "unresolved Fn::ImportValue/Fn::GetAtt and cannot be pasted into IAM."
+    )
+    policy = json.loads(value)  # must parse as JSON
+    resources: list[str] = []
+    for stmt in policy["Statement"]:
+        res = stmt["Resource"]
+        resources.extend(res if isinstance(res, list) else [res])
+    # Every ARN resource is a fully-resolved literal — no CFN intrinsic markers.
+    for res in resources:
+        assert "Fn::" not in res and "${Token" not in res, (
+            f"Resource ARN in ByorTaskRoleInlinePolicy is unresolved: {res!r}"
+        )
+    # Spot-check the data-plane ARNs resolved to the expected literal names.
+    joined = " ".join(resources)
+    assert "table/relay-" in joined
+    assert f":{_ACCOUNT}:" in joined, "ARNs must contain the literal account id"
 
 
 def test_byor_execution_policy_contains_ecr_and_logs() -> None:

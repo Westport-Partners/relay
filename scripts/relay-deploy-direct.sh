@@ -68,13 +68,36 @@ relay_build_context
 # (AWS::EarlyValidation::ResourceExistenceCheck). Catch that conflict here with
 # a clear message rather than a confusing CFN error mid-deploy.
 #
-# Skip with RELAY_SKIP_CLI_GUARD=1 only if you know what you are doing (e.g.
-# you are intentionally migrating partial resources or running in a test harness).
+# IMPORTANT: only resources that exist AND are NOT already owned by a Relay
+# CloudFormation stack are treated as CLI orphans. On the documented two-step
+# path the data plane is deployed first (RelayDataStack creates the table +
+# topics), then the compute stack; a naive "does it exist?" check would flag
+# those stack-managed resources and block the very sequence the docs prescribe
+# (and every re-deploy). CloudFormation cleanly UPDATEs a resource its own stack
+# already owns, so we skip any resource whose owning stack is present.
+#
+# Skip entirely with RELAY_SKIP_CLI_GUARD=1 only if you know what you are doing
+# (e.g. intentionally migrating partial resources or running in a test harness).
+_relay_stack_exists() {
+  # True when a CloudFormation stack exists in a non-deleted state.
+  local _name="$1" _status
+  _status="$(aws cloudformation describe-stacks --stack-name "${_name}" \
+    --region "${AWS_REGION}" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)" || return 1
+  [ -n "${_status}" ] && [ "${_status}" != "None" ] && [ "${_status}" != "DELETE_COMPLETE" ]
+}
+
 _cli_preflight_check() {
   if [ "${RELAY_SKIP_CLI_GUARD:-0}" = "1" ]; then
     echo "WARN: RELAY_SKIP_CLI_GUARD=1 — skipping CLI-resource conflict check." >&2
     return 0
   fi
+
+  # Resources owned by an existing Relay stack are managed by CloudFormation,
+  # not CLI orphans — the data plane (table + topics) lives in RelayDataStack,
+  # and the ingest queues + alarm rule live in RelayComputeStack.
+  local _data_managed=0 _compute_managed=0
+  _relay_stack_exists "RelayDataStack" && _data_managed=1
+  _relay_stack_exists "RelayComputeStack" && _compute_managed=1
 
   # Resource names — must match relay-provision-cli.sh exactly.
   local _table="relay-${RELAY_TEAM_NAME:-}"
@@ -86,38 +109,46 @@ _cli_preflight_check() {
 
   local _found=()
 
-  # DynamoDB table.
-  if aws dynamodb describe-table --table-name "${_table}" \
-      --region "${AWS_REGION}" >/dev/null 2>&1; then
-    _found+=("DynamoDB table: ${_table}")
+  # Data-plane resources (table + topics) — only a conflict if RelayDataStack
+  # does NOT already own them.
+  if [ "${_data_managed}" -eq 0 ]; then
+    # DynamoDB table.
+    if aws dynamodb describe-table --table-name "${_table}" \
+        --region "${AWS_REGION}" >/dev/null 2>&1; then
+      _found+=("DynamoDB table: ${_table}")
+    fi
+
+    # SNS paging topics (check by ARN — the describe-topic call is cheap).
+    local _paging_arn="arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:${_paging_topic}"
+    local _central_arn="arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:${_central_topic}"
+    if aws sns get-topic-attributes --topic-arn "${_paging_arn}" \
+        --region "${AWS_REGION}" >/dev/null 2>&1; then
+      _found+=("SNS topic: ${_paging_topic}")
+    fi
+    if aws sns get-topic-attributes --topic-arn "${_central_arn}" \
+        --region "${AWS_REGION}" >/dev/null 2>&1; then
+      _found+=("SNS topic: ${_central_topic}")
+    fi
   fi
 
-  # SNS paging topics (check by ARN — the describe-topic call is cheap).
-  local _paging_arn="arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:${_paging_topic}"
-  local _central_arn="arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:${_central_topic}"
-  if aws sns get-topic-attributes --topic-arn "${_paging_arn}" \
-      --region "${AWS_REGION}" >/dev/null 2>&1; then
-    _found+=("SNS topic: ${_paging_topic}")
-  fi
-  if aws sns get-topic-attributes --topic-arn "${_central_arn}" \
-      --region "${AWS_REGION}" >/dev/null 2>&1; then
-    _found+=("SNS topic: ${_central_topic}")
-  fi
+  # Compute-plane resources (ingest queues + alarm rule) — only a conflict if
+  # RelayComputeStack does NOT already own them.
+  if [ "${_compute_managed}" -eq 0 ]; then
+    # SQS queues (get-queue-url returns non-zero when the queue doesn't exist).
+    if aws sqs get-queue-url --queue-name "${_ingest_queue}" \
+        --region "${AWS_REGION}" >/dev/null 2>&1; then
+      _found+=("SQS queue: ${_ingest_queue}")
+    fi
+    if aws sqs get-queue-url --queue-name "${_ingest_dlq}" \
+        --region "${AWS_REGION}" >/dev/null 2>&1; then
+      _found+=("SQS queue: ${_ingest_dlq}")
+    fi
 
-  # SQS queues (get-queue-url returns non-zero when the queue doesn't exist).
-  if aws sqs get-queue-url --queue-name "${_ingest_queue}" \
-      --region "${AWS_REGION}" >/dev/null 2>&1; then
-    _found+=("SQS queue: ${_ingest_queue}")
-  fi
-  if aws sqs get-queue-url --queue-name "${_ingest_dlq}" \
-      --region "${AWS_REGION}" >/dev/null 2>&1; then
-    _found+=("SQS queue: ${_ingest_dlq}")
-  fi
-
-  # EventBridge rule.
-  if aws events describe-rule --name "${_alarm_rule}" \
-      --region "${AWS_REGION}" >/dev/null 2>&1; then
-    _found+=("EventBridge rule: ${_alarm_rule}")
+    # EventBridge rule.
+    if aws events describe-rule --name "${_alarm_rule}" \
+        --region "${AWS_REGION}" >/dev/null 2>&1; then
+      _found+=("EventBridge rule: ${_alarm_rule}")
+    fi
   fi
 
   if [ "${#_found[@]}" -gt 0 ]; then

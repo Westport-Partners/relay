@@ -13,11 +13,23 @@ and creates nothing.
 > Lambda execution role, no EventBridge Scheduler invoke role, and no `PassRole` grant in the
 > task definition.
 
-> **`cdk deploy` itself needs `iam:PassRole`.** BYOR/BYOV remove *runtime* role and
-> VPC creation, but `cdk deploy` still passes the CDK bootstrap execution role to
-> CloudFormation. If your account denies `iam:PassRole`, deploy with
-> `scripts/relay-deploy-direct.sh` (synth → `aws cloudformation deploy` with your own
-> credentials) — see [deploy.md → Locked-down accounts](deploy.md#locked-down-accounts-iampassrole-denied).
+> **Deploy with `scripts/relay-deploy-direct.sh` — not `cdk deploy`.** `cdk deploy`
+> passes the CDK bootstrap execution role to CloudFormation via `iam:PassRole`, which
+> locked-down accounts deny, so it fails immediately. `relay-deploy-direct.sh` synths
+> locally then submits with `aws cloudformation deploy` using your own credentials — no
+> bootstrap role is passed, and no CDK bootstrap is required. This is the only supported
+> deploy path here; every example below uses it.
+>
+> **`iam:PassRole` is still required — but scoped, not blanket.** "No bootstrap role is
+> passed" does **not** mean "no PassRole at all." Registering the ECS task definition
+> requires the **deploy identity** to `iam:PassRole` the task and execution roles to
+> `ecs-tasks.amazonaws.com` — this is intrinsic to ECS; no deploy tool avoids it.
+> Locked-down accounts allow this by scoping `iam:PassRole` to exactly those two role
+> ARNs with an `iam:PassedToService = ecs-tasks.amazonaws.com` condition (see
+> [Deploy principal permissions](#deploy-principal-permissions)). If your account denies
+> `iam:PassRole` outright with no scoped exception, the ECS/Fargate path is impossible —
+> run the released container directly instead ([local-dev.md](local-dev.md)).
+>
 > To evaluate Relay without deploying ECS at all, `scripts/relay-provision-cli.sh`
 > creates just the data plane + alarm ingest with plain AWS CLI calls.
 
@@ -152,11 +164,22 @@ Have an account administrator:
 
 ### 4. Deploy with the same context keys
 
+Deploy the data plane first (no IAM, no VPC), then the compute stack. Always use
+`relay-deploy-direct.sh`:
+
 ```bash
+# Data stack first
 RELAY_DEPLOY_TYPE=team \
 RELAY_TEAM_NAME=<team> \
+RELAY_STACK_SELECTOR=data \
+./scripts/relay-deploy-direct.sh
+
+# Then the compute stack with the BYOR/BYOV context
+RELAY_DEPLOY_TYPE=team \
+RELAY_TEAM_NAME=<team> \
+RELAY_STACK_SELECTOR=compute \
 RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
-./scripts/relay-deploy.sh \
+./scripts/relay-deploy-direct.sh \
   -c relay:ecs_task_role_arn=arn:aws:iam::<account>:role/<task-role> \
   -c relay:ecs_execution_role_arn=arn:aws:iam::<account>:role/<exec-role> \
   -c relay:vpc_id=vpc-<id>
@@ -175,7 +198,7 @@ RELAY_DEPLOY_TYPE=team \
 RELAY_TEAM_NAME=<team> \
 RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
 RELAY_STACK_SELECTOR=compute \
-./scripts/relay-deploy.sh \
+./scripts/relay-deploy-direct.sh \
   -c relay:ecs_task_role_arn=<task-role-arn> \
   -c relay:ecs_execution_role_arn=<exec-role-arn> \
   -c relay:vpc_id=<vpc-id>
@@ -229,6 +252,51 @@ error code.  Common BYOR failures:
 
 ## Deploy principal permissions
 
-The role that runs the deploy (human or CI runner) still needs permission to call
-CloudFormation and the services each stack provisions. In BYOR mode the stack does not create roles, so `iam:CreateRole` can be
-omitted from that policy — but all other permissions remain. Full reference: [infra/RUNNER_IAM.md](https://github.com/Westport-Partners/relay/blob/main/infra/RUNNER_IAM.md).
+The identity that runs the deploy — the deploy box's instance profile, or a CI runner,
+or your CLI credentials — needs permission to call CloudFormation and the services each
+stack provisions. In BYOR mode the stack does not create roles, so `iam:CreateRole` can be
+omitted; in BYOV mode `ec2:CreateVpc` is not needed either. But the deploy identity still
+needs the service actions for the compute stack (ECS, ELBv2, autoscaling, CloudWatch,
+security groups, logs, events, SQS, SNS, DynamoDB, ECR, CloudFormation) **and** a scoped
+`iam:PassRole`.
+
+An administrator attaches this as an inline policy on your pre-provisioned deploy/instance
+role:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RelayDirectDeploy",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:*", "dynamodb:*", "sns:*", "sqs:*", "logs:*",
+        "events:*", "ecr:*", "ecs:*", "elasticloadbalancing:*",
+        "application-autoscaling:*", "cloudwatch:*",
+        "ec2:Describe*", "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress", "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress", "ec2:RevokeSecurityGroupEgress",
+        "ec2:CreateTags", "ec2:DeleteTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RelayPassRuntimeRolesToEcs",
+      "Effect": "Allow",
+      "Action": ["iam:PassRole"],
+      "Resource": [
+        "arn:aws:iam::<account>:role/<task-role>",
+        "arn:aws:iam::<account>:role/<execution-role>"
+      ],
+      "Condition": {
+        "StringEquals": {"iam:PassedToService": "ecs-tasks.amazonaws.com"}
+      }
+    }
+  ]
+}
+```
+
+The `RelayPassRuntimeRolesToEcs` statement is the one most often missed — without it the
+compute deploy rolls back at `AWS::ECS::TaskDefinition` with an `iam:PassRole`
+`AccessDenied`. Full reference: [infra/RUNNER_IAM.md](https://github.com/Westport-Partners/relay/blob/main/infra/RUNNER_IAM.md).
