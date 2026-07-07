@@ -16,6 +16,14 @@
 #                       The image-internal path is always /app/config (set by
 #                       ENV RELAY_CONFIG_DIR in the Dockerfile); this var is only
 #                       a build-time source selector — it is NOT passed to CDK.
+#   DOCKER_BUILD_NETWORK — value forwarded to `docker build --network=<v>`.
+#                       Leave unset for Docker's default bridge network. On WSL2,
+#                       VPNs, and locked-down corporate networks the bridge often
+#                       can't resolve DNS or reach the internet during the
+#                       `RUN apt-get`/`pip install` steps, so the build fails with
+#                       "Temporary failure resolving ..." or pip timeouts. Set
+#                       DOCKER_BUILD_NETWORK=host to build against the host's
+#                       network stack, which inherits working DNS/egress.
 #
 # Outputs (stdout, last line):
 #   The fully-qualified ECR image URI. Hand it to the deploy via the
@@ -99,7 +107,15 @@ echo "" >&2
 echo "--- Building image ${LOCAL_TAG} ---" >&2
 # Bake build provenance into the image so the running Hub can report it.
 _BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
+# On WSL2 / VPNs / locked-down networks the default bridge network can't resolve
+# DNS during the RUN steps; DOCKER_BUILD_NETWORK=host works around it. See header.
+_BUILD_NETWORK_ARGS=()
+if [ -n "${DOCKER_BUILD_NETWORK:-}" ]; then
+  echo "Docker build network: ${DOCKER_BUILD_NETWORK}" >&2
+  _BUILD_NETWORK_ARGS=(--network "${DOCKER_BUILD_NETWORK}")
+fi
 docker build \
+  "${_BUILD_NETWORK_ARGS[@]}" \
   --build-arg "RELAY_BUILD_SHA=${IMAGE_TAG}" \
   --build-arg "RELAY_BUILD_TIME=${_BUILD_TIME}" \
   -t "${LOCAL_TAG}" "${RELAY_ROOT}"
