@@ -183,6 +183,50 @@ RELAY_STACK_SELECTOR=compute \
 
 ---
 
+## Verifying a BYOR deployment
+
+Once the container is running, hit the deep readiness endpoint to confirm every
+wired dependency is reachable and the task role has the required permissions.
+**This is the recommended first diagnostic step for any BYOR deployment.**
+
+```bash
+# Replace <DASHBOARD_URL> with the value of the DashboardUrl stack output.
+curl -s <DASHBOARD_URL>/health/ready | jq .
+```
+
+A healthy deployment returns:
+
+```json
+{
+  "status": "ok",
+  "checks": {
+    "dynamodb":             {"ok": true, "table": "relay-<team>-fleet"},
+    "sqs_ingest":           {"ok": true},
+    "sns_paging_topic":     {"ok": true},
+    "sns_direct_sms":       {"ok": true},
+    "config_loaded":        {"ok": true, "source": "local", "path": "/app/config"},
+    "ignore_rules_seeded":  {"ok": true, "count": 2},
+    "routing_rules_seeded": {"ok": true, "count": 8}
+  }
+}
+```
+
+If `status` is `"degraded"`, the failing check's `error` field names the AWS
+error code.  Common BYOR failures:
+
+| Failing check | Error | Fix |
+|---|---|---|
+| `dynamodb` | `AccessDeniedException` | Add `dynamodb:*` actions on the fleet table to `ByorTaskRoleInlinePolicy` |
+| `sqs_ingest` | `AccessDenied` | Add `sqs:ReceiveMessage` / `sqs:DeleteMessage` / `sqs:GetQueueAttributes` on the ingest queue |
+| `sns_paging_topic` | `AuthorizationError` | Add `sns:Publish` on the paging topic ARN |
+| `sns_direct_sms` | `AuthorizationError` | Add the `RelayHubDirectSms` statement from `ByorTaskRoleInlinePolicy` (requires `-c relay:enable_direct_sms=true` at synth time) |
+
+> **Note on `sns_direct_sms`:** This check always runs. If your deployment does
+> not use targeted per-contact SMS pages, an `ok: false` result here is
+> informational only. Direct SMS is an opt-in feature (`relay:enable_direct_sms`).
+
+---
+
 ## Deploy principal permissions
 
 The role that runs the deploy (human or CI runner) still needs permission to call

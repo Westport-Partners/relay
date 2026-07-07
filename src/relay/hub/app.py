@@ -97,6 +97,23 @@ def _scrub(value: object) -> str:
     """
     return str(value).replace("\r", "\\r").replace("\n", "\\n")
 
+
+def _ready_error(exc: Exception) -> str:
+    """Format an exception into a short, single-line readiness-check error string.
+
+    Extracts the AWS error code when available (e.g. ``AuthorizationError —
+    SNS:Publish denied on phone resources``) so the /health/ready response body
+    is actionable without requiring a log dive.
+    """
+    from botocore.exceptions import ClientError
+
+    if isinstance(exc, ClientError):
+        code = exc.response.get("Error", {}).get("Code", "ClientError")
+        msg = exc.response.get("Error", {}).get("Message", str(exc))
+        return f"{code} — {msg}"
+    return type(exc).__name__ + ": " + str(exc)
+
+
 # Map an incident's persisted state to the lifecycle event dispatched when the
 # Hub sees a genuine transition into that state over the bus. ACKNOWLEDGED and
 # RESOLVED are driven from their API endpoints (the Hub owns those transitions),
@@ -1919,6 +1936,159 @@ class HubApp:
         def health() -> dict[str, Any]:
             fleet_size = len(hub_state.fleet)
             return {"status": "ok", "role": "hub", "fleet_size": fleet_size}
+
+        # ----------------------------------------------------------------
+        # GET /health/ready — deep readiness probe
+        #
+        # Verifies that every dependency wired at deploy time is actually
+        # functional.  Designed to surface BYOR/locked-down IAM misconfigs
+        # at boot rather than during a live incident.
+        #
+        # All checks are cheap/bounded (describe/permission probes — no
+        # actual publishes or sends).  A failing dependency is reported as
+        # ok=false with a short error string; the endpoint never raises.
+        # status aggregates: "ok" if all checks pass, "degraded" otherwise.
+        # HTTP 200 is always returned so load-balancer health checks still
+        # pass (use /health for the ALB liveness probe).
+        # ----------------------------------------------------------------
+        @app.get("/health/ready")
+        def health_ready() -> dict[str, Any]:
+            checks: dict[str, Any] = {}
+
+            # --- DynamoDB: describe the fleet/incidents table ---
+            _dynamo_table = (
+                os.environ.get("RELAY_FLEET_TABLE_NAME")
+                or os.environ.get("RELAY_DYNAMO_INCIDENTS_TABLE")
+                or "relay-hub-fleet"
+            )
+            try:
+                _ddb = boto3.client("dynamodb")
+                _ddb.describe_table(TableName=_dynamo_table)
+                checks["dynamodb"] = {"ok": True, "table": _dynamo_table}
+            except Exception as exc:
+                checks["dynamodb"] = {
+                    "ok": False,
+                    "table": _dynamo_table,
+                    "error": _ready_error(exc),
+                }
+
+            # --- SQS ingest queue (only when a queue URL is configured) ---
+            _sqs_url = os.environ.get("RELAY_SQS_QUEUE_URL", "").strip()
+            if _sqs_url:
+                try:
+                    _sqs_c = boto3.client("sqs")
+                    _sqs_c.get_queue_attributes(
+                        QueueUrl=_sqs_url,
+                        AttributeNames=["ApproximateNumberOfMessages"],
+                    )
+                    checks["sqs_ingest"] = {"ok": True}
+                except Exception as exc:
+                    checks["sqs_ingest"] = {"ok": False, "error": _ready_error(exc)}
+            else:
+                checks["sqs_ingest"] = {
+                    "ok": True,
+                    "note": "not configured (local/dev runtime)",
+                }
+
+            # --- SNS paging topic (only when a topic ARN is configured) ---
+            _sns_topic = _resolve_paging_topic_arn()
+            if _sns_topic:
+                try:
+                    _sns_c = boto3.client("sns")
+                    _sns_c.get_topic_attributes(TopicArn=_sns_topic)
+                    checks["sns_paging_topic"] = {"ok": True}
+                except Exception as exc:
+                    checks["sns_paging_topic"] = {
+                        "ok": False,
+                        "error": _ready_error(exc),
+                    }
+            else:
+                checks["sns_paging_topic"] = {
+                    "ok": True,
+                    "note": "not configured — paging disabled",
+                }
+
+            # --- SNS direct-SMS IAM probe ---
+            # CheckIfPhoneNumberIsOptedOut is a cheap, read-only SNS call that
+            # exercises the phone-number resource path. In BYOR deployments where
+            # relay:enable_direct_sms=true was NOT set (and the
+            # RelayHubDirectSms inline policy statement is missing), this call
+            # returns AuthorizationError — exactly the error that would silence
+            # targeted SMS pages at incident time. The probe number (+15005550006)
+            # is a Twilio magic test number that SNS responds to without sending
+            # any real message.
+            try:
+                _sns_sms_c = boto3.client("sns")
+                _sns_sms_c.check_if_phone_number_is_opted_out(
+                    phoneNumber="+15005550006"
+                )
+                checks["sns_direct_sms"] = {"ok": True}
+            except Exception as exc:
+                checks["sns_direct_sms"] = {"ok": False, "error": _ready_error(exc)}
+
+            # --- Config source + loaded state ---
+            _cfg_source = os.environ.get(
+                "RELAY_CONFIG_SOURCE",
+                "local" if os.environ.get("RELAY_CONFIG_DIR") else "unknown",
+            )
+            _cfg_path = os.environ.get("RELAY_CONFIG_DIR", "/app/config")
+            if hub_config is not None:
+                checks["config_loaded"] = {
+                    "ok": True,
+                    "source": _cfg_source,
+                    "path": _cfg_path if _cfg_source == "local" else None,
+                }
+            else:
+                # Config is best-effort — the Hub can run without one. Surface
+                # the unloaded state so operators can tell whether On-Call view
+                # and rule seeding are active, but don't mark it as a failure.
+                checks["config_loaded"] = {
+                    "ok": True,
+                    "source": _cfg_source,
+                    "loaded": False,
+                    "note": "no config loaded — On-Call view and rule seeding disabled",
+                }
+
+            # --- Ignore-rule count (post-seed) ---
+            if ignore_rule_store is not None:
+                try:
+                    _ig_rules = ignore_rule_store.list_rules()
+                    checks["ignore_rules_seeded"] = {"ok": True, "count": len(_ig_rules)}
+                except Exception as exc:
+                    checks["ignore_rules_seeded"] = {
+                        "ok": False,
+                        "error": _ready_error(exc),
+                    }
+            else:
+                checks["ignore_rules_seeded"] = {
+                    "ok": False,
+                    "error": "ignore rule store unavailable",
+                }
+
+            # --- Routing-rule count (post-seed) ---
+            if routing_rule_store is not None:
+                try:
+                    _rt_rules = routing_rule_store.list_rules()
+                    checks["routing_rules_seeded"] = {
+                        "ok": True,
+                        "count": len(_rt_rules),
+                    }
+                except Exception as exc:
+                    checks["routing_rules_seeded"] = {
+                        "ok": False,
+                        "error": _ready_error(exc),
+                    }
+            else:
+                checks["routing_rules_seeded"] = {
+                    "ok": False,
+                    "error": "routing rule store unavailable",
+                }
+
+            all_ok = all(c.get("ok", False) for c in checks.values())
+            return {
+                "status": "ok" if all_ok else "degraded",
+                "checks": checks,
+            }
 
         # ----------------------------------------------------------------
         # GET /fleet — full snapshot JSON
