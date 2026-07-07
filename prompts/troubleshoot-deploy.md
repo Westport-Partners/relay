@@ -220,11 +220,20 @@ The stack is trying to create the ECS task and execution roles, but the account 
 
 ## General diagnostic sequence
 
-1. Check CloudFormation stack events for `*_FAILED` resources.
-2. Check ECS service events and stopped-task `stoppedReason`.
-3. Check CloudWatch Logs for container errors.
-4. Check the DLQ depth for ingestion failures.
-5. Confirm `RELAY_HUB_IMAGE_URI` is a real, pushable ECR URI.
-6. Confirm ALB scheme matches the network topology.
+1. **Hit the deep readiness endpoint first** — it surfaces IAM and dependency misconfigs in one call:
+
+   ```bash
+   # Replace <DASHBOARD_URL> with the DashboardUrl stack output.
+   curl -s <DASHBOARD_URL>/health/ready | jq .
+   ```
+
+   A `"status": "degraded"` result names the failing check and the AWS error code directly, which usually identifies the root cause without any log diving. See [`docs/byor.md` → Verifying a BYOR deployment](../docs/byor.md#verifying-a-byor-deployment) for the full failure table.
+
+2. Check CloudFormation stack events for `*_FAILED` resources.
+3. Check ECS service events and stopped-task `stoppedReason`.
+4. Check CloudWatch Logs for container errors.
+5. Check the DLQ depth for ingestion failures.
+6. Confirm `RELAY_HUB_IMAGE_URI` is a real, pushable ECR URI.
+7. Confirm ALB scheme matches the network topology.
 
 Do not re-deploy until you understand the cause — blind re-deploys on a stuck stack often make the CloudFormation state worse.
