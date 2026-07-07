@@ -127,6 +127,72 @@ class SNSNotifier:
             logger.exception("SNS publish_direct failed")
             raise
 
+    def list_subscription_status_by_email(self, topic_arn: str) -> dict[str, str]:
+        """Return ``{lowercased_email: "confirmed"|"pending"}`` for the topic's
+        email subscriptions.
+
+        Operators subscribe to the paging topic by email; this is the identifier
+        the topic pages by, so subscription state on the Contacts screen is keyed
+        on email. Paginates ``ListSubscriptionsByTopic`` (the list can span many
+        pages on a busy topic) and is best-effort: any SNS error yields ``{}`` so
+        the UI degrades to "unknown" rather than erroring.
+
+        A subscription whose ``SubscriptionArn`` is still ``PendingConfirmation``
+        is reported as ``"pending"`` (the confirmation email was sent but the
+        recipient hasn't clicked it yet); a real ARN is ``"confirmed"``. When the
+        same email appears more than once, ``"confirmed"`` wins.
+        """
+        status: dict[str, str] = {}
+        next_token: str | None = None
+        try:
+            while True:
+                if next_token:
+                    resp = self._sns.list_subscriptions_by_topic(
+                        TopicArn=topic_arn, NextToken=next_token
+                    )
+                else:
+                    resp = self._sns.list_subscriptions_by_topic(TopicArn=topic_arn)
+                for sub in resp.get("Subscriptions", []):
+                    if sub.get("Protocol") != "email":
+                        continue
+                    endpoint = (sub.get("Endpoint") or "").strip().lower()
+                    if not endpoint:
+                        continue
+                    arn = sub.get("SubscriptionArn", "")
+                    if arn == "Deleted":
+                        continue
+                    if status.get(endpoint) == "confirmed":
+                        continue  # keep the confirmed record over a duplicate
+                    status[endpoint] = (
+                        "pending" if arn in ("", "PendingConfirmation") else "confirmed"
+                    )
+                next_token = resp.get("NextToken")
+                if not next_token:
+                    break
+        except ClientError:
+            logger.warning(
+                "list_subscriptions_by_topic failed for %s", topic_arn, exc_info=True
+            )
+        return status
+
+    def subscribe_email(self, topic_arn: str, email: str) -> str:
+        """Subscribe ``email`` to ``topic_arn`` (protocol=email).
+
+        SNS immediately sends a confirmation email; the subscription stays in
+        ``PendingConfirmation`` until the recipient clicks the link. Returns the
+        raw ``SubscriptionArn`` from SNS (``"pending confirmation"`` for email).
+
+        Raises:
+            ClientError: On SNS API failure.
+        """
+        resp = self._sns.subscribe(
+            TopicArn=topic_arn,
+            Protocol="email",
+            Endpoint=email,
+            ReturnSubscriptionArn=False,
+        )
+        return str(resp.get("SubscriptionArn", ""))
+
     def publish_test(
         self,
         *,

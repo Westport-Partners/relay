@@ -460,12 +460,19 @@ class RelayComputeStack(Stack):
             fleet_table.grant_read_write_data(task_role)
             central_paging_topic.grant_publish(task_role)
             # The container also publishes to the team paging topic (resolved
-            # on-call). Grant by ARN (imported topic).
+            # on-call). Grant by ARN (imported topic). ListSubscriptionsByTopic +
+            # Subscribe back the Contacts screen's per-contact subscription state
+            # + Subscribe button (#78): operators subscribe by email, so the Hub
+            # lists the topic's subscriptions and can add an email endpoint.
             task_role.add_to_principal_policy(
                 iam.PolicyStatement(
                     sid="RelayTeamPaging",
                     effect=iam.Effect.ALLOW,
-                    actions=["sns:Publish"],
+                    actions=[
+                        "sns:Publish",
+                        "sns:ListSubscriptionsByTopic",
+                        "sns:Subscribe",
+                    ],
                     resources=[paging_topic_arn],
                 )
             )
@@ -891,6 +898,16 @@ class RelayComputeStack(Stack):
                 "Effect": "Allow",
                 "Action": ["sns:Publish"],
                 "Resource": [central_paging_topic.topic_arn, paging_topic_arn],
+            },
+            {
+                # Contacts screen subscription state + Subscribe button (#78): the
+                # Hub lists the paging topic's email subscriptions and can add an
+                # email endpoint. Team paging topic only (not the central topic,
+                # which has no human subscribers).
+                "Sid": "RelayHubPagingSubscriptions",
+                "Effect": "Allow",
+                "Action": ["sns:ListSubscriptionsByTopic", "sns:Subscribe"],
+                "Resource": [paging_topic_arn],
             },
             {
                 "Sid": "RelayHubIngestConsume",

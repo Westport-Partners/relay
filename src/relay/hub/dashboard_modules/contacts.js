@@ -96,7 +96,7 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
         <th>Roles</th>
         ${th('oncall', 'Available', 'text-align:center;')}
         ${th('shifts', 'Shifts (wk)', 'text-align:center;')}
-        <th>Test</th><th></th>
+        <th>Paging</th><th></th>
       </tr></thead>
       <tbody id="contacts-tbody"></tbody>
     </table>`;
@@ -196,9 +196,8 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
       <td>${rolesCell}</td>
       <td style="text-align:center;">${onCallCell}</td>
       <td style="text-align:center;">${shiftsCell}</td>
-      <td>
-        <button class="btn-sm btn-test-contact" data-cid="${esc(c.contact_id)}"
-          ${!CAN_WRITE ? 'disabled title="Read-only: authentication not configured"' : ''}>Test page</button>
+      <td class="sub-cell" data-cid="${esc(c.contact_id)}">
+        <span class="sub-action" data-cid="${esc(c.contact_id)}"><span style="color:var(--text-faint);font-size:11px;">…</span></span>
         <span class="test-page-result" data-cid="${esc(c.contact_id)}" style="font-size:11px;margin-left:6px;"></span>
       </td>
       <td style="white-space:nowrap;">
@@ -320,7 +319,69 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
     btn.addEventListener('click', () => confirmDeleteContact(btn.dataset.cid));
   });
 
-  document.querySelectorAll('.btn-test-contact').forEach(btn => {
+  // Per-row Subscribe / Test-page hydration. The Paging cell renders a "…"
+  // placeholder in each row (renderRows) so the table paints immediately; this
+  // fetch resolves SNS subscription state ONCE for all contacts (server lists
+  // the topic once and matches on email), then swaps each cell to the right
+  // button. Never on the page-load critical path — kicked off after the rows
+  // exist. "Subscribed" tracks EMAIL subscription to the paging topic; direct
+  // SMS is a separate opt-in (#83).
+  hydrateSubscriptions();
+  async function hydrateSubscriptions() {
+    let statuses = {}, available = false;
+    try {
+      const r = await fetch('/contacts/subscriptions');
+      if (r.ok) { const b = await r.json(); statuses = b.statuses || {}; available = b.available === true; }
+    } catch (_) { /* leave cells as "…"; degrade to Test page below */ }
+    document.querySelectorAll('.sub-action').forEach(cell => {
+      const cid = cell.dataset.cid;
+      // Default to a Test-page button when subscription state is unknown/N-A
+      // (no topic wired, no email, or the query failed) — never worse than today.
+      const st = statuses[cid] || (available ? 'unsubscribed' : 'unknown');
+      if (st === 'unsubscribed') {
+        cell.innerHTML = `<button class="btn-sm btn-subscribe-contact" data-cid="${esc(cid)}"
+          ${!CAN_WRITE ? 'disabled title="Read-only: authentication not configured"' : ''}>Subscribe</button>`;
+        const sb = cell.querySelector('.btn-subscribe-contact');
+        if (sb) sb.addEventListener('click', () => subscribeContact(cid, sb));
+      } else if (st === 'pending') {
+        cell.innerHTML = `<span style="color:var(--amber);font-size:11px;" title="Confirmation email sent — awaiting click">&#9679; Pending confirm</span>`;
+      } else {
+        // confirmed | no_email | unknown → offer Test page (existing behavior).
+        cell.innerHTML = `<button class="btn-sm btn-test-contact" data-cid="${esc(cid)}"
+          ${!CAN_WRITE ? 'disabled title="Read-only: authentication not configured"' : ''}>Test page</button>`;
+        const tb = cell.querySelector('.btn-test-contact');
+        if (tb) wireTestButton(tb);
+      }
+    });
+  }
+
+  async function subscribeContact(cid, btn) {
+    if (!CAN_WRITE) return;
+    const resultEl = document.querySelector(`.test-page-result[data-cid="${CSS.escape(cid)}"]`);
+    btn.disabled = true;
+    btn.textContent = 'Subscribing…';
+    if (resultEl) resultEl.textContent = '';
+    try {
+      const r = await fetch('/contacts/' + encodeURIComponent(cid) + '/subscribe', { method: 'POST' });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok && body.ok) {
+        const cell = btn.closest('.sub-action');
+        if (cell) cell.innerHTML = `<span style="color:var(--amber);font-size:11px;" title="Confirmation email sent — awaiting click">&#9679; Pending confirm</span>`;
+      } else if (r.status === 403) {
+        if (resultEl) { resultEl.textContent = '✗ not authorised'; resultEl.style.color = 'var(--red)'; }
+        btn.disabled = false; btn.textContent = 'Subscribe';
+      } else {
+        if (resultEl) { resultEl.textContent = '✗ ' + (body.detail || 'failed'); resultEl.style.color = 'var(--red)'; }
+        btn.disabled = false; btn.textContent = 'Subscribe';
+      }
+    } catch (_) {
+      if (resultEl) { resultEl.textContent = '✗ network error'; resultEl.style.color = 'var(--red)'; }
+      btn.disabled = false; btn.textContent = 'Subscribe';
+    }
+    if (resultEl) setTimeout(() => { resultEl.textContent = ''; }, 8000);
+  }
+
+  function wireTestButton(btn) {
     btn.addEventListener('click', async () => {
       if (!CAN_WRITE) return;
       const cid = btn.dataset.cid;
@@ -351,7 +412,7 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
       // Auto-clear result after 8s
       if (resultEl) setTimeout(() => { resultEl.textContent = ''; }, 8000);
     });
-  });
+  }
 
   // Wire availability expanders
   document.querySelectorAll('.btn-avail-toggle').forEach(btn => {
