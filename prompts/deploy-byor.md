@@ -238,8 +238,29 @@ RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
 ## Teardown
 
 `cdk destroy` requires `iam:PassRole` just like `cdk deploy`, so on this path tear down
-via CloudFormation directly. The DynamoDB table has a `RETAIN` deletion policy and
-**survives** stack deletion — remove it explicitly if you want the data gone.
+via **`scripts/relay-teardown-direct.sh`**:
+
+```bash
+# Standard teardown (confirms before deleting)
+RELAY_TEAM_NAME=<team> AWS_REGION=us-east-1 ./scripts/relay-teardown-direct.sh
+
+# Also delete ECR images (opt-in — all images in relay-hub are removed)
+RELAY_TEAM_NAME=<team> AWS_REGION=us-east-1 ./scripts/relay-teardown-direct.sh --purge-ecr
+
+# Non-interactive (CI / automation)
+RELAY_TEAM_NAME=<team> AWS_REGION=us-east-1 RELAY_FORCE=1 ./scripts/relay-teardown-direct.sh
+```
+
+The script implements the sequence below in order, waiting for each step:
+
+1. **Compute stack** (`RelayComputeStack`) — ECS service, ALB, security groups.
+2. **Data stack** (`RelayDataStack`) — SNS, SQS, EventBridge. The DynamoDB table has a `RETAIN` deletion policy and **survives** this step.
+3. **DynamoDB table** (`relay-<team>`) — deleted explicitly because the RETAIN policy keeps it after the stack is gone.
+4. **ECR images** (opt-in: `--purge-ecr` / `RELAY_PURGE_ECR=1`) — removes all images in `relay-hub`. The repository itself is left intact.
+
+All steps are idempotent; already-absent stacks are skipped gracefully.
+
+**Manual fallback** (if you prefer raw CLI commands):
 
 ```bash
 # 1. Compute stack (ECS service, ALB, security groups)
@@ -259,7 +280,7 @@ aws ecr batch-delete-image --repository-name relay-hub --region "$AWS_REGION" \
 ```
 
 > `scripts/relay-teardown-cli.sh` only removes resources created by `relay-provision-cli.sh`.
-> It does **not** apply to CloudFormation-deployed stacks — use the sequence above.
+> It does **not** apply to CloudFormation-deployed stacks — use `relay-teardown-direct.sh` above.
 
 ---
 
