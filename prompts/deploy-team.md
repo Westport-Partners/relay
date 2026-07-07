@@ -15,7 +15,8 @@ Complete a fresh team deploy and verify the dashboard is reachable at the `Dashb
 - Preflight passes: `./scripts/relay-preflight.sh` exits 0. If it warned about `iam:CreateRole` or `ec2:CreateVpc` being denied, stop here and follow [`prompts/deploy-byor.md`](deploy-byor.md) instead.
 - AWS credentials are configured for the target account.
 - Docker daemon is running.
-- Python 3.12+ and Node.js 18+ are installed.
+- Python 3.12+ and Node.js 20+ are installed (CDK synth runs `npx aws-cdk@2`, which no longer supports the end-of-life Node 18; 22 is recommended). On Amazon Linux 2023, `dnf install nodejs` installs EOL Node 18 — use `dnf install nodejs22`.
+- Python CDK deps are installed in a venv: `python3.12 -m venv .venv && . .venv/bin/activate && pip install -e '.[infra]'`. The deploy scripts auto-activate `.venv/` if it exists; without `aws-cdk-lib` + `constructs` (the `[infra]` extra) the synth fails with `ModuleNotFoundError: aws_cdk`.
 
 ---
 

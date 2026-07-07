@@ -66,11 +66,23 @@ env = cdk.Environment(
     region=app.node.try_get_context("relay:aws_region") or None,
 )
 
+# Relay deploys a pre-built ECR image (relay:hub_image_uri), not CDK file/image
+# assets, so it needs no bootstrap bucket/repo. The locked-down direct path
+# (relay-deploy-direct.sh) submits templates with `aws cloudformation deploy`
+# and no bootstrap. By default CDK injects a CheckBootstrapVersion rule plus a
+# BootstrapVersion parameter (an AWS::SSM::Parameter::Value pointing at
+# /cdk-bootstrap/<qualifier>/version); CloudFormation resolves that SSM lookup
+# at change-set time, which requires ssm:GetParameters and fails in accounts
+# that deny it. Suppressing the rule keeps the templates free of any bootstrap
+# dependency — matching the "no bootstrap required" contract of the direct path.
+_synth = cdk.DefaultStackSynthesizer(generate_bootstrap_version_rule=False)
+
 # 1. Data plane — always synthesized. Deploy first; the compute stack imports it.
 data = RelayDataStack(
     app,
     "RelayDataStack",
     role=role,
+    synthesizer=_synth,
     env=env,
     description="Relay data plane — DynamoDB table + paging SNS topics [RETAIN]",
 )
@@ -84,6 +96,7 @@ compute = RelayComputeStack(
     data_table_arn=data.table_arn,
     paging_topic_arn=data.paging_topic.topic_arn,
     central_paging_topic_arn=data.central_paging_topic.topic_arn,
+    synthesizer=_synth,
     env=env,
     description="Relay compute plane — always-on Fargate container + ALB + SQS ingress",
 )
@@ -94,6 +107,7 @@ if role == "federated-hub":
     RelayFederationStack(
         app,
         "RelayFederationStack",
+        synthesizer=_synth,
         env=env,
         description="Relay federated-hub EventBridge bus + org policy + ingest rule",
     )
