@@ -508,6 +508,67 @@ else
 fi
 
 # ===========================================================================
+# CHECK 6 — BYOV egress: NAT gateway OR required interface VPC endpoints
+# ===========================================================================
+# When an existing VPC is imported (BYOV, RELAY_VPC_ID set), Fargate tasks in
+# its private subnets can only reach the AWS control-plane APIs Relay needs
+# (ECR, DynamoDB, SQS, SNS, CloudWatch Logs, Secrets Manager) via EITHER a NAT
+# gateway OR interface/gateway VPC endpoints. With neither, ECS task startup
+# fails with no clear error (image pull hangs, then times out). Warn — not fail
+# — because the VPC may have connectivity we can't see (Transit Gateway / VPC
+# peering to a NAT-equipped hub VPC). Best-effort: denied describe calls skip.
+_progress ""
+_progress "--- 6. BYOV egress (NAT or VPC endpoints) ---"
+
+if [ -z "${RELAY_VPC_ID:-}" ]; then
+  _record PASS "byov-egress" "not BYOV (RELAY_VPC_ID unset — Relay creates a NAT-equipped VPC)"
+  _progress "  skipped: not BYOV"
+elif [ -z "${_AWS_REGION_RESOLVED}" ]; then
+  _record WARN "byov-egress" "skipped (no region resolved — cannot query VPC egress)" \
+    "set AWS_REGION and re-run to verify NAT/endpoint coverage for ${RELAY_VPC_ID}"
+  _progress "  WARN: skipped BYOV egress check (no region)"
+else
+  # NAT gateways in the VPC (available state only).
+  _nat_count="$(aws ec2 describe-nat-gateways \
+        --filter "Name=vpc-id,Values=${RELAY_VPC_ID}" "Name=state,Values=available" \
+        --region "${_AWS_REGION_RESOLVED}" \
+        --query 'length(NatGateways)' --output text 2>/dev/null || echo "skip")"
+  # Service names of VPC endpoints in the VPC.
+  _endpoint_services="$(aws ec2 describe-vpc-endpoints \
+        --filters "Name=vpc-id,Values=${RELAY_VPC_ID}" \
+        --region "${_AWS_REGION_RESOLVED}" \
+        --query 'VpcEndpoints[].ServiceName' --output text 2>/dev/null || echo "skip")"
+
+  if [ "${_nat_count}" = "skip" ] || [ "${_endpoint_services}" = "skip" ]; then
+    _record WARN "byov-egress" "could not query VPC egress (ec2:DescribeNatGateways / DescribeVpcEndpoints denied)" \
+      "Grant ec2:DescribeNatGateways + ec2:DescribeVpcEndpoints, or manually confirm the VPC has a NAT gateway or the required interface endpoints (see docs/byor.md 'BYOV' table)."
+    _progress "  WARN: skipped BYOV egress scan (describe denied)"
+  elif [ "${_nat_count:-0}" -gt 0 ] 2>/dev/null; then
+    _record PASS "byov-egress" "${_nat_count} NAT gateway(s) in ${RELAY_VPC_ID} — private-subnet egress available"
+    _progress "  ${_nat_count} NAT gateway(s) present"
+  else
+    # No NAT: require the interface/gateway endpoints Relay depends on.
+    _missing=""
+    for _svc in ecr.api ecr.dkr s3 dynamodb sqs sns logs secretsmanager; do
+      _needle="com.amazonaws.${_AWS_REGION_RESOLVED}.${_svc}"
+      case " ${_endpoint_services} " in
+        *" ${_needle} "*) : ;;
+        *) _missing="${_missing} ${_svc}" ;;
+      esac
+    done
+    _missing="${_missing# }"
+    if [ -z "${_missing}" ]; then
+      _record PASS "byov-egress" "no NAT, but all required VPC endpoints present in ${RELAY_VPC_ID}"
+      _progress "  no NAT, but all required endpoints present"
+    else
+      _record WARN "byov-egress" "${RELAY_VPC_ID}: no NAT gateway and missing endpoints: ${_missing}" \
+        "Request either a NAT gateway or these interface/gateway VPC endpoints from your network team: ${_missing} (full names: com.amazonaws.${_AWS_REGION_RESOLVED}.<service>). See the 'BYOV' table in docs/byor.md. Without egress, ECS tasks fail to start."
+      _progress "  WARN: no NAT, missing endpoints: ${_missing}"
+    fi
+  fi
+fi
+
+# ===========================================================================
 # Tally
 # ===========================================================================
 _n_pass=0

@@ -67,6 +67,7 @@ locals {
       RELAY_TZ                       = var.tz
       LOG_LEVEL                      = var.log_level
       RELAY_RESOLVE_ALARM_TAGS       = var.resolve_alarm_tags ? "true" : "false"
+      RELAY_ENABLE_DIRECT_SMS        = var.enable_direct_sms ? "true" : "false"
       RELAY_TEAM_NAME                = var.team_name
       RELAY_NODE_APP_NAME            = local.app_name
       RELAY_NODE_DEPLOYMENT_ID       = local.deployment_id

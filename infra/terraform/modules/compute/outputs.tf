@@ -19,13 +19,16 @@ locals {
           "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
           "dynamodb:Query", "dynamodb:DeleteItem", "dynamodb:Scan",
           "dynamodb:BatchWriteItem", "dynamodb:BatchGetItem",
+          # DescribeTable backs the /health/ready dynamodb probe.
+          "dynamodb:DescribeTable",
         ]
         Resource = [var.table_arn, "${var.table_arn}/index/*"]
       },
       {
-        Sid      = "RelayHubPaging"
-        Effect   = "Allow"
-        Action   = ["sns:Publish"]
+        Sid    = "RelayHubPaging"
+        Effect = "Allow"
+        # GetTopicAttributes backs the /health/ready sns_paging_topic probe.
+        Action   = ["sns:Publish", "sns:GetTopicAttributes"]
         Resource = [var.central_paging_topic_arn, var.paging_topic_arn]
       },
       {
@@ -51,11 +54,15 @@ locals {
       Resource = var.central_hub_bus_arn
     }] : [],
     var.enable_direct_sms ? [{
-      Sid       = "RelayHubDirectSms"
-      Effect    = "Allow"
-      Action    = ["sns:Publish"]
+      Sid    = "RelayHubDirectSms"
+      Effect = "Allow"
+      # CheckIfPhoneNumberIsOptedOut backs the /health/ready sns_direct_sms probe.
+      Action = ["sns:Publish", "sns:CheckIfPhoneNumberIsOptedOut"]
+      # Scope by region, not sns:Protocol: Protocol is a Subscribe-only condition
+      # key, absent from a Publish request context, so gating on it fails closed
+      # and silently breaks direct paging (mirrors compute_stack.py).
       Resource  = "*"
-      Condition = { StringEquals = { "sns:Protocol" = "sms" } }
+      Condition = { StringEquals = { "aws:RequestedRegion" = local._region } }
     }] : [],
     local.ai_uses_bedrock ? [{
       Sid    = "RelayHubBedrockInvoke"

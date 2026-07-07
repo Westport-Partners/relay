@@ -231,7 +231,20 @@ task definition without it.
 
 The imported VPC must have:
 - **Public subnets** — the ALB is placed here.
-- **Private subnets** — Fargate tasks run here (NAT or VPC endpoints needed for ECR, DynamoDB, SQS, SNS, CloudWatch Logs, Secrets Manager).
+- **Private subnets** — Fargate tasks run here. They need outbound reachability to the AWS APIs below, via **either** a NAT gateway **or** the specific VPC endpoints listed (substitute your region for `<region>`):
+
+  | Endpoint | Type | Used for |
+  |---|---|---|
+  | `com.amazonaws.<region>.ecr.api` | Interface | Pull the container image (ECR auth) |
+  | `com.amazonaws.<region>.ecr.dkr` | Interface | Pull the container image (layers) |
+  | `com.amazonaws.<region>.s3` | Gateway | ECR layer blobs live in S3 |
+  | `com.amazonaws.<region>.dynamodb` | Gateway | Fleet/incidents table |
+  | `com.amazonaws.<region>.sqs` | Interface | Ingest queue |
+  | `com.amazonaws.<region>.sns` | Interface | Paging topics |
+  | `com.amazonaws.<region>.logs` | Interface | CloudWatch Logs |
+  | `com.amazonaws.<region>.secretsmanager` | Interface | AI/integration secrets (if used) |
+
+  Interface endpoints need a security group allowing inbound HTTPS (443) from the Fargate task security group. With neither NAT nor these endpoints, ECS tasks fail to start with no clear error; `relay-preflight.sh` emits a WARN when it detects a BYOV VPC lacking both.
 
 `from_lookup` queries the live account at synth time and caches the result to `cdk.context.json`. Commit or carry `cdk.context.json` so CI synths are reproducible without live AWS access.
 
