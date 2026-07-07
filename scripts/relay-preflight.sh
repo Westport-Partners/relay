@@ -64,7 +64,7 @@ _install_cmd() {
       case "${name}" in
         docker)   echo "sudo apt-get install -y docker.io" ;;
         git)      echo "sudo apt-get install -y git" ;;
-        node)     echo "sudo apt-get install -y nodejs  # or: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs" ;;
+        node)     echo "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs  # distro 'nodejs' may be < 20" ;;
         python3)  echo "sudo apt-get install -y python3" ;;
         aws-cli)  _aws_install_cmd ;;
         *)        echo "sudo apt-get install -y ${name}" ;;
@@ -73,7 +73,7 @@ _install_cmd() {
       case "${name}" in
         docker)   echo "sudo dnf install -y docker && sudo systemctl enable --now docker" ;;
         git)      echo "sudo dnf install -y git" ;;
-        node)     echo "sudo dnf install -y nodejs  # or: https://rpm.nodesource.com" ;;
+        node)     echo "sudo dnf install -y nodejs22 && sudo alternatives --set node /usr/bin/node-22  # 'nodejs' alone is EOL Node 18 on AL2023" ;;
         python3)  echo "sudo dnf install -y python3" ;;
         aws-cli)  _aws_install_cmd ;;
         *)        echo "sudo dnf install -y ${name}" ;;
@@ -256,14 +256,17 @@ else
   _progress "  docker: NOT FOUND"
 fi
 
-# ---- node >= 18 ----
+# ---- node >= 20 ----
+# CDK synth runs `npx aws-cdk@2`, whose current release refuses to support
+# Node 18 (end-of-life 2025-11-30) — it still exits 0 but prints a loud EOL
+# banner. Node 20 is the floor; 22 is clean. Require >= 20.
 _progress "  node..."
 if _node_ver="$(node --version 2>/dev/null)"; then
-  if _ver_ge "${_node_ver}" 18 0; then
+  if _ver_ge "${_node_ver}" 20 0; then
     _record PASS "node" "node ${_node_ver}"
     _progress "  node ${_node_ver}"
   else
-    _record FAIL "node" "node ${_node_ver} (need >= 18)" "$(_install_cmd node)"
+    _record FAIL "node" "node ${_node_ver} (need >= 20; aws-cdk dropped Node 18)" "$(_install_cmd node)"
     _progress "  node ${_node_ver}: too old — FAIL"
   fi
 else

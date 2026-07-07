@@ -23,6 +23,8 @@ Deploy Relay using pre-provisioned IAM roles and/or an existing VPC, produce the
 ## Preconditions
 
 - Preflight has been run: `./scripts/relay-preflight.sh`. The WARN on `iam:CreateRole` / `ec2:CreateVpc` is expected here — that is exactly why you are on this path.
+- **Node.js 20+** is installed (CDK synth runs `npx aws-cdk@2`, which dropped the EOL Node 18; 22 recommended). On Amazon Linux 2023, `dnf install nodejs` gives EOL Node 18 — use `dnf install nodejs22`.
+- **Python CDK deps are installed in a venv:** `python3.12 -m venv .venv && . .venv/bin/activate && pip install -e '.[infra]'`. `relay-synth.sh` / `relay-deploy-direct.sh` auto-activate `.venv/` if present, but do not create it or install deps — without the `[infra]` extra (`aws-cdk-lib` + `constructs`) the synth fails with `ModuleNotFoundError: aws_cdk`.
 - An account administrator has provisioned (or can identify) two IAM roles: one ECS task role and one ECS execution role. One role may cover both responsibilities — pass the same ARN for both context keys.
 - VPC ID is available if `ec2:CreateVpc` is also denied.
 - `RELAY_HUB_IMAGE_URI` is set (built with `relay-build-hub-image.sh` — see [`prompts/deploy-team.md`](deploy-team.md) Step 2).
