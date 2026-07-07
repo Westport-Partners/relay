@@ -10,6 +10,16 @@ Canonical reference: [`docs/byor.md`](../docs/byor.md) and [`docs/deploy.md`](..
 
 Deploy Relay using pre-provisioned IAM roles and/or an existing VPC, produce the inline-policy JSON from the synth output, have an account administrator apply it, then complete the deploy.
 
+> **Do NOT run `scripts/relay-provision-cli.sh` on this path.** That script creates
+> the DynamoDB table, SNS topics, SQS queues, and EventBridge resources directly via
+> the AWS CLI. `relay-deploy-direct.sh` (below) creates the *same* resources via
+> CloudFormation. Running the CLI provisioner first makes the data-stack deploy fail
+> with `AWS::EarlyValidation::ResourceExistenceCheck` — CloudFormation refuses to
+> create resources that already exist. The two paths are mutually exclusive: pick
+> `relay-deploy-direct.sh` and never run `relay-provision-cli.sh` alongside it. (If
+> you already ran it, tear those resources down with `scripts/relay-teardown-cli.sh`
+> before deploying.)
+
 ## Preconditions
 
 - Preflight has been run: `./scripts/relay-preflight.sh`. The WARN on `iam:CreateRole` / `ec2:CreateVpc` is expected here — that is exactly why you are on this path.
@@ -27,6 +37,16 @@ Relay runs as a **single always-on container**. The IAM surface is exactly **two
 - **ECS execution role** — ECR image pull, CloudWatch Logs writes.
 
 There is no Lambda role, no EventBridge Scheduler role, and no `iam:PassRole` grant in the task definition.
+
+> **Direct-to-contact SMS ("Test page" and targeted pages) needs an opt-in.** SMS to
+> a specific phone uses `sns:Publish` with a *phone number* resource (not a topic ARN),
+> which the base task policy does not cover. The synth only adds the `RelayHubDirectSms`
+> statement to `ByorTaskRoleInlinePolicy` when you pass **`-c relay:enable_direct_sms=true`**
+> (or set `RELAY_ENABLE_DIRECT_SMS=true`) on the synth in Step 2. Without it, "Test page"
+> returns 200 but no SMS is delivered and the logs show `AuthorizationError ... sns:Publish`.
+> Set it before generating the policy so the administrator applies the complete policy in
+> one pass. IAM changes take effect on the **next task launch**, so after any policy edit
+> run `aws ecs update-service --cluster relay-hub --service relay-hub --force-new-deployment`.
 
 ---
 
@@ -69,7 +89,8 @@ RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
 ./scripts/relay-synth.sh \
   -c relay:ecs_task_role_arn=$TASK_ROLE_ARN \
   -c relay:ecs_execution_role_arn=$EXEC_ROLE_ARN \
-  -c relay:vpc_id=$VPC_ID
+  -c relay:vpc_id=$VPC_ID \
+  -c relay:enable_direct_sms=true   # include if you use direct-to-contact SMS / "Test page"
 ```
 
 Trailing `-c relay:*` flags are forwarded verbatim to `cdk synth`. Templates land in `cdk.out/`. Do **not** insert a `--` before the flags — CDK's arg parser treats everything after `--` as positional and silently ignores it.
@@ -165,6 +186,78 @@ RELAY_STACK_SELECTOR=compute \
   -c relay:ecs_execution_role_arn=$EXEC_ROLE_ARN \
   -c relay:vpc_id=$VPC_ID
 ```
+
+> **Same image tag = no rollout.** CloudFormation only starts an ECS deployment when
+> the task definition changes. `relay-build-hub-image.sh` tags by git short SHA, so a
+> normal commit-and-rebuild produces a new tag and rolls automatically. But if you
+> rebuild the **same SHA** (e.g. to fix a Dockerfile issue without committing), the
+> image URI is unchanged, the task def is unchanged, and ECS keeps running the old
+> revision even though the deploy "succeeds". Either build a distinct `IMAGE_TAG` or
+> force a rollout:
+>
+> ```bash
+> aws ecs update-service --cluster relay-hub --service relay-hub --force-new-deployment
+> ```
+
+### Faster re-deploys with Express Mode (opt-in)
+
+`relay-deploy-direct.sh` waits for full resource stabilization by default — for the
+compute stack that means the entire ECS service roll (health checks passing), often
+15-20+ minutes. During iterative BYOR work you can opt into CloudFormation **Express
+Mode**, which returns as soon as resource *configuration* is applied and lets ECS/ALB
+finish coming up in the background:
+
+```bash
+RELAY_CFN_MODE=EXPRESS \
+RELAY_DEPLOY_TYPE=team \
+RELAY_TEAM_NAME=<team> \
+RELAY_STACK_SELECTOR=compute \
+RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
+./scripts/relay-deploy-direct.sh \
+  -c relay:ecs_task_role_arn=$TASK_ROLE_ARN \
+  -c relay:ecs_execution_role_arn=$EXEC_ROLE_ARN \
+  -c relay:vpc_id=$VPC_ID
+```
+
+- **Default is `STANDARD`** — omit `RELAY_CFN_MODE` and behavior is unchanged.
+- **Requires AWS CLI ≥ 2.35** (the version that added `--deployment-config`). The
+  script fails fast with a clear message on older CLIs.
+- **"Success" ≠ "serving traffic."** The command returns before the ECS service is
+  healthy. If you need to gate on readiness, poll:
+  `aws ecs wait services-stable --cluster relay-hub --services relay-hub`.
+- **Same-tag rebuilds still don't roll** (see the note above) — that's a task-def
+  identity thing, independent of the deploy mode.
+- Rollback stays enabled (`DisableRollback:false`), so a failed EXPRESS update rolls
+  back rather than stranding the stack.
+- Best for the **compute** stack (the slow one). The data stack is already fast.
+
+---
+
+## Teardown
+
+`cdk destroy` requires `iam:PassRole` just like `cdk deploy`, so on this path tear down
+via CloudFormation directly. The DynamoDB table has a `RETAIN` deletion policy and
+**survives** stack deletion — remove it explicitly if you want the data gone.
+
+```bash
+# 1. Compute stack (ECS service, ALB, security groups)
+aws cloudformation delete-stack --stack-name RelayComputeStack --region "$AWS_REGION"
+aws cloudformation wait stack-delete-complete --stack-name RelayComputeStack --region "$AWS_REGION"
+
+# 2. Data stack (SNS, SQS, EventBridge — the DynamoDB table is retained)
+aws cloudformation delete-stack --stack-name RelayDataStack --region "$AWS_REGION"
+aws cloudformation wait stack-delete-complete --stack-name RelayDataStack --region "$AWS_REGION"
+
+# 3. DynamoDB table (RETAIN policy means it outlives the stack) — deletes incident history
+aws dynamodb delete-table --table-name relay-<team> --region "$AWS_REGION"
+
+# 4. (Optional) ECR images
+aws ecr batch-delete-image --repository-name relay-hub --region "$AWS_REGION" \
+  --image-ids "$(aws ecr list-images --repository-name relay-hub --region "$AWS_REGION" --query 'imageIds[*]' --output json)"
+```
+
+> `scripts/relay-teardown-cli.sh` only removes resources created by `relay-provision-cli.sh`.
+> It does **not** apply to CloudFormation-deployed stacks — use the sequence above.
 
 ---
 
