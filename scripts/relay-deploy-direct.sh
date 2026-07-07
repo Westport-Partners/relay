@@ -61,6 +61,94 @@ fi
 relay_resolve_account
 relay_build_context
 
+# Preflight: detect resources already created by relay-provision-cli.sh.
+# The CLI path and the CloudFormation path are mutually exclusive — they create
+# the SAME DynamoDB table, SNS topics, SQS queues, and EventBridge rule.
+# CloudFormation will refuse to create any resource that already exists
+# (AWS::EarlyValidation::ResourceExistenceCheck). Catch that conflict here with
+# a clear message rather than a confusing CFN error mid-deploy.
+#
+# Skip with RELAY_SKIP_CLI_GUARD=1 only if you know what you are doing (e.g.
+# you are intentionally migrating partial resources or running in a test harness).
+_cli_preflight_check() {
+  if [ "${RELAY_SKIP_CLI_GUARD:-0}" = "1" ]; then
+    echo "WARN: RELAY_SKIP_CLI_GUARD=1 — skipping CLI-resource conflict check." >&2
+    return 0
+  fi
+
+  # Resource names — must match relay-provision-cli.sh exactly.
+  local _table="relay-${RELAY_TEAM_NAME:-}"
+  local _paging_topic="relay-${RELAY_TEAM_NAME:-}-paging"
+  local _central_topic="relay-${RELAY_TEAM_NAME:-}-central-paging"
+  local _ingest_queue="relay-hub-ingest"
+  local _ingest_dlq="relay-hub-ingest-dlq"
+  local _alarm_rule="relay-cloudwatch-alarm"
+
+  local _found=()
+
+  # DynamoDB table.
+  if aws dynamodb describe-table --table-name "${_table}" \
+      --region "${AWS_REGION}" >/dev/null 2>&1; then
+    _found+=("DynamoDB table: ${_table}")
+  fi
+
+  # SNS paging topics (check by ARN — the describe-topic call is cheap).
+  local _paging_arn="arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:${_paging_topic}"
+  local _central_arn="arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:${_central_topic}"
+  if aws sns get-topic-attributes --topic-arn "${_paging_arn}" \
+      --region "${AWS_REGION}" >/dev/null 2>&1; then
+    _found+=("SNS topic: ${_paging_topic}")
+  fi
+  if aws sns get-topic-attributes --topic-arn "${_central_arn}" \
+      --region "${AWS_REGION}" >/dev/null 2>&1; then
+    _found+=("SNS topic: ${_central_topic}")
+  fi
+
+  # SQS queues (get-queue-url returns non-zero when the queue doesn't exist).
+  if aws sqs get-queue-url --queue-name "${_ingest_queue}" \
+      --region "${AWS_REGION}" >/dev/null 2>&1; then
+    _found+=("SQS queue: ${_ingest_queue}")
+  fi
+  if aws sqs get-queue-url --queue-name "${_ingest_dlq}" \
+      --region "${AWS_REGION}" >/dev/null 2>&1; then
+    _found+=("SQS queue: ${_ingest_dlq}")
+  fi
+
+  # EventBridge rule.
+  if aws events describe-rule --name "${_alarm_rule}" \
+      --region "${AWS_REGION}" >/dev/null 2>&1; then
+    _found+=("EventBridge rule: ${_alarm_rule}")
+  fi
+
+  if [ "${#_found[@]}" -gt 0 ]; then
+    echo "" >&2
+    echo "ERROR: The following resources already exist in account ${AWS_ACCOUNT_ID} / ${AWS_REGION}:" >&2
+    for _r in "${_found[@]}"; do
+      echo "  - ${_r}" >&2
+    done
+    echo "" >&2
+    echo "These resources were created by relay-provision-cli.sh (the CLI provisioning" >&2
+    echo "path). relay-deploy-direct.sh creates the SAME resources via CloudFormation." >&2
+    echo "The two paths are mutually exclusive — CloudFormation will refuse to create" >&2
+    echo "resources that already exist." >&2
+    echo "" >&2
+    echo "Remediation — pick ONE of:" >&2
+    echo "  1. Tear down the CLI-provisioned resources, then re-run this script:" >&2
+    echo "       RELAY_TEAM_NAME=${RELAY_TEAM_NAME:-<team>} scripts/relay-teardown-cli.sh" >&2
+    echo "  2. Continue using the CLI path (no CloudFormation needed):" >&2
+    echo "       docs/local-dev.md explains how to run Relay against these resources." >&2
+    echo "" >&2
+    echo "If you are certain these resources are NOT from the CLI path and you want to" >&2
+    echo "proceed anyway, set RELAY_SKIP_CLI_GUARD=1." >&2
+    echo "" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+_cli_preflight_check
+
 cd "${RELAY_ROOT}"
 
 # 1. Synthesize the selected stacks to cdk.out (no AWS writes).
