@@ -472,6 +472,9 @@ class RelayComputeStack(Stack):
                         "sns:Publish",
                         "sns:ListSubscriptionsByTopic",
                         "sns:Subscribe",
+                        # GetTopicAttributes backs the /health/ready
+                        # sns_paging_topic probe.
+                        "sns:GetTopicAttributes",
                     ],
                     resources=[paging_topic_arn],
                 )
@@ -504,7 +507,9 @@ class RelayComputeStack(Stack):
                 iam.PolicyStatement(
                     sid="RelayHubDirectSms",
                     effect=iam.Effect.ALLOW,
-                    actions=["sns:Publish"],
+                    # CheckIfPhoneNumberIsOptedOut backs the /health/ready
+                    # sns_direct_sms probe (only run when direct SMS is enabled).
+                    actions=["sns:Publish", "sns:CheckIfPhoneNumberIsOptedOut"],
                     # Direct-to-phone SMS: Publish(PhoneNumber=...) with no topic
                     # ARN, so the resource is "*". Scope by region rather than by
                     # sns:Protocol — sns:Protocol is a Subscribe-only condition key
@@ -668,6 +673,9 @@ class RelayComputeStack(Stack):
             "RELAY_TZ": team_tz,
             "LOG_LEVEL": log_level,
             "RELAY_RESOLVE_ALARM_TAGS": "true" if resolve_alarm_tags else "false",
+            # Signals /health/ready to run the sns_direct_sms probe only when the
+            # operator opted into direct SMS (and the matching IAM grant exists).
+            "RELAY_ENABLE_DIRECT_SMS": "true" if enable_direct_sms else "false",
             # Node self-identity (the container now owns detection in-process, so
             # it carries the identity that was on the Node Lambda — plan §11 Step 4).
             "RELAY_TEAM_NAME": team_name,
@@ -935,13 +943,16 @@ class RelayComputeStack(Stack):
                     "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
                     "dynamodb:Query", "dynamodb:DeleteItem", "dynamodb:Scan",
                     "dynamodb:BatchWriteItem", "dynamodb:BatchGetItem",
+                    # DescribeTable backs the /health/ready dynamodb probe.
+                    "dynamodb:DescribeTable",
                 ],
                 "Resource": [table_arn, f"{table_arn}/index/*"],
             },
             {
                 "Sid": "RelayHubPaging",
                 "Effect": "Allow",
-                "Action": ["sns:Publish"],
+                # GetTopicAttributes backs the /health/ready sns_paging_topic probe.
+                "Action": ["sns:Publish", "sns:GetTopicAttributes"],
                 "Resource": [central_paging_topic_arn_literal, paging_topic_arn_literal],
             },
             {
@@ -982,7 +993,9 @@ class RelayComputeStack(Stack):
             task_statements.append({
                 "Sid": "RelayHubDirectSms",
                 "Effect": "Allow",
-                "Action": ["sns:Publish"],
+                # CheckIfPhoneNumberIsOptedOut backs the /health/ready
+                # sns_direct_sms probe (only run when direct SMS is enabled).
+                "Action": ["sns:Publish", "sns:CheckIfPhoneNumberIsOptedOut"],
                 # See the non-BYOR grant above: direct-to-phone Publish carries no
                 # sns:Protocol context key, so scope by region, not protocol.
                 "Resource": "*",

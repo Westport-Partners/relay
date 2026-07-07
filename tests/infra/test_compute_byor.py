@@ -199,6 +199,27 @@ def test_byor_task_policy_contains_required_sids() -> None:
         assert sid in text, f"Required Sid '{sid}' missing from ByorTaskRoleInlinePolicy"
 
 
+def test_byor_task_policy_includes_health_probe_actions() -> None:
+    """The /health/ready deep probe actions are present in the BYOR policy.
+
+    Without these three read-only actions a fresh BYOR deploy reports
+    /health/ready as degraded even when the runtime grants are otherwise
+    correct: DynamoDB describe, SNS GetTopicAttributes, and (when direct SMS is
+    enabled) CheckIfPhoneNumberIsOptedOut.
+    """
+    template = _synth_compute({"relay:enable_direct_sms": "true"})
+    outputs = template.find_outputs("*")
+    text = _flatten_fn_join(outputs["ByorTaskRoleInlinePolicy"]["Value"])
+    for action in (
+        "dynamodb:DescribeTable",
+        "sns:GetTopicAttributes",
+        "sns:CheckIfPhoneNumberIsOptedOut",
+    ):
+        assert action in text, (
+            f"health-probe action '{action}' missing from ByorTaskRoleInlinePolicy"
+        )
+
+
 def test_byor_task_policy_is_literal_json_no_intrinsics() -> None:
     """ByorTaskRoleInlinePolicy must be a plain, pasteable JSON string.
 

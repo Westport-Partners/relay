@@ -2008,23 +2008,38 @@ class HubApp:
                     "note": "not configured — paging disabled",
                 }
 
-            # --- SNS direct-SMS IAM probe ---
+            # --- SNS direct-SMS IAM probe (only when direct SMS is enabled) ---
             # CheckIfPhoneNumberIsOptedOut is a cheap, read-only SNS call that
-            # exercises the phone-number resource path. In BYOR deployments where
-            # relay:enable_direct_sms=true was NOT set (and the
-            # RelayHubDirectSms inline policy statement is missing), this call
-            # returns AuthorizationError — exactly the error that would silence
-            # targeted SMS pages at incident time. The probe number (+15005550006)
-            # is a Twilio magic test number that SNS responds to without sending
-            # any real message.
-            try:
-                _sns_sms_c = boto3.client("sns")
-                _sns_sms_c.check_if_phone_number_is_opted_out(
-                    phoneNumber="+15005550006"
-                )
-                checks["sns_direct_sms"] = {"ok": True}
-            except Exception as exc:
-                checks["sns_direct_sms"] = {"ok": False, "error": _ready_error(exc)}
+            # exercises the phone-number resource path. When direct SMS is enabled
+            # (relay:enable_direct_sms=true → RELAY_ENABLE_DIRECT_SMS), a failure
+            # here is exactly the error that would silence targeted SMS pages at
+            # incident time, so we probe it. The probe number (+15005550006) is a
+            # Twilio magic test number that SNS responds to without sending any
+            # real message.
+            #
+            # When direct SMS is NOT enabled we skip the probe entirely: the
+            # RelayHubDirectSms grant is absent by design, and in strict-SCP
+            # accounts this call routes to Pinpoint SMS Voice
+            # (sms-voice:DescribeOptedOutNumbers) which may be denied outright —
+            # surfacing a false "degraded" for a capability the operator never
+            # opted into.
+            _direct_sms_enabled = (
+                os.environ.get("RELAY_ENABLE_DIRECT_SMS", "").strip().lower() == "true"
+            )
+            if _direct_sms_enabled:
+                try:
+                    _sns_sms_c = boto3.client("sns")
+                    _sns_sms_c.check_if_phone_number_is_opted_out(
+                        phoneNumber="+15005550006"
+                    )
+                    checks["sns_direct_sms"] = {"ok": True}
+                except Exception as exc:
+                    checks["sns_direct_sms"] = {"ok": False, "error": _ready_error(exc)}
+            else:
+                checks["sns_direct_sms"] = {
+                    "ok": True,
+                    "note": "probe skipped — enable_direct_sms not set",
+                }
 
             # --- Config source + loaded state ---
             _cfg_source = os.environ.get(

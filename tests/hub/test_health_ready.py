@@ -174,6 +174,7 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "RELAY_CONFIG_SOURCE",
         "RELAY_CONFIG_DIR",
         "RELAY_AUTH_MODE",
+        "RELAY_ENABLE_DIRECT_SMS",
     ]:
         monkeypatch.delenv(var, raising=False)
 
@@ -188,6 +189,7 @@ class TestHealthReady:
         """When every probe succeeds, status is 'ok'."""
         good = _good_boto3()
         monkeypatch.setattr("relay.hub.app.boto3.client", lambda svc, **kw: good)
+        monkeypatch.setenv("RELAY_ENABLE_DIRECT_SMS", "true")
 
         client = _client(
             ignore_rule_store=_FakeIgnoreRuleStore(["rule1", "rule2"]),
@@ -302,8 +304,13 @@ class TestHealthReady:
         assert body["checks"]["sns_paging_topic"]["ok"] is False
 
     def test_sns_direct_sms_auth_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """SNS direct-SMS probe raises AuthorizationError → sns_direct_sms fails."""
+        """SNS direct-SMS probe raises AuthorizationError → sns_direct_sms fails.
+
+        Only runs when direct SMS is enabled (RELAY_ENABLE_DIRECT_SMS=true).
+        """
         from botocore.exceptions import ClientError
+
+        monkeypatch.setenv("RELAY_ENABLE_DIRECT_SMS", "true")
 
         def _raise(*a: Any, **k: Any) -> None:
             raise ClientError(
@@ -330,6 +337,33 @@ class TestHealthReady:
         # Because only the direct-SMS check fails and other checks pass,
         # this deployment is degraded.
         assert body["status"] == "degraded"
+
+    def test_sns_direct_sms_skipped_when_not_enabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without RELAY_ENABLE_DIRECT_SMS the probe is skipped (ok=true, note).
+
+        The probe must not call CheckIfPhoneNumberIsOptedOut — in strict-SCP
+        accounts that call routes to Pinpoint SMS Voice and can be denied
+        outright, so a deployment that never opted into direct SMS must not go
+        degraded on its account.
+        """
+        mock = _good_boto3()
+        monkeypatch.setattr("relay.hub.app.boto3.client", lambda svc, **kw: mock)
+
+        client = _client(
+            ignore_rule_store=_FakeIgnoreRuleStore(["r1"]),
+            routing_rule_store=_FakeRoutingRuleStore(["rt1"]),
+            hub_config=_FakeConfig(),
+        )
+        resp = client.get("/health/ready")
+        assert resp.status_code == 200
+        body = resp.json()
+        sms = body["checks"]["sns_direct_sms"]
+        assert sms["ok"] is True
+        assert "skipped" in sms.get("note", "")
+        assert body["status"] == "ok"
+        mock.check_if_phone_number_is_opted_out.assert_not_called()
 
     def test_config_loaded_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When hub_config is not None, config_loaded ok=true with source."""
