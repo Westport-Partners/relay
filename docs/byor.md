@@ -65,6 +65,23 @@ secret (when AI is enabled); alarm and resource tag-read APIs
 `ecs:ListTagsForResource`) — these do not support resource-level scoping so they are on
 `*`; without them the container degrades to alarm-name matching for app resolution.
 
+> **Direct-to-contact SMS is opt-in.** SMS to a specific phone number (the "Test page"
+> button and targeted pages) uses `sns:Publish` against a *phone-number* resource, which
+> the base task policy does not grant. The `RelayHubDirectSms` statement is added to
+> `ByorTaskRoleInlinePolicy` only when you synth with `-c relay:enable_direct_sms=true`
+> (or `RELAY_ENABLE_DIRECT_SMS=true`). It is scoped by `aws:RequestedRegion` — **not** by
+> `sns:Protocol`, which is a Subscribe-only condition key absent from a `Publish` request
+> and would fail closed. Without this statement, "Test page" returns 200 but delivers
+> nothing and the logs show an `sns:Publish` `AuthorizationError`. IAM edits apply on the
+> next task launch, so `force-new-deployment` after adding it.
+
+> **"Test page" pages the team topic.** The test page (and real escalation pages) publish
+> to the **team** paging topic — the one operators subscribe to — resolved from
+> `RELAY_SNS_TOPIC_ARN` (falling back to `RELAY_PAGING_TOPIC_ARN`, then the central
+> federation topic only as a last resort). If a test page reports `{"ok": true}` but
+> nobody receives it, confirm there are subscriptions on the team topic, not just that the
+> publish succeeded.
+
 **Execution role** — Standard ECR image pull (`ecr:GetAuthorizationToken`,
 `ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer`) and CloudWatch Logs writes
 (`logs:CreateLogStream`, `logs:PutLogEvents`).

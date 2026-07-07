@@ -99,7 +99,16 @@ echo "" >&2
 echo "--- Building image ${LOCAL_TAG} ---" >&2
 # Bake build provenance into the image so the running Hub can report it.
 _BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
+# --network host: the default bridge network uses a separate netns; in
+# environments where the host reaches package mirrors via a local resolver or
+# policy route that the bridge does not inherit, `apt-get update` inside the
+# build hangs while the host itself has connectivity. Host networking sidesteps
+# that. It only affects build-time RUN steps (the pushed image is identical) and
+# is Linux-only — macOS Docker Desktop silently ignores it (the VM's network,
+# which already works, is used). Export RELAY_BUILD_NETWORK="" to disable, or set
+# it to an alternate flag string (e.g. "--network default") to override.
 docker build \
+  ${RELAY_BUILD_NETWORK---network host} \
   --build-arg "RELAY_BUILD_SHA=${IMAGE_TAG}" \
   --build-arg "RELAY_BUILD_TIME=${_BUILD_TIME}" \
   -t "${LOCAL_TAG}" "${RELAY_ROOT}"

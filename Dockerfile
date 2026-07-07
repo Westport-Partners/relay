@@ -49,7 +49,11 @@ COPY scripts/relay-local-bootstrap.py ./scripts/relay-local-bootstrap.py
 COPY scripts/relay-entrypoint.sh ./scripts/relay-entrypoint.sh
 COPY tools/ ./tools/
 USER root
-RUN chmod +x ./scripts/relay-entrypoint.sh
+# 755 (not +x): the file is COPY'd as root and executed by the non-root `relay`
+# user. `chmod +x` leaves the read bit at the mercy of the build umask, and bash
+# needs READ (not just execute) to run a script — a umask that dropped group/other
+# read produced `Permission denied` at container start.
+RUN chmod 755 ./scripts/relay-entrypoint.sh
 USER relay
 
 # Confirm the dashboard UI shipped in the installed package: the markup/CSS
