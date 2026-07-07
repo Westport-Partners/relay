@@ -65,6 +65,28 @@ Then re-run synth and deploy.
 
 ---
 
+### Symptom: `relay-build-hub-image.sh` fails during `RUN apt-get`/`pip install` with DNS errors
+
+```
+Temporary failure resolving 'deb.debian.org'
+# or: pip ... Could not find a version / connection timed out
+```
+
+**Cause:** Docker's default bridge network can't resolve DNS or reach the
+internet during the image build. Common on WSL2, VPNs, and locked-down corporate
+networks, where the bridge network doesn't inherit the host's working DNS/egress.
+
+**Fix:** build against the host network stack via the `DOCKER_BUILD_NETWORK` env
+var (leave it unset on Docker Desktop / Mac / Windows, where host networking for
+builds is unsupported — the default bridge is correct there):
+
+```bash
+DOCKER_BUILD_NETWORK=host \
+export RELAY_HUB_IMAGE_URI="$(./scripts/relay-build-hub-image.sh | tail -1)"
+```
+
+---
+
 ### Symptom: Stack is stuck in `CREATE_IN_PROGRESS` or `UPDATE_IN_PROGRESS`
 
 ```bash

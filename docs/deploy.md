@@ -61,11 +61,10 @@ To bake in your team's config files instead of the in-repo defaults, set `RELAY_
 to the directory that holds your `*.yaml` files before running the script. The originals
 are restored automatically after the build even if the build fails.
 
-The build runs with `--network host` by default so `RUN` steps (e.g. `apt-get`) use the
-host's network stack — some restricted Docker bridge networks cannot reach package mirrors
-even when the host can. Override or disable it with `RELAY_BUILD_NETWORK` (e.g.
-`RELAY_BUILD_NETWORK=` to drop the flag). `--network host` is Linux-only and only affects
-build-time steps; the pushed image is identical.
+The build uses Docker's default bridge network. On WSL2, VPNs, and locked-down corporate
+networks the bridge often can't resolve DNS during `RUN` steps (e.g. `apt-get`) even when
+the host has connectivity; set `DOCKER_BUILD_NETWORK=host` to build against the host's
+network stack instead. It only affects build-time steps; the pushed image is identical.
 
 **CPU architecture.** The image is built for the build host's architecture. The deploy
 scripts auto-detect it (`relay-context.sh` → `relay:cpu_arch`) and set the Fargate task's
@@ -398,7 +397,7 @@ reference.
 | Variable | Default | Description |
 |---|---|---|
 | `IMAGE_TAG` | git short SHA | Image tag. A new tag is what triggers an ECS roll; rebuilding the same tag does not. |
-| `RELAY_BUILD_NETWORK` | `--network host` | Docker build network flag (Linux). Set empty to drop it. Works around restricted bridge networks that can't reach package mirrors during `RUN` steps. |
+| `DOCKER_BUILD_NETWORK` | — | Value forwarded to `docker build --network=<v>`. Unset uses Docker's default bridge; set `host` to work around WSL2/VPN/locked-down bridge networks that can't resolve DNS during `RUN` steps. |
 | `RELAY_CPU_ARCH` | auto (`uname -m`) | Override the detected build-host arch (`X86_64` \| `ARM64`). Sets the Fargate task `RuntimePlatform` via `relay:cpu_arch` so the task matches the image; a mismatch fails at launch with `exec format error`. |
 
 ### Networking
