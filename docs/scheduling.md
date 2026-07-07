@@ -39,6 +39,8 @@ These settings are stored in DynamoDB and take effect immediately. They are not 
   <figcaption>Contacts are self-service: each responder sets their own name, email, phone, role eligibility, availability grid, and OOO range — no Active Directory sync required.</figcaption>
 </figure>
 
+The **Paging** column shows whether each contact's **email** is subscribed to the team paging SNS topic. A contact who is not subscribed gets a **Subscribe** button — clicking it sends the standard SNS confirmation email, and the column shows "Pending confirm" until the recipient clicks the link. Once subscribed (or when the contact has no email / the topic isn't wired), the column offers the existing **Test page** button instead, so a test page is only offered to someone who can actually receive it. Subscription state is resolved once for the whole directory and hydrated per row after the page renders, so it never slows the Contacts screen. Direct-to-phone SMS is a separate opt-in.
+
 ---
 
 ## Auto-Schedule

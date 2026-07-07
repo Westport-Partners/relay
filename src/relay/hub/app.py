@@ -701,6 +701,11 @@ class SSEPublisher:
 _SWEEP_INTERVAL_SECONDS = 30
 _PING_INTERVAL_SECONDS = 15
 
+# TTL for the Contacts screen's cached SNS email-subscription map. Short enough
+# that a fresh subscribe/confirm shows up quickly, long enough that lazily
+# hydrating N contact rows doesn't re-list the topic N times.
+_SUBS_CACHE_TTL_SECONDS = 30
+
 
 class DeadlineSweeper:
     """Fires due escalation deadlines from DynamoDB on each sweep tick.
@@ -1825,6 +1830,38 @@ class HubApp:
         pipeline = getattr(self, "_pipeline", None)
         runtime = getattr(self, "_runtime", "fargate")
 
+        # Short-lived cache of the paging topic's email-subscription map so the
+        # Contacts screen's lazy per-row hydration doesn't re-list SNS on every
+        # render (ListSubscriptionsByTopic is paginated/slow). Keyed by nothing —
+        # there's one paging topic — and refreshed after _SUBS_CACHE_TTL seconds.
+        # Guarded by a lock because uvicorn serves requests on a thread pool.
+        subs_cache: dict[str, Any] = {"at": 0.0, "status": {}}
+        subs_cache_lock = threading.Lock()
+
+        def _subscription_status(*, force: bool = False) -> dict[str, str]:
+            """Return the cached ``{email: confirmed|pending}`` map for the paging
+            topic, refreshing from SNS when the TTL has expired or ``force`` is set
+            (used right after a Subscribe so the button flips without waiting out
+            the TTL)."""
+            if notifier is None or not paging_topic_arn:
+                return {}
+            now = time.monotonic()
+            with subs_cache_lock:
+                fresh = (now - subs_cache["at"]) < _SUBS_CACHE_TTL_SECONDS
+                if fresh and not force:
+                    return dict(subs_cache["status"])
+            try:
+                status = notifier.list_subscription_status_by_email(paging_topic_arn)
+            except Exception:
+                # Never let a subscription lookup break the (read-only) Contacts
+                # hydration; degrade to "unknown"/"unsubscribed" client-side.
+                logger.warning("subscription status lookup failed", exc_info=True)
+                status = {}
+            with subs_cache_lock:
+                subs_cache["status"] = status
+                subs_cache["at"] = time.monotonic()
+            return dict(status)
+
         # ----------------------------------------------------------------
         # GET / — self-contained dashboard HTML
         # ----------------------------------------------------------------
@@ -2399,6 +2436,80 @@ class HubApp:
             except Exception as exc:
                 raise HTTPException(status_code=502, detail=f"test page failed: {exc}")
             return {"ok": any(result.values()), "channels": result}
+
+        # ----------------------------------------------------------------
+        # GET /contacts/subscriptions — per-contact paging-subscription state.
+        # Loaded LAZILY by the Contacts screen after the rows render (never on
+        # the page-load critical path). One SNS list serves all contacts, cached
+        # for _SUBS_CACHE_TTL_SECONDS. Read-only, so no writer gate.
+        #
+        # Channel semantics: "subscribed" means the contact's EMAIL is subscribed
+        # to the paging topic. Operators subscribe to the team paging topic by
+        # email (see _resolve_paging_topic_arn / publish_test.email_topic_arn);
+        # direct-to-phone SMS is a distinct, separately-gated opt-in (#83) and is
+        # NOT what "subscribed" tracks here.
+        #
+        # Per-contact status values:
+        #   "confirmed"   — email subscription exists + confirmed → offer Test page
+        #   "pending"     — subscribed, awaiting the SNS confirmation click
+        #   "unsubscribed"— has an email but no matching subscription → offer Subscribe
+        #   "no_email"    — contact has no email; email subscription N/A
+        #   "unknown"     — topic/notifier unavailable; can't determine
+        # ----------------------------------------------------------------
+        @app.get("/contacts/subscriptions")
+        def contact_subscriptions() -> dict[str, Any]:
+            available = notifier is not None and bool(paging_topic_arn)
+            out: dict[str, str] = {}
+            if contact_store is None:
+                return {"available": available, "statuses": out}
+            status_by_email = _subscription_status() if available else {}
+            try:
+                contacts = contact_store.list_contacts()
+            except Exception:
+                logger.warning("contact_subscriptions: list_contacts failed", exc_info=True)
+                contacts = []
+            for c in contacts:
+                email = (c.email or "").strip().lower()
+                if not email:
+                    out[c.contact_id] = "no_email"
+                elif not available:
+                    out[c.contact_id] = "unknown"
+                else:
+                    out[c.contact_id] = status_by_email.get(email, "unsubscribed")
+            return {"available": available, "statuses": out}
+
+        # ----------------------------------------------------------------
+        # POST /contacts/{id}/subscribe — subscribe the contact's email to the
+        # paging topic (writer-gated). SNS sends a confirmation email; the row
+        # then shows "pending" until the recipient confirms.
+        # ----------------------------------------------------------------
+        @app.post("/contacts/{contact_id}/subscribe")
+        def subscribe_contact(contact_id: str, request: Request) -> dict[str, Any]:
+            from fastapi import HTTPException
+            _auth.require_writer(dict(request.headers))
+            if contact_store is None or notifier is None or not paging_topic_arn:
+                raise HTTPException(
+                    status_code=503, detail="contacts/notifier/topic unavailable"
+                )
+            contact = contact_store.get_contact(contact_id)
+            if contact is None:
+                raise HTTPException(status_code=404, detail="contact not found")
+            email = (contact.email or "").strip()
+            if not email:
+                raise HTTPException(
+                    status_code=422, detail="contact has no email to subscribe"
+                )
+            try:
+                notifier.subscribe_email(paging_topic_arn, email)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"subscribe failed: {exc}")
+            # Force-refresh the cache so a follow-up /contacts/subscriptions call
+            # reflects the new (pending) subscription without waiting out the TTL.
+            try:
+                _subscription_status(force=True)
+            except Exception:
+                logger.debug("subs cache refresh after subscribe failed", exc_info=True)
+            return {"ok": True, "status": "pending"}
 
         # ----------------------------------------------------------------
         # Settings — per-Hub config (Teams webhook URL). Read shows whether a
