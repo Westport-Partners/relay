@@ -452,8 +452,24 @@ export function renderContacts(contacts, avMap = new Map(), shiftCounts = new Ma
           body: JSON.stringify({ available, slots, ooo, roles }),
         });
         if (r.ok) {
-          if (savedMsg) { savedMsg.textContent = '✓ saved'; }
-          setTimeout(() => { if (savedMsg) savedMsg.textContent = ''; }, 4000);
+          // Update the in-memory availability record so the Available column,
+          // role badges, and filters reflect the save without a full reload,
+          // then re-render the rows from the refreshed avMap.
+          avMap.set(cid, { contact_id: cid, available, slots, ooo, roles });
+          renderRows();
+          // renderRows() rebuilt the tbody, so re-open this contact's expander
+          // and show the confirmation on the freshly rendered elements.
+          const newRow = document.getElementById('avail-row-' + cid);
+          if (newRow) newRow.classList.add('open');
+          const newToggle = document.querySelector(`.btn-avail-toggle[data-cid="${CSS.escape(cid)}"]`);
+          if (newToggle) newToggle.textContent = 'On-call ▾';
+          const newMsg = document.getElementById('avail-saved-' + cid);
+          if (newMsg) {
+            newMsg.textContent = '✓ saved';
+            newMsg.style.color = 'var(--green)';
+            setTimeout(() => { if (newMsg) newMsg.textContent = ''; }, 4000);
+          }
+          return; // btn was detached by the re-render; nothing more to reset.
         } else {
           const body = await r.json().catch(() => ({}));
           if (savedMsg) {
