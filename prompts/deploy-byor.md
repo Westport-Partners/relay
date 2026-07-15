@@ -305,6 +305,26 @@ RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
 - **"Success" ≠ "serving traffic."** The command returns before the ECS service is
   healthy. If you need to gate on readiness, poll:
   `aws ecs wait services-stable --cluster relay-hub --services relay-hub`.
+- **`wait services-stable` does not confirm the new image is live.** It gates only on
+  `runningCount == desiredCount`, so if a healthy task on the *prior* image is already
+  running, the wait can return while the replacement is still rolling — and a
+  subsequent `/health/ready` may report the old image's state. Before trusting the
+  health check on an EXPRESS deploy, confirm the running task is on the expected image:
+  ```bash
+  TASK_ARN=$(aws ecs list-tasks --cluster relay-hub --service-name relay-hub \
+    --region us-east-1 --query 'taskArns[0]' --output text)
+  aws ecs describe-tasks --cluster relay-hub --tasks "$TASK_ARN" \
+    --region us-east-1 --query 'tasks[0].containers[0].image' --output text
+  ```
+  If it doesn't match, force a fresh roll of the latest task definition and wait again:
+  ```bash
+  LATEST=$(aws ecs describe-services --cluster relay-hub --services relay-hub \
+    --region us-east-1 --query 'services[0].deployments[0].taskDefinition' --output text)
+  aws ecs update-service --cluster relay-hub --service relay-hub \
+    --task-definition "$LATEST" --force-new-deployment --region us-east-1
+  aws ecs wait services-stable --cluster relay-hub --services relay-hub --region us-east-1
+  ```
+  STANDARD mode isn't affected — it waits for the full service roll.
 - **Same-tag rebuilds still don't roll** (see the note above) — that's a task-def
   identity thing, independent of the deploy mode.
 - Rollback stays enabled (`DisableRollback:false`), so a failed EXPRESS update rolls
