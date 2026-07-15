@@ -324,7 +324,9 @@ RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
     --task-definition "$LATEST" --force-new-deployment --region us-east-1
   aws ecs wait services-stable --cluster relay-hub --services relay-hub --region us-east-1
   ```
-  STANDARD mode isn't affected — it waits for the full service roll.
+  This only bites on a **re-deploy** onto a service with a running healthy task — a
+  first-time stack *create* has no prior task to keep serving, so there's nothing to
+  confirm. STANDARD mode isn't affected either — it waits for the full service roll.
 - **Same-tag rebuilds still don't roll** (see the note above) — that's a task-def
   identity thing, independent of the deploy mode.
 - Rollback stays enabled (`DisableRollback:false`), so a failed EXPRESS update rolls
