@@ -520,22 +520,40 @@ fi
 _progress ""
 _progress "--- 6. BYOV egress (NAT or VPC endpoints) ---"
 
-if [ -z "${RELAY_VPC_ID:-}" ]; then
-  _record PASS "byov-egress" "not BYOV (RELAY_VPC_ID unset — Relay creates a NAT-equipped VPC)"
+# Operators following the ecs-clean-start / deploy-byor path pass the VPC as a
+# CDK context flag (-c relay:vpc_id=...) rather than the RELAY_VPC_ID env var, so
+# fall back to cdk.context.json before concluding "not BYOV" (ISSUE-7).
+_byov_vpc_id="${RELAY_VPC_ID:-}"
+if [ -z "${_byov_vpc_id}" ]; then
+  _repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  _cdk_ctx="${_repo_root}/cdk.context.json"
+  if [ -f "${_cdk_ctx}" ] && command -v python3 >/dev/null 2>&1; then
+    _byov_vpc_id="$(python3 -c "import sys,json
+try:
+    d=json.load(open(sys.argv[1]))
+except Exception:
+    print(''); sys.exit(0)
+print(d.get('relay:vpc_id') or '')" "${_cdk_ctx}" 2>/dev/null || echo "")"
+  fi
+fi
+
+if [ -z "${_byov_vpc_id}" ]; then
+  _record PASS "byov-egress" "not BYOV (no VPC configured — Relay creates a NAT-equipped VPC)" \
+    "If this IS a BYOV deploy, set RELAY_VPC_ID=<vpc-id> (or -c relay:vpc_id=<vpc-id> in cdk.context.json) before running preflight so the egress check can validate NAT/endpoint coverage."
   _progress "  skipped: not BYOV"
 elif [ -z "${_AWS_REGION_RESOLVED}" ]; then
   _record WARN "byov-egress" "skipped (no region resolved — cannot query VPC egress)" \
-    "set AWS_REGION and re-run to verify NAT/endpoint coverage for ${RELAY_VPC_ID}"
+    "set AWS_REGION and re-run to verify NAT/endpoint coverage for ${_byov_vpc_id}"
   _progress "  WARN: skipped BYOV egress check (no region)"
 else
   # NAT gateways in the VPC (available state only).
   _nat_count="$(aws ec2 describe-nat-gateways \
-        --filter "Name=vpc-id,Values=${RELAY_VPC_ID}" "Name=state,Values=available" \
+        --filter "Name=vpc-id,Values=${_byov_vpc_id}" "Name=state,Values=available" \
         --region "${_AWS_REGION_RESOLVED}" \
         --query 'length(NatGateways)' --output text 2>/dev/null || echo "skip")"
   # Service names of VPC endpoints in the VPC.
   _endpoint_services="$(aws ec2 describe-vpc-endpoints \
-        --filters "Name=vpc-id,Values=${RELAY_VPC_ID}" \
+        --filters "Name=vpc-id,Values=${_byov_vpc_id}" \
         --region "${_AWS_REGION_RESOLVED}" \
         --query 'VpcEndpoints[].ServiceName' --output text 2>/dev/null || echo "skip")"
 
@@ -544,7 +562,7 @@ else
       "Grant ec2:DescribeNatGateways + ec2:DescribeVpcEndpoints, or manually confirm the VPC has a NAT gateway or the required interface endpoints (see docs/byor.md 'BYOV' table)."
     _progress "  WARN: skipped BYOV egress scan (describe denied)"
   elif [ "${_nat_count:-0}" -gt 0 ] 2>/dev/null; then
-    _record PASS "byov-egress" "${_nat_count} NAT gateway(s) in ${RELAY_VPC_ID} — private-subnet egress available"
+    _record PASS "byov-egress" "${_nat_count} NAT gateway(s) in ${_byov_vpc_id} — private-subnet egress available"
     _progress "  ${_nat_count} NAT gateway(s) present"
   else
     # No NAT: require the interface/gateway endpoints Relay depends on.
@@ -558,10 +576,10 @@ else
     done
     _missing="${_missing# }"
     if [ -z "${_missing}" ]; then
-      _record PASS "byov-egress" "no NAT, but all required VPC endpoints present in ${RELAY_VPC_ID}"
+      _record PASS "byov-egress" "no NAT, but all required VPC endpoints present in ${_byov_vpc_id}"
       _progress "  no NAT, but all required endpoints present"
     else
-      _record WARN "byov-egress" "${RELAY_VPC_ID}: no NAT gateway and missing endpoints: ${_missing}" \
+      _record WARN "byov-egress" "${_byov_vpc_id}: no NAT gateway and missing endpoints: ${_missing}" \
         "Request either a NAT gateway or these interface/gateway VPC endpoints from your network team: ${_missing} (full names: com.amazonaws.${_AWS_REGION_RESOLVED}.<service>). See the 'BYOV' table in docs/byor.md. Without egress, ECS tasks fail to start."
       _progress "  WARN: no NAT, missing endpoints: ${_missing}"
     fi

@@ -175,6 +175,7 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "RELAY_CONFIG_DIR",
         "RELAY_AUTH_MODE",
         "RELAY_ENABLE_DIRECT_SMS",
+        "RELAY_SKIP_SMS_OPTOUT_PROBE",
     ]:
         monkeypatch.delenv(var, raising=False)
 
@@ -337,6 +338,83 @@ class TestHealthReady:
         # Because only the direct-SMS check fails and other checks pass,
         # this deployment is degraded.
         assert body["status"] == "degraded"
+
+    def test_sns_direct_sms_pinpoint_scp_deny_is_warn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ISSUE-5: a Pinpoint SMS Voice v2 SCP denial is a warn, not a failure.
+
+        The opt-out probe routes internally to sms-voice:DescribeOptedOutNumbers.
+        An SCP that denies that service blocks the probe even though the runtime
+        sns:Publish SMS path is unaffected, so the check stays ok=true (with a
+        warn) and the deployment is not degraded.
+        """
+        from botocore.exceptions import ClientError
+
+        monkeypatch.setenv("RELAY_ENABLE_DIRECT_SMS", "true")
+
+        def _raise(*a: Any, **k: Any) -> None:
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "AuthorizationError",
+                        "Message": (
+                            "User is not authorized to perform: "
+                            "sms-voice:DescribeOptedOutNumbers on resource: "
+                            "arn:aws:sms-voice:us-east-1:123:opt-out-list/Default "
+                            "with an explicit deny in an identity-based policy "
+                            "(Service: PinpointSmsVoiceV2, Status Code: 400)"
+                        ),
+                    }
+                },
+                "ListPhoneNumbersOptedOut",
+            )
+
+        mock = _good_boto3()
+        mock.list_phone_numbers_opted_out.side_effect = _raise
+        monkeypatch.setattr("relay.hub.app.boto3.client", lambda svc, **kw: mock)
+
+        client = _client(
+            ignore_rule_store=_FakeIgnoreRuleStore(["r1"]),
+            routing_rule_store=_FakeRoutingRuleStore(["rt1"]),
+            hub_config=_FakeConfig(),
+        )
+        resp = client.get("/health/ready")
+        assert resp.status_code == 200
+        body = resp.json()
+        sms = body["checks"]["sns_direct_sms"]
+        assert sms["ok"] is True
+        assert "SCP" in sms.get("warn", "")
+        assert "error" not in sms
+        assert body["status"] == "ok"
+
+    def test_sns_direct_sms_skipped_by_escape_hatch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ISSUE-5: RELAY_SKIP_SMS_OPTOUT_PROBE=true skips the probe entirely.
+
+        Operators who know their account denies Pinpoint SMS Voice v2 can opt out
+        of the probe for a clean health check; it must not run boto3 at all.
+        """
+        monkeypatch.setenv("RELAY_ENABLE_DIRECT_SMS", "true")
+        monkeypatch.setenv("RELAY_SKIP_SMS_OPTOUT_PROBE", "true")
+
+        mock = _good_boto3()
+        monkeypatch.setattr("relay.hub.app.boto3.client", lambda svc, **kw: mock)
+
+        client = _client(
+            ignore_rule_store=_FakeIgnoreRuleStore(["r1"]),
+            routing_rule_store=_FakeRoutingRuleStore(["rt1"]),
+            hub_config=_FakeConfig(),
+        )
+        resp = client.get("/health/ready")
+        assert resp.status_code == 200
+        body = resp.json()
+        sms = body["checks"]["sns_direct_sms"]
+        assert sms["ok"] is True
+        assert "skipped" in sms.get("note", "")
+        assert body["status"] == "ok"
+        mock.list_phone_numbers_opted_out.assert_not_called()
 
     def test_sns_direct_sms_skipped_when_not_enabled(
         self, monkeypatch: pytest.MonkeyPatch

@@ -349,10 +349,22 @@ class RelayComputeStack(Stack):
         image_check = str(
             self.node.try_get_context("relay:image_check") or "true"
         ).lower() != "false"
-        if image_check and (
-            not hub_image_uri
-            or any(m in hub_image_uri for m in _PLACEHOLDER_IMAGE_MARKERS)
-        ):
+        if image_check and not hub_image_uri:
+            # Empty URI: the common cause is RELAY_HUB_IMAGE_URI not surviving
+            # between shells, not a data-only deploy. The image_check=false hint
+            # is a red herring here — it would bypass the guard on a compute
+            # deploy — so we scope it to the data-only case (ISSUE-8).
+            raise ValueError(
+                "relay:hub_image_uri is empty.\n"
+                "  - If you are deploying the compute stack: set "
+                "RELAY_HUB_IMAGE_URI or pass -c relay:hub_image_uri=<ecr-uri> "
+                "directly. Build + push first with "
+                "scripts/relay-build-hub-image.sh.\n"
+                "  - If you are deploying ONLY the data plane: pass "
+                "-c relay:image_check=false (relay-deploy-direct.sh does this "
+                "automatically when RelayComputeStack is not a target)."
+            )
+        if image_check and any(m in hub_image_uri for m in _PLACEHOLDER_IMAGE_MARKERS):
             raise ValueError(
                 "relay:hub_image_uri must be a real ECR image URI for the Relay "
                 f"container (got {hub_image_uri!r}). Build + push the image first "

@@ -114,6 +114,21 @@ def _ready_error(exc: Exception) -> str:
     return type(exc).__name__ + ": " + str(exc)
 
 
+def _is_pinpoint_sms_voice_denial(err: str) -> bool:
+    """True when a readiness error is an SCP/IAM denial of Pinpoint SMS Voice v2.
+
+    The SNS opt-out probe (list_phone_numbers_opted_out) routes internally to
+    the Pinpoint SMS Voice v2 API, so an SCP that denies that service surfaces
+    as a ``sms-voice:DescribeOptedOutNumbers`` / ``PinpointSmsVoiceV2`` denial
+    even though the runtime ``sns:Publish`` SMS path is unaffected (ISSUE-5).
+    """
+    lowered = err.lower()
+    return (
+        "sms-voice:describeoptedoutnumbers" in lowered
+        or "pinpointsmsvoicev2" in lowered
+    )
+
+
 # Map an incident's persisted state to the lifecycle event dispatched when the
 # Hub sees a genuine transition into that state over the bus. ACKNOWLEDGED and
 # RESOLVED are driven from their API endpoints (the Hub owns those transitions),
@@ -2009,39 +2024,60 @@ class HubApp:
                 }
 
             # --- SNS direct-SMS IAM probe (only when direct SMS is enabled) ---
-            # ListPhoneNumbersOptedOut is a cheap, read-only SNS call that
-            # exercises the account-level SMS opt-out path. When direct SMS is
-            # enabled (relay:enable_direct_sms=true → RELAY_ENABLE_DIRECT_SMS), a
-            # failure here is the same class of IAM denial that would silence
+            # ListPhoneNumbersOptedOut is a cheap, read-only call that exercises
+            # the account-level SMS opt-out path. When direct SMS is enabled
+            # (relay:enable_direct_sms=true → RELAY_ENABLE_DIRECT_SMS), a plain
+            # IAM denial here is the same class of failure that would silence
             # targeted SMS pages at incident time, so we probe it. It takes no
             # phone-number argument and sends no message.
             #
-            # We deliberately DO NOT use CheckIfPhoneNumberIsOptedOut: AWS routes
-            # that call internally to the Pinpoint SMS Voice v2 API
-            # (sms-voice:DescribeOptedOutNumbers). Accounts with an SCP that
-            # explicitly denies Pinpoint SMS Voice see an explicit-deny error even
-            # when direct SMS (sns:Publish to a phone number — a different path)
-            # works at runtime, producing a false "degraded". ISSUE-5.
-            # ListPhoneNumbersOptedOut stays within SNS and does not route to
-            # Pinpoint, so it reflects the capability without the false negative.
+            # Caveat (ISSUE-5): both ListPhoneNumbersOptedOut and the older
+            # CheckIfPhoneNumberIsOptedOut route internally to the Pinpoint SMS
+            # Voice v2 API (sms-voice:DescribeOptedOutNumbers). An SCP that
+            # explicitly denies Pinpoint SMS Voice v2 blocks the probe even though
+            # the actual runtime path (sns:Publish to a phone number — a separate
+            # code path) is unaffected. We therefore treat a Pinpoint-specific
+            # denial as a WARN (ok:true), not a hard failure, so those
+            # deployments stay "ok" while still surfacing the SCP constraint.
+            # RELAY_SKIP_SMS_OPTOUT_PROBE=true is an escape hatch for operators
+            # who know their account has this restriction.
             #
             # When direct SMS is NOT enabled we skip the probe entirely: the
             # RelayHubDirectSms grant is absent by design.
             _direct_sms_enabled = (
                 os.environ.get("RELAY_ENABLE_DIRECT_SMS", "").strip().lower() == "true"
             )
-            if _direct_sms_enabled:
+            _skip_optout_probe = (
+                os.environ.get("RELAY_SKIP_SMS_OPTOUT_PROBE", "").strip().lower()
+                == "true"
+            )
+            if not _direct_sms_enabled:
+                checks["sns_direct_sms"] = {
+                    "ok": True,
+                    "note": "probe skipped — enable_direct_sms not set",
+                }
+            elif _skip_optout_probe:
+                checks["sns_direct_sms"] = {
+                    "ok": True,
+                    "note": "probe skipped — RELAY_SKIP_SMS_OPTOUT_PROBE set",
+                }
+            else:
                 try:
                     _sns_sms_c = boto3.client("sns")
                     _sns_sms_c.list_phone_numbers_opted_out()
                     checks["sns_direct_sms"] = {"ok": True}
                 except Exception as exc:
-                    checks["sns_direct_sms"] = {"ok": False, "error": _ready_error(exc)}
-            else:
-                checks["sns_direct_sms"] = {
-                    "ok": True,
-                    "note": "probe skipped — enable_direct_sms not set",
-                }
+                    _err = _ready_error(exc)
+                    if _is_pinpoint_sms_voice_denial(_err):
+                        checks["sns_direct_sms"] = {
+                            "ok": True,
+                            "warn": (
+                                "opt-out probe blocked by SCP (Pinpoint SMS Voice "
+                                "v2 denied) — direct SMS publish path unaffected"
+                            ),
+                        }
+                    else:
+                        checks["sns_direct_sms"] = {"ok": False, "error": _err}
 
             # --- Config source + loaded state ---
             _cfg_source = os.environ.get(
