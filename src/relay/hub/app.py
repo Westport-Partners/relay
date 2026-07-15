@@ -2009,29 +2009,31 @@ class HubApp:
                 }
 
             # --- SNS direct-SMS IAM probe (only when direct SMS is enabled) ---
-            # CheckIfPhoneNumberIsOptedOut is a cheap, read-only SNS call that
-            # exercises the phone-number resource path. When direct SMS is enabled
-            # (relay:enable_direct_sms=true → RELAY_ENABLE_DIRECT_SMS), a failure
-            # here is exactly the error that would silence targeted SMS pages at
-            # incident time, so we probe it. The probe number (+15005550006) is a
-            # Twilio magic test number that SNS responds to without sending any
-            # real message.
+            # ListPhoneNumbersOptedOut is a cheap, read-only SNS call that
+            # exercises the account-level SMS opt-out path. When direct SMS is
+            # enabled (relay:enable_direct_sms=true → RELAY_ENABLE_DIRECT_SMS), a
+            # failure here is the same class of IAM denial that would silence
+            # targeted SMS pages at incident time, so we probe it. It takes no
+            # phone-number argument and sends no message.
+            #
+            # We deliberately DO NOT use CheckIfPhoneNumberIsOptedOut: AWS routes
+            # that call internally to the Pinpoint SMS Voice v2 API
+            # (sms-voice:DescribeOptedOutNumbers). Accounts with an SCP that
+            # explicitly denies Pinpoint SMS Voice see an explicit-deny error even
+            # when direct SMS (sns:Publish to a phone number — a different path)
+            # works at runtime, producing a false "degraded". ISSUE-5.
+            # ListPhoneNumbersOptedOut stays within SNS and does not route to
+            # Pinpoint, so it reflects the capability without the false negative.
             #
             # When direct SMS is NOT enabled we skip the probe entirely: the
-            # RelayHubDirectSms grant is absent by design, and in strict-SCP
-            # accounts this call routes to Pinpoint SMS Voice
-            # (sms-voice:DescribeOptedOutNumbers) which may be denied outright —
-            # surfacing a false "degraded" for a capability the operator never
-            # opted into.
+            # RelayHubDirectSms grant is absent by design.
             _direct_sms_enabled = (
                 os.environ.get("RELAY_ENABLE_DIRECT_SMS", "").strip().lower() == "true"
             )
             if _direct_sms_enabled:
                 try:
                     _sns_sms_c = boto3.client("sns")
-                    _sns_sms_c.check_if_phone_number_is_opted_out(
-                        phoneNumber="+15005550006"
-                    )
+                    _sns_sms_c.list_phone_numbers_opted_out()
                     checks["sns_direct_sms"] = {"ok": True}
                 except Exception as exc:
                     checks["sns_direct_sms"] = {"ok": False, "error": _ready_error(exc)}

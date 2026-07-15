@@ -264,9 +264,14 @@ error code.  Common BYOR failures:
 | `sns_paging_topic` | `AuthorizationError` | Add `sns:Publish` on the paging topic ARN |
 | `sns_direct_sms` | `AuthorizationError` | Add the `RelayHubDirectSms` statement from `ByorTaskRoleInlinePolicy` (requires `-c relay:enable_direct_sms=true` at synth time) |
 
-> **Note on `sns_direct_sms`:** This check always runs. If your deployment does
-> not use targeted per-contact SMS pages, an `ok: false` result here is
-> informational only. Direct SMS is an opt-in feature (`relay:enable_direct_sms`).
+> **Note on `sns_direct_sms`:** This check runs only when direct SMS is enabled
+> (`-c relay:enable_direct_sms=true`); otherwise it is skipped and reports
+> `ok: true` with a note. The probe calls `sns:ListPhoneNumbersOptedOut`, which
+> stays within SNS. It deliberately avoids `sns:CheckIfPhoneNumberIsOptedOut`,
+> which AWS routes internally to Pinpoint SMS Voice
+> (`sms-voice:DescribeOptedOutNumbers`) — in accounts with an SCP that denies
+> Pinpoint SMS Voice that call would report a false `degraded` even though direct
+> SMS (`sns:Publish` to a phone number, a separate path) works at runtime.
 
 ---
 

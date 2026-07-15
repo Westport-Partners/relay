@@ -507,9 +507,12 @@ class RelayComputeStack(Stack):
                 iam.PolicyStatement(
                     sid="RelayHubDirectSms",
                     effect=iam.Effect.ALLOW,
-                    # CheckIfPhoneNumberIsOptedOut backs the /health/ready
+                    # ListPhoneNumbersOptedOut backs the /health/ready
                     # sns_direct_sms probe (only run when direct SMS is enabled).
-                    actions=["sns:Publish", "sns:CheckIfPhoneNumberIsOptedOut"],
+                    # It stays within SNS — unlike CheckIfPhoneNumberIsOptedOut,
+                    # which routes to Pinpoint SMS Voice and trips SCP denies
+                    # (ISSUE-5).
+                    actions=["sns:Publish", "sns:ListPhoneNumbersOptedOut"],
                     # Direct-to-phone SMS: Publish(PhoneNumber=...) with no topic
                     # ARN, so the resource is "*". Scope by region rather than by
                     # sns:Protocol — sns:Protocol is a Subscribe-only condition key
@@ -993,9 +996,12 @@ class RelayComputeStack(Stack):
             task_statements.append({
                 "Sid": "RelayHubDirectSms",
                 "Effect": "Allow",
-                # CheckIfPhoneNumberIsOptedOut backs the /health/ready
+                # ListPhoneNumbersOptedOut backs the /health/ready
                 # sns_direct_sms probe (only run when direct SMS is enabled).
-                "Action": ["sns:Publish", "sns:CheckIfPhoneNumberIsOptedOut"],
+                # It stays within SNS — unlike CheckIfPhoneNumberIsOptedOut,
+                # which routes to Pinpoint SMS Voice and trips SCP denies
+                # (ISSUE-5).
+                "Action": ["sns:Publish", "sns:ListPhoneNumbersOptedOut"],
                 # See the non-BYOR grant above: direct-to-phone Publish carries no
                 # sns:Protocol context key, so scope by region, not protocol.
                 "Resource": "*",
