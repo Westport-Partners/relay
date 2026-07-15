@@ -520,10 +520,16 @@ fi
 _progress ""
 _progress "--- 6. BYOV egress (NAT or VPC endpoints) ---"
 
-# Operators following the ecs-clean-start / deploy-byor path pass the VPC as a
-# CDK context flag (-c relay:vpc_id=...) rather than the RELAY_VPC_ID env var, so
-# fall back to cdk.context.json before concluding "not BYOV" (ISSUE-7).
+# BYOV can be signalled two ways: the RELAY_VPC_ID env var, or -c relay:vpc_id=...
+# on the deploy command (the deploy-byor / ecs-clean-start path). CDK does NOT
+# persist the passed `relay:vpc_id` context value, but `ec2.Vpc.from_lookup`
+# DOES cache the resolved VPC under a `vpc-provider:...filter.vpc-id=<id>...` key
+# in cdk.context.json once a synth/deploy has run. We read that so a BYOV deploy
+# driven purely by CDK context is still egress-checked (ISSUE-7). When BYOV is
+# detected only via the cache (RELAY_VPC_ID unset), we WARN rather than silently
+# PASS, since the env-var-gated checks below can't see the operator's real intent.
 _byov_vpc_id="${RELAY_VPC_ID:-}"
+_byov_from_cache=""
 if [ -z "${_byov_vpc_id}" ]; then
   _repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   _cdk_ctx="${_repo_root}/cdk.context.json"
@@ -533,14 +539,23 @@ try:
     d=json.load(open(sys.argv[1]))
 except Exception:
     print(''); sys.exit(0)
-print(d.get('relay:vpc_id') or '')" "${_cdk_ctx}" 2>/dev/null || echo "")"
+for k, v in d.items():
+    if k.startswith('vpc-provider:') and isinstance(v, dict) and v.get('vpcId'):
+        print(v['vpcId']); break
+else:
+    print('')" "${_cdk_ctx}" 2>/dev/null || echo "")"
+    [ -n "${_byov_vpc_id}" ] && _byov_from_cache="yes"
   fi
 fi
 
 if [ -z "${_byov_vpc_id}" ]; then
   _record PASS "byov-egress" "not BYOV (no VPC configured — Relay creates a NAT-equipped VPC)" \
-    "If this IS a BYOV deploy, set RELAY_VPC_ID=<vpc-id> (or -c relay:vpc_id=<vpc-id> in cdk.context.json) before running preflight so the egress check can validate NAT/endpoint coverage."
+    "If this IS a BYOV deploy, set RELAY_VPC_ID=<vpc-id> (or run a synth with -c relay:vpc_id=<vpc-id> first) before running preflight so the egress check can validate NAT/endpoint coverage."
   _progress "  skipped: not BYOV"
+elif [ -n "${_byov_from_cache}" ] && [ -z "${_AWS_REGION_RESOLVED}" ]; then
+  _record WARN "byov-egress" "BYOV detected via cdk.context.json (${_byov_vpc_id}) but RELAY_VPC_ID unset and no region resolved — egress check skipped" \
+    "set RELAY_VPC_ID=${_byov_vpc_id} and AWS_REGION, then re-run to validate NAT/endpoint coverage"
+  _progress "  WARN: BYOV via cache, no region — egress check skipped"
 elif [ -z "${_AWS_REGION_RESOLVED}" ]; then
   _record WARN "byov-egress" "skipped (no region resolved — cannot query VPC egress)" \
     "set AWS_REGION and re-run to verify NAT/endpoint coverage for ${_byov_vpc_id}"
