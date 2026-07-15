@@ -124,7 +124,7 @@ def _good_boto3() -> MagicMock:
     mock.describe_table.return_value = {"Table": {"TableName": "relay-hub-fleet"}}
     mock.get_queue_attributes.return_value = {"Attributes": {"ApproximateNumberOfMessages": "0"}}
     mock.get_topic_attributes.return_value = {"Attributes": {"TopicArn": "arn:aws:sns:us-east-1:123:test"}}
-    mock.check_if_phone_number_is_opted_out.return_value = {"isOptedOut": False}
+    mock.list_phone_numbers_opted_out.return_value = {"phoneNumbers": []}
     return mock
 
 
@@ -149,7 +149,7 @@ def _boto3_factory(success: dict[str, Any], fail_on: set[str] | None = None) -> 
             m.describe_table.side_effect = _raise
             m.get_queue_attributes.side_effect = _raise
             m.get_topic_attributes.side_effect = _raise
-            m.check_if_phone_number_is_opted_out.side_effect = _raise
+            m.list_phone_numbers_opted_out.side_effect = _raise
             return m
         return success.get(service, _good_boto3())
 
@@ -320,11 +320,11 @@ class TestHealthReady:
                         "Message": "SNS:Publish denied on phone resources",
                     }
                 },
-                "CheckIfPhoneNumberIsOptedOut",
+                "ListPhoneNumbersOptedOut",
             )
 
         mock = _good_boto3()
-        mock.check_if_phone_number_is_opted_out.side_effect = _raise
+        mock.list_phone_numbers_opted_out.side_effect = _raise
         monkeypatch.setattr("relay.hub.app.boto3.client", lambda svc, **kw: mock)
 
         client = _client()
@@ -343,10 +343,9 @@ class TestHealthReady:
     ) -> None:
         """Without RELAY_ENABLE_DIRECT_SMS the probe is skipped (ok=true, note).
 
-        The probe must not call CheckIfPhoneNumberIsOptedOut — in strict-SCP
-        accounts that call routes to Pinpoint SMS Voice and can be denied
-        outright, so a deployment that never opted into direct SMS must not go
-        degraded on its account.
+        A deployment that never opted into direct SMS must not run the probe at
+        all — the RelayHubDirectSms grant is absent by design, so probing would
+        surface a spurious denial.
         """
         mock = _good_boto3()
         monkeypatch.setattr("relay.hub.app.boto3.client", lambda svc, **kw: mock)
@@ -363,6 +362,31 @@ class TestHealthReady:
         assert sms["ok"] is True
         assert "skipped" in sms.get("note", "")
         assert body["status"] == "ok"
+        mock.list_phone_numbers_opted_out.assert_not_called()
+
+    def test_sns_direct_sms_never_routes_to_pinpoint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression (ISSUE-5): the direct-SMS probe must never call an SNS API
+        that AWS routes internally to Pinpoint SMS Voice.
+
+        CheckIfPhoneNumberIsOptedOut routes to sms-voice:DescribeOptedOutNumbers,
+        which strict-SCP accounts deny outright even when direct SMS works at
+        runtime — a false degraded. This test fails closed if the probe is ever
+        switched back to a Pinpoint-routing call, a class of bug that a mocked
+        boto3 client cannot otherwise surface (the mock has no real routing).
+        """
+        mock = _good_boto3()
+        monkeypatch.setattr("relay.hub.app.boto3.client", lambda svc, **kw: mock)
+        monkeypatch.setenv("RELAY_ENABLE_DIRECT_SMS", "true")
+
+        client = _client()
+        resp = client.get("/health/ready")
+        assert resp.status_code == 200
+        assert resp.json()["checks"]["sns_direct_sms"]["ok"] is True
+        # The probe must use the SNS-local opt-out list call...
+        mock.list_phone_numbers_opted_out.assert_called_once()
+        # ...and never the phone-number check that AWS routes to Pinpoint.
         mock.check_if_phone_number_is_opted_out.assert_not_called()
 
     def test_config_loaded_present(self, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -56,8 +56,10 @@ locals {
     var.enable_direct_sms ? [{
       Sid    = "RelayHubDirectSms"
       Effect = "Allow"
-      # CheckIfPhoneNumberIsOptedOut backs the /health/ready sns_direct_sms probe.
-      Action = ["sns:Publish", "sns:CheckIfPhoneNumberIsOptedOut"]
+      # ListPhoneNumbersOptedOut backs the /health/ready sns_direct_sms probe. It
+      # stays within SNS — unlike CheckIfPhoneNumberIsOptedOut, which routes to
+      # Pinpoint SMS Voice and trips SCP denies (ISSUE-5).
+      Action = ["sns:Publish", "sns:ListPhoneNumbersOptedOut"]
       # Scope by region, not sns:Protocol: Protocol is a Subscribe-only condition
       # key, absent from a Publish request context, so gating on it fails closed
       # and silently breaks direct paging (mirrors compute_stack.py).

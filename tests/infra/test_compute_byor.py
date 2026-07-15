@@ -205,7 +205,7 @@ def test_byor_task_policy_includes_health_probe_actions() -> None:
     Without these three read-only actions a fresh BYOR deploy reports
     /health/ready as degraded even when the runtime grants are otherwise
     correct: DynamoDB describe, SNS GetTopicAttributes, and (when direct SMS is
-    enabled) CheckIfPhoneNumberIsOptedOut.
+    enabled) ListPhoneNumbersOptedOut.
     """
     template = _synth_compute({"relay:enable_direct_sms": "true"})
     outputs = template.find_outputs("*")
@@ -213,11 +213,16 @@ def test_byor_task_policy_includes_health_probe_actions() -> None:
     for action in (
         "dynamodb:DescribeTable",
         "sns:GetTopicAttributes",
-        "sns:CheckIfPhoneNumberIsOptedOut",
+        "sns:ListPhoneNumbersOptedOut",
     ):
         assert action in text, (
             f"health-probe action '{action}' missing from ByorTaskRoleInlinePolicy"
         )
+    # ISSUE-5: the probe must not require the Pinpoint-routing action.
+    assert "sns:CheckIfPhoneNumberIsOptedOut" not in text, (
+        "ByorTaskRoleInlinePolicy still grants sns:CheckIfPhoneNumberIsOptedOut, "
+        "which routes to Pinpoint SMS Voice and trips SCP denies"
+    )
 
 
 def test_byor_task_policy_is_literal_json_no_intrinsics() -> None:
