@@ -59,3 +59,40 @@ jobs:
           build-args: |
             RELAY_BUILD_SHA=${{ github.sha }}
             RELAY_BUILD_TIME=${{ github.event.repository.updated_at }}
+
+  publish-templates:
+    name: Publish CFN templates + BYOR policy docs
+    # Only a real version-tag push (not the main-branch push or manual dispatch
+    # this workflow also triggers on) creates a release to attach assets to.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[infra]"
+
+      - name: Synth release templates + BYOR policy bundle
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./scripts/relay-synth-release-templates.sh "$VERSION"
+
+      - name: Create or update GitHub release with artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" cdk.out/release-artifacts/*.json --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" cdk.out/release-artifacts/*.json --generate-notes
+          fi

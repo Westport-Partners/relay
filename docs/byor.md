@@ -101,6 +101,150 @@ secret (when AI is enabled); alarm and resource tag-read APIs
 **Trust policy** — Both roles need `ecs-tasks.amazonaws.com` as a trusted principal. The
 `ByorEcsRoleTrust` output contains the exact trust document.
 
+### Example policy documents (for pre-deploy security review)
+
+The documents below are the literal output of a representative synth (placeholder account
+`123456789012`, placeholder team `example-team`, region `us-east-1`, no BYOV) — they let a
+security team review the exact permission shape **before** any deploy is attempted, breaking
+the chicken-and-egg problem this section exists to solve: you can't get the real policy
+without deploying, and you can't get pre-approval to deploy without the policy.
+
+Your real ARNs will carry your account id, team name, and region instead of the placeholders
+above — this is the shape, not a promise of the exact resource names for every deployment.
+As noted above, some statements (direct-to-contact SMS, AI, federation-forwarding) are
+conditional on synth-time flags and won't all appear for every deployment.
+
+Task role inline policy (`ByorTaskRoleInlinePolicy`):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RelayHubFleetTable",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:Query",
+        "dynamodb:DeleteItem",
+        "dynamodb:Scan",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:BatchGetItem",
+        "dynamodb:DescribeTable"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-east-1:123456789012:table/relay-example-team",
+        "arn:aws:dynamodb:us-east-1:123456789012:table/relay-example-team/index/*"
+      ]
+    },
+    {
+      "Sid": "RelayHubPaging",
+      "Effect": "Allow",
+      "Action": [
+        "sns:Publish",
+        "sns:GetTopicAttributes"
+      ],
+      "Resource": [
+        "arn:aws:sns:us-east-1:123456789012:relay-example-team-central-paging",
+        "arn:aws:sns:us-east-1:123456789012:relay-example-team-paging"
+      ]
+    },
+    {
+      "Sid": "RelayHubPagingSubscriptions",
+      "Effect": "Allow",
+      "Action": [
+        "sns:ListSubscriptionsByTopic",
+        "sns:Subscribe"
+      ],
+      "Resource": [
+        "arn:aws:sns:us-east-1:123456789012:relay-example-team-paging"
+      ]
+    },
+    {
+      "Sid": "RelayHubIngestConsume",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:GetQueueAttributes",
+        "sqs:GetQueueUrl"
+      ],
+      "Resource": "arn:aws:sqs:us-east-1:123456789012:relay-hub-ingest"
+    },
+    {
+      "Sid": "RelayAlarmTagResolution",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:ListTagsForResource",
+        "lambda:ListTags",
+        "sqs:ListQueueTags",
+        "ecs:ListTagsForResource",
+        "ec2:DescribeTags"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+Execution role inline policy (`ByorExecutionRoleInlinePolicy`):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RelayHubEcr",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RelayHubLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:us-east-1:123456789012:log-group:/relay/hub:*"
+    }
+  ]
+}
+```
+
+ECS trust policy (`ByorEcsRoleTrust`):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "123456789012"
+        }
+      }
+    }
+  ]
+}
+```
+
+These same three documents are also published as a release asset
+(`relay-byor-inline-policies-<version>.json`) alongside the CFN templates on each tagged
+release, for teams that want a stable versioned artifact for change-management purposes.
+
 ---
 
 ## BYOV — Bring-Your-Own-VPC
