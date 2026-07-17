@@ -254,6 +254,34 @@ A healthy deployment returns:
 }
 ```
 
+> **Fresh deploy with no config:** The example above reflects a deployment with a
+> populated `config/routing.yaml`. A first-time deploy with no user-supplied config
+> returns `"loaded": false` and `"count": 0` for `config_loaded`,
+> `ignore_rules_seeded`, and `routing_rules_seeded` — this is correct and expected.
+> The deployment is healthy; routing rules are seeded only after configuration is
+> applied (see [`prompts/configure.md`](../prompts/configure.md)).
+
+> **SCP-restricted accounts:** In accounts where `sms-voice:DescribeOptedOutNumbers`
+> is SCP-denied (Pinpoint SMS Voice v2 blocked), `sns_direct_sms` returns an extra
+> `"warn"` field: `{"ok": true, "warn": "opt-out probe blocked by SCP (Pinpoint SMS
+> Voice v2 denied) — direct SMS publish path unaffected"}`. This is expected; `ok`
+> stays `true` and routing is unaffected.
+
+> **EXPRESS re-deploys:** If you used `RELAY_CFN_MODE=EXPRESS` on a re-deploy onto
+> a running service, `wait services-stable` gates only on `runningCount ==
+> desiredCount` — it can return while the service is still running the prior image.
+> Before trusting `/health/ready` on an EXPRESS re-deploy, confirm the running task
+> is on the expected image:
+> ```bash
+> TASK_ARN=$(aws ecs list-tasks --cluster relay-hub --service-name relay-hub \
+>   --region us-east-1 --query 'taskArns[0]' --output text)
+> aws ecs describe-tasks --cluster relay-hub --tasks "$TASK_ARN" \
+>   --region us-east-1 --query 'tasks[0].containers[0].image' --output text
+> ```
+> This does not apply to first-time deploys (no prior task) or STANDARD mode deploys.
+> See the Express Mode section in [`prompts/deploy-byor.md`](../prompts/deploy-byor.md)
+> for the full force-redeploy recovery steps.
+
 If `status` is `"degraded"`, the failing check's `error` field names the AWS
 error code.  Common BYOR failures:
 
