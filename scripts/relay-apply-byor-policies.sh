@@ -12,10 +12,18 @@
 # are easy to fat-finger, and it is the single most common place operators get
 # stuck on a first BYOR deploy (SUGGEST-2). This script automates all of it.
 #
-# The three policy documents are read straight from the already-deployed
-# RelayComputeStack's CloudFormation outputs — so this must be run AFTER
-# `cdk synth` has produced a template and that template (or a prior deploy)
-# has populated the stack's outputs. See prompts/deploy-byor.md Step 2.
+# The three policy documents are read from the synthesized
+# cdk.out/RelayComputeStack.template.json (same source as prompts/deploy-byor.md
+# Step 2's `cat cdk.out/... | jq .Outputs`), falling back to the deployed
+# stack's live CloudFormation Outputs if no local template is found. The
+# template is the primary source deliberately: on a genuine first-time BYOR
+# deploy, the ECS task can't start without the very policies this script
+# applies, so the deploy's ECS circuit breaker trips and the stack lands in
+# ROLLBACK_COMPLETE with Outputs=null — describe-stacks alone would leave this
+# script unable to bootstrap the first deploy it exists to unblock. Run
+# `relay-synth.sh` (or a prior `relay-deploy-direct.sh` attempt, successful or
+# not) with the BYOR context flags first so cdk.out/ is populated. See
+# prompts/deploy-byor.md Step 2.
 #
 # TRUST POLICY SAFETY
 # --------------------
@@ -50,6 +58,10 @@ STACK_NAME="RelayComputeStack"
 CLUSTER_NAME="relay-hub"
 SERVICE_NAME="relay-hub"
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RELAY_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TEMPLATE_FILE="${RELAY_ROOT}/cdk.out/${STACK_NAME}.template.json"
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -89,21 +101,33 @@ echo "Task role:       ${TASK_ROLE_NAME}" >&2
 echo "Execution role:  ${EXEC_ROLE_NAME}" >&2
 
 # ---------------------------------------------------------------------------
-# 1. Read the three policy documents from the stack's CloudFormation outputs.
+# 1. Read the three policy documents — prefer the synthesized template (works
+#    even when the stack itself is ROLLBACK_COMPLETE / has no live outputs),
+#    falling back to the deployed stack's CloudFormation outputs.
 # ---------------------------------------------------------------------------
 echo "" >&2
-echo "--- Reading policy outputs from ${STACK_NAME} ---" >&2
 
-_outputs_json="$(aws cloudformation describe-stacks \
-      --stack-name "${STACK_NAME}" \
-      --region "${AWS_REGION}" \
-      --query 'Stacks[0].Outputs' \
-      --output json 2>&1)" || {
-  echo "ERROR: could not describe stack '${STACK_NAME}' in ${AWS_REGION}:" >&2
-  echo "  ${_outputs_json}" >&2
-  echo "  Synth/deploy the compute stack first (see prompts/deploy-byor.md Step 2)." >&2
-  exit 1
-}
+if [ -f "${TEMPLATE_FILE}" ]; then
+  echo "--- Reading policy outputs from ${TEMPLATE_FILE} ---" >&2
+  _outputs_json="$(jq '.Outputs | to_entries | map({OutputKey: .key, OutputValue: .value.Value})' \
+        "${TEMPLATE_FILE}" 2>&1)" || {
+    echo "ERROR: could not parse ${TEMPLATE_FILE} as JSON:" >&2
+    echo "  ${_outputs_json}" >&2
+    exit 1
+  }
+else
+  echo "--- No local template at ${TEMPLATE_FILE} — reading live outputs from ${STACK_NAME} ---" >&2
+  _outputs_json="$(aws cloudformation describe-stacks \
+        --stack-name "${STACK_NAME}" \
+        --region "${AWS_REGION}" \
+        --query 'Stacks[0].Outputs' \
+        --output json 2>&1)" || {
+    echo "ERROR: could not describe stack '${STACK_NAME}' in ${AWS_REGION}:" >&2
+    echo "  ${_outputs_json}" >&2
+    echo "  Synth the compute stack first with the BYOR context flags (see prompts/deploy-byor.md Step 2)." >&2
+    exit 1
+  }
+fi
 
 _get_output() {
   local _key="$1"
