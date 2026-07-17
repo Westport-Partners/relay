@@ -174,7 +174,12 @@ cat cdk.out/RelayComputeStack.template.json | jq '.Outputs'
 
 ### 3. An admin applies the policies
 
-Have an account administrator:
+Recommended: have the administrator run `scripts/relay-apply-byor-policies.sh
+<task-role-name> <exec-role-name>` — it reads the three outputs above straight from
+the stack, applies the inline policies, and safely merges the trust statement into
+each role (never overwriting existing trust entries). See
+[`prompts/deploy-byor.md` Step 3](https://github.com/Westport-Partners/relay/blob/main/prompts/deploy-byor.md#step-3--account-administrator-applies-the-policies)
+for the full walkthrough, including the manual IAM-console fallback:
 
 1. Open **IAM → Roles → (task role) → Add permissions → Create inline policy**, choose
    JSON, paste `ByorTaskRoleInlinePolicy`, and save.
@@ -259,7 +264,7 @@ A healthy deployment returns:
 > returns `"loaded": false` and `"count": 0` for `config_loaded`,
 > `ignore_rules_seeded`, and `routing_rules_seeded` — this is correct and expected.
 > The deployment is healthy; routing rules are seeded only after configuration is
-> applied (see [`prompts/configure.md`](../prompts/configure.md)).
+> applied (see [`prompts/configure.md`](https://github.com/Westport-Partners/relay/blob/main/prompts/configure.md)).
 
 > **SCP-restricted accounts:** In accounts where `sms-voice:DescribeOptedOutNumbers`
 > is SCP-denied (Pinpoint SMS Voice v2 blocked), `sns_direct_sms` returns an extra
@@ -276,10 +281,15 @@ A healthy deployment returns:
 > TASK_ARN=$(aws ecs list-tasks --cluster relay-hub --service-name relay-hub \
 >   --region us-east-1 --query 'taskArns[0]' --output text)
 > aws ecs describe-tasks --cluster relay-hub --tasks "$TASK_ARN" \
->   --region us-east-1 --query 'tasks[0].containers[0].image' --output text
+>   --region us-east-1 \
+>   --query "tasks[0].containers[?name=='relay-hub'].image | [0]" --output text
 > ```
+> Query by container **name**, not index. In accounts with AWS GuardDuty Runtime
+> Monitoring enabled, ECS injects a GuardDuty agent sidecar that can appear as
+> `containers[0]`, shadowing the real `relay-hub` container (which has no fixed
+> index once a sidecar is present) — an index-based query silently returns `None`.
 > This does not apply to first-time deploys (no prior task) or STANDARD mode deploys.
-> See the Express Mode section in [`prompts/deploy-byor.md`](../prompts/deploy-byor.md)
+> See the Express Mode section in [`prompts/deploy-byor.md`](https://github.com/Westport-Partners/relay/blob/main/prompts/deploy-byor.md)
 > for the full force-redeploy recovery steps.
 
 If `status` is `"degraded"`, the failing check's `error` field names the AWS

@@ -185,15 +185,43 @@ The three outputs to hand to the account administrator:
 
 ## Step 3 — Account administrator applies the policies
 
-Have the administrator:
+Have the administrator run **`scripts/relay-apply-byor-policies.sh`** (needs `aws` +
+`jq`, and permission to call `iam:PutRolePolicy` / `iam:UpdateAssumeRolePolicy` on
+both roles):
+
+```bash
+./scripts/relay-apply-byor-policies.sh <task-role-name> <exec-role-name>
+
+# Also force a fresh ECS deployment so running tasks pick up the new
+# permissions immediately (otherwise they take effect on the next deploy):
+./scripts/relay-apply-byor-policies.sh <task-role-name> <exec-role-name> --force-redeploy
+```
+
+The script:
+
+1. Reads `ByorTaskRoleInlinePolicy`, `ByorExecutionRoleInlinePolicy`, and
+   `ByorEcsRoleTrust` from the `RelayComputeStack` CloudFormation outputs (from
+   Step 2 — synth or deploy the compute stack first).
+2. `iam:PutRolePolicy`'s the two inline policies onto the task and execution roles.
+3. Merges `ecs-tasks.amazonaws.com` into **both** roles' trust policies — safely: if a
+   role already trusts `ecs-tasks.amazonaws.com` it's a no-op, otherwise the required
+   trust statement is **appended** alongside whatever the role already trusts (it
+   never overwrites the existing document). If the merge can't be computed
+   confidently, it prints the current trust doc and the exact statement to add, and
+   asks you to apply it by hand instead of guessing.
+
+Idempotent — safe to re-run after a re-synth (e.g. if the policy content changed).
+
+> If one role covers both task and execution responsibilities, pass that same role
+> name as both arguments — the script applies both inline policies to it.
+
+**Manual fallback** (if you prefer the IAM console or don't have `jq`):
 
 1. Open **IAM → Roles → (task role) → Add permissions → Create inline policy** → JSON tab → paste `ByorTaskRoleInlinePolicy` → save.
 2. Repeat for `ByorExecutionRoleInlinePolicy` on the execution role.
 3. Update the trust policy on **both** roles to include `ByorEcsRoleTrust` — merge it with any existing trust entries; do not replace.
 
 Both roles need `ecs-tasks.amazonaws.com` as a trusted principal. The `ByorEcsRoleTrust` output contains the exact trust document.
-
-> If one role covers both task and execution responsibilities, apply **both** inline policies to that single role.
 
 ---
 
@@ -265,6 +293,22 @@ RELAY_STACK_SELECTOR=compute \
   -c relay:vpc_id=$VPC_ID
 ```
 
+> **`RELAY_HUB_IMAGE_URI` does not survive a new shell.** If you built the image in
+> one terminal/session and are running this re-deploy in another (a new tab, a new
+> SSH session, or separate automation tool calls), the `export` from the build step
+> is gone here — the command above then fails with the misleading
+> `relay:hub_image_uri is empty` error, because the variable was never actually in
+> scope. Rather than re-exporting by hand, resolve it fresh from ECR:
+>
+> ```bash
+> RELAY_HUB_IMAGE_URI="$(./scripts/relay-get-latest-image.sh)"
+> ```
+>
+> `relay-get-latest-image.sh` queries ECR directly for the most recently pushed
+> `relay-hub` tag and prints the fully-qualified URI — it doesn't rely on anything
+> exported earlier, so Steps that build and Steps that deploy can run in completely
+> independent shells.
+
 > **Same image tag = no rollout.** CloudFormation only starts an ECS deployment when
 > the task definition changes. `relay-build-hub-image.sh` tags by git short SHA, so a
 > normal commit-and-rebuild produces a new tag and rolls automatically. But if you
@@ -314,8 +358,13 @@ RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
   TASK_ARN=$(aws ecs list-tasks --cluster relay-hub --service-name relay-hub \
     --region us-east-1 --query 'taskArns[0]' --output text)
   aws ecs describe-tasks --cluster relay-hub --tasks "$TASK_ARN" \
-    --region us-east-1 --query 'tasks[0].containers[0].image' --output text
+    --region us-east-1 \
+    --query "tasks[0].containers[?name=='relay-hub'].image | [0]" --output text
   ```
+  Query by container **name**, not index — in accounts with AWS GuardDuty Runtime
+  Monitoring enabled, ECS can inject an agent sidecar that appears as
+  `containers[0]`, shadowing the real `relay-hub` container and causing an
+  index-based query to silently return `None`.
   If it doesn't match, force a fresh roll of the latest task definition and wait again:
   ```bash
   LATEST=$(aws ecs describe-services --cluster relay-hub --services relay-hub \

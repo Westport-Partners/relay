@@ -526,8 +526,13 @@ _progress "--- 6. BYOV egress (NAT or VPC endpoints) ---"
 # DOES cache the resolved VPC under a `vpc-provider:...filter.vpc-id=<id>...` key
 # in cdk.context.json once a synth/deploy has run. We read that so a BYOV deploy
 # driven purely by CDK context is still egress-checked (ISSUE-7). When BYOV is
-# detected only via the cache (RELAY_VPC_ID unset), we WARN rather than silently
-# PASS, since the env-var-gated checks below can't see the operator's real intent.
+# detected only via the cache (RELAY_VPC_ID unset), we ALWAYS WARN rather than
+# running the real NAT/endpoint scan — even when a region happens to be
+# resolved. Running the real scan here would risk a misleading plain PASS:
+# it would report on whatever VPC last got cached, not on what the operator's
+# actual deploy env has wired up (RELAY_VPC_ID unset means the compute stack
+# itself has no confirmed signal to use this VPC either). Only a genuinely
+# operator-set RELAY_VPC_ID unlocks the real PASS/WARN-by-findings check below.
 _byov_vpc_id="${RELAY_VPC_ID:-}"
 _byov_from_cache=""
 if [ -z "${_byov_vpc_id}" ]; then
@@ -556,6 +561,10 @@ elif [ -n "${_byov_from_cache}" ] && [ -z "${_AWS_REGION_RESOLVED}" ]; then
   _record WARN "byov-egress" "BYOV detected via cdk.context.json (${_byov_vpc_id}) but RELAY_VPC_ID unset and no region resolved — egress check skipped" \
     "set RELAY_VPC_ID=${_byov_vpc_id} and AWS_REGION, then re-run to validate NAT/endpoint coverage"
   _progress "  WARN: BYOV via cache, no region — egress check skipped"
+elif [ -n "${_byov_from_cache}" ]; then
+  _record WARN "byov-egress" "BYOV detected via cdk.context.json (${_byov_vpc_id}) but RELAY_VPC_ID not set — egress check skipped" \
+    "set RELAY_VPC_ID=${_byov_vpc_id} before running preflight so the egress check can validate NAT/endpoint coverage for ${_byov_vpc_id}"
+  _progress "  WARN: BYOV via cache — egress check skipped (set RELAY_VPC_ID to validate)"
 elif [ -z "${_AWS_REGION_RESOLVED}" ]; then
   _record WARN "byov-egress" "skipped (no region resolved — cannot query VPC egress)" \
     "set AWS_REGION and re-run to verify NAT/endpoint coverage for ${_byov_vpc_id}"

@@ -66,6 +66,11 @@ echo "$RELAY_HUB_IMAGE_URI"
 # expected: something like 123456789012.dkr.ecr.us-east-1.amazonaws.com/relay-hub:abc1234
 ```
 
+> If a later step runs in a separate shell (a new terminal tab, a new SSH session, or
+> separate automation tool calls) this `export` won't be visible there. Use
+> `./scripts/relay-get-latest-image.sh` in that shell instead to re-resolve the URI
+> from ECR — see the callout in [`prompts/deploy-byor.md`](deploy-byor.md#scoped-re-deploys-in-byor-mode).
+
 ---
 
 ## Step 3 — Synthesize and review (no AWS writes)
