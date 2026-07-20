@@ -580,19 +580,17 @@ if [ -z "${_byov_vpc_id}" ]; then
   _record PASS "byov-egress" "not BYOV (no VPC configured — Relay creates a NAT-equipped VPC)" \
     "If this IS a BYOV deploy, set RELAY_VPC_ID=<vpc-id> (or run a synth with -c relay:vpc_id=<vpc-id> first) before running preflight so the egress check can validate NAT/endpoint coverage."
   _progress "  skipped: not BYOV"
-elif [ -n "${_byov_from_cache}" ] && [ -z "${_AWS_REGION_RESOLVED}" ]; then
-  _record WARN "byov-egress" "BYOV detected via cdk.context.json (${_byov_vpc_id}) but RELAY_VPC_ID unset and no region resolved — egress check skipped" \
-    "set RELAY_VPC_ID=${_byov_vpc_id} and AWS_REGION, then re-run to validate NAT/endpoint coverage"
-  _progress "  WARN: BYOV via cache, no region — egress check skipped"
-elif [ -n "${_byov_from_cache}" ]; then
-  _record WARN "byov-egress" "BYOV detected via cdk.context.json (${_byov_vpc_id}) but RELAY_VPC_ID not set — egress check skipped" \
-    "set RELAY_VPC_ID=${_byov_vpc_id} before running preflight so the egress check can validate NAT/endpoint coverage for ${_byov_vpc_id}"
-  _progress "  WARN: BYOV via cache — egress check skipped (set RELAY_VPC_ID to validate)"
 elif [ -z "${_AWS_REGION_RESOLVED}" ]; then
-  _record WARN "byov-egress" "skipped (no region resolved — cannot query VPC egress)" \
+  _record WARN "byov-egress" "skipped (no region resolved — cannot query VPC egress for ${_byov_vpc_id})" \
     "set AWS_REGION and re-run to verify NAT/endpoint coverage for ${_byov_vpc_id}"
   _progress "  WARN: skipped BYOV egress check (no region)"
 else
+  # When the VPC came from the CDK context cache, note the source in the result
+  # message but run the real NAT/endpoint scan — the operator ran a synth with
+  # -c relay:vpc_id=... so the cached value IS the intended deploy VPC.
+  _byov_src=""
+  [ -n "${_byov_from_cache}" ] && _byov_src=" (source: cdk.context.json)"
+
   # NAT gateways in the VPC (available state only).
   _nat_count="$(aws ec2 describe-nat-gateways \
         --filter "Name=vpc-id,Values=${_byov_vpc_id}" "Name=state,Values=available" \
@@ -605,11 +603,11 @@ else
         --query 'VpcEndpoints[].ServiceName' --output text 2>/dev/null || echo "skip")"
 
   if [ "${_nat_count}" = "skip" ] || [ "${_endpoint_services}" = "skip" ]; then
-    _record WARN "byov-egress" "could not query VPC egress (ec2:DescribeNatGateways / DescribeVpcEndpoints denied)" \
+    _record WARN "byov-egress" "could not query VPC egress (ec2:DescribeNatGateways / DescribeVpcEndpoints denied)${_byov_src}" \
       "Grant ec2:DescribeNatGateways + ec2:DescribeVpcEndpoints, or manually confirm the VPC has a NAT gateway or the required interface endpoints (see docs/byor.md 'BYOV' table)."
     _progress "  WARN: skipped BYOV egress scan (describe denied)"
   elif [ "${_nat_count:-0}" -gt 0 ] 2>/dev/null; then
-    _record PASS "byov-egress" "${_nat_count} NAT gateway(s) in ${_byov_vpc_id} — private-subnet egress available"
+    _record PASS "byov-egress" "${_nat_count} NAT gateway(s) in ${_byov_vpc_id} — private-subnet egress available${_byov_src}"
     _progress "  ${_nat_count} NAT gateway(s) present"
   else
     # No NAT: require the interface/gateway endpoints Relay depends on.
@@ -623,10 +621,10 @@ else
     done
     _missing="${_missing# }"
     if [ -z "${_missing}" ]; then
-      _record PASS "byov-egress" "no NAT, but all required VPC endpoints present in ${_byov_vpc_id}"
+      _record PASS "byov-egress" "no NAT, but all required VPC endpoints present in ${_byov_vpc_id}${_byov_src}"
       _progress "  no NAT, but all required endpoints present"
     else
-      _record WARN "byov-egress" "${_byov_vpc_id}: no NAT gateway and missing endpoints: ${_missing}" \
+      _record WARN "byov-egress" "${_byov_vpc_id}: no NAT gateway and missing endpoints: ${_missing}${_byov_src}" \
         "Request either a NAT gateway or these interface/gateway VPC endpoints from your network team: ${_missing} (full names: com.amazonaws.${_AWS_REGION_RESOLVED}.<service>). See the 'BYOV' table in docs/byor.md. Without egress, ECS tasks fail to start."
       _progress "  WARN: no NAT, missing endpoints: ${_missing}"
     fi

@@ -274,6 +274,90 @@ _deploy_express() {
   fi
 }
 
+# After an EXPRESS compute deploy, CloudFormation returns as soon as resource
+# configuration is applied — ECS is still rolling the new task in the background.
+# This function:
+#   1. Waits for the service to reach runningCount == desiredCount.
+#   2. Checks whether the running task is on the expected image.
+#   3. If not (old healthy task kept serving while the new one was starting),
+#      force-triggers a fresh ECS deployment with the latest ACTIVE task definition
+#      and waits again.
+# Skipped on first-time creates (no prior task) and when RELAY_HUB_IMAGE_URI is
+# unset (no expected tag to compare against).
+_express_verify_compute() {
+  local _cluster="relay-hub" _service="relay-hub"
+
+  echo "" >&2
+  echo "EXPRESS mode: waiting for ECS service to stabilize..." >&2
+  if ! aws ecs wait services-stable \
+      --cluster "${_cluster}" --services "${_service}" \
+      --region "${AWS_REGION}" 2>/dev/null; then
+    echo "WARN: 'wait services-stable' timed out or failed — check ECS console." >&2
+    return 0
+  fi
+
+  # If no expected image was given, skip the image-match check.
+  if [ -z "${RELAY_HUB_IMAGE_URI:-}" ]; then
+    echo "EXPRESS mode: service stable (RELAY_HUB_IMAGE_URI not set — skipping image check)." >&2
+    return 0
+  fi
+
+  # Get the running task ARN (there should be exactly one on a team topology).
+  local _task_arn
+  _task_arn="$(aws ecs list-tasks \
+    --cluster "${_cluster}" --service-name "${_service}" \
+    --region "${AWS_REGION}" \
+    --query 'taskArns[0]' --output text 2>/dev/null || echo "")"
+
+  if [ -z "${_task_arn}" ] || [ "${_task_arn}" = "None" ]; then
+    echo "EXPRESS mode: service stable but no running task found — nothing to verify." >&2
+    return 0
+  fi
+
+  local _running_image
+  _running_image="$(aws ecs describe-tasks \
+    --cluster "${_cluster}" --tasks "${_task_arn}" \
+    --region "${AWS_REGION}" \
+    --query "tasks[0].containers[?name=='relay-hub'].image | [0]" --output text 2>/dev/null || echo "")"
+
+  if [ "${_running_image}" = "${RELAY_HUB_IMAGE_URI}" ]; then
+    echo "EXPRESS mode: running task is on expected image — deploy verified." >&2
+    return 0
+  fi
+
+  echo "EXPRESS mode: running image (${_running_image:-<unknown>}) does not match" >&2
+  echo "  expected: ${RELAY_HUB_IMAGE_URI}" >&2
+  echo "  The service stabilized on the prior image. Forcing a fresh ECS deployment..." >&2
+
+  # Use list-task-definitions --status ACTIVE so we always get a live ARN, not
+  # a potentially INACTIVE one from describe-services (ISSUE-14).
+  local _latest_td
+  _latest_td="$(aws ecs list-task-definitions \
+    --family-prefix relay-hub --region "${AWS_REGION}" --status ACTIVE \
+    --query 'taskDefinitionArns[-1]' --output text 2>/dev/null || echo "")"
+
+  if [ -z "${_latest_td}" ] || [ "${_latest_td}" = "None" ]; then
+    echo "WARN: could not resolve latest ACTIVE task definition — skipping force-redeploy." >&2
+    return 0
+  fi
+
+  aws ecs update-service \
+    --cluster "${_cluster}" --service "${_service}" \
+    --task-definition "${_latest_td}" \
+    --force-new-deployment \
+    --region "${AWS_REGION}" >/dev/null
+
+  echo "EXPRESS mode: waiting for ECS service to re-stabilize after force-redeploy..." >&2
+  if ! aws ecs wait services-stable \
+      --cluster "${_cluster}" --services "${_service}" \
+      --region "${AWS_REGION}" 2>/dev/null; then
+    echo "WARN: 'wait services-stable' timed out after force-redeploy — check ECS console." >&2
+    return 0
+  fi
+
+  echo "EXPRESS mode: service stable after force-redeploy — deploy verified." >&2
+}
+
 # 2. Deploy each synthesized template directly via CloudFormation, using the
 #    caller's credentials. No PassRole, no bootstrap execution role.
 echo "Deploy mode: ${_cfn_mode}" >&2
@@ -286,6 +370,11 @@ for _stack in ${RELAY_STACKS}; do
   fi
   if [ "${_cfn_mode}" = "EXPRESS" ]; then
     _deploy_express "${_stack}" "${_template}"
+    # After the compute stack EXPRESS deploy, gate on the ECS service and confirm
+    # the new image is actually running (ISSUE-6).
+    if [ "${_stack}" = "RelayComputeStack" ]; then
+      _express_verify_compute
+    fi
   else
     echo "Deploying ${_stack} via aws cloudformation deploy (no PassRole)..." >&2
     # shellcheck disable=SC2086

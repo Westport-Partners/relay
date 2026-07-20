@@ -416,25 +416,16 @@ A healthy deployment returns:
 > Voice v2 denied) — direct SMS publish path unaffected"}`. This is expected; `ok`
 > stays `true` and routing is unaffected.
 
-> **EXPRESS re-deploys:** If you used `RELAY_CFN_MODE=EXPRESS` on a re-deploy onto
-> a running service, `wait services-stable` gates only on `runningCount ==
-> desiredCount` — it can return while the service is still running the prior image.
-> Before trusting `/health/ready` on an EXPRESS re-deploy, confirm the running task
-> is on the expected image:
-> ```bash
-> TASK_ARN=$(aws ecs list-tasks --cluster relay-hub --service-name relay-hub \
->   --region us-east-1 --query 'taskArns[0]' --output text)
-> aws ecs describe-tasks --cluster relay-hub --tasks "$TASK_ARN" \
->   --region us-east-1 \
->   --query "tasks[0].containers[?name=='relay-hub'].image | [0]" --output text
-> ```
-> Query by container **name**, not index. In accounts with AWS GuardDuty Runtime
-> Monitoring enabled, ECS injects a GuardDuty agent sidecar that can appear as
-> `containers[0]`, shadowing the real `relay-hub` container (which has no fixed
-> index once a sidecar is present) — an index-based query silently returns `None`.
-> This does not apply to first-time deploys (no prior task) or STANDARD mode deploys.
-> See the Express Mode section in [`prompts/deploy-byor.md`](https://github.com/Westport-Partners/relay/blob/main/prompts/deploy-byor.md)
-> for the full force-redeploy recovery steps.
+> **EXPRESS re-deploys:** `RELAY_CFN_MODE=EXPRESS` returns as soon as CloudFormation
+> applies resource configuration — ECS is still rolling the new task in the
+> background. `relay-deploy-direct.sh` handles this automatically: after the
+> CloudFormation call returns, it runs `wait services-stable`, checks the running
+> task's image by container name (not index — GuardDuty Runtime Monitoring can inject
+> a sidecar that shifts container indices), and forces a fresh ECS deployment if the
+> service stabilized on the prior image. This only fires on re-deploys onto a running
+> service; first-time creates and STANDARD mode are unaffected. See
+> [`prompts/deploy-byor.md`](https://github.com/Westport-Partners/relay/blob/main/prompts/deploy-byor.md)
+> for the full Express Mode details.
 
 If `status` is `"degraded"`, the failing check's `error` field names the AWS
 error code.  Common BYOR failures:
