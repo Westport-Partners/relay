@@ -346,37 +346,21 @@ RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
   script fails fast with a clear message on older CLIs, and `relay-preflight.sh`
   flags it as the `aws-cli-express` WARN. To upgrade, follow
   [`prompts/upgrade-aws-cli.md`](upgrade-aws-cli.md).
-- **"Success" ≠ "serving traffic."** The command returns before the ECS service is
-  healthy. If you need to gate on readiness, poll:
-  `aws ecs wait services-stable --cluster relay-hub --services relay-hub`.
-- **`wait services-stable` does not confirm the new image is live.** It gates only on
-  `runningCount == desiredCount`, so if a healthy task on the *prior* image is already
-  running, the wait can return while the replacement is still rolling — and a
-  subsequent `/health/ready` may report the old image's state. Before trusting the
-  health check on an EXPRESS deploy, confirm the running task is on the expected image:
-  ```bash
-  TASK_ARN=$(aws ecs list-tasks --cluster relay-hub --service-name relay-hub \
-    --region us-east-1 --query 'taskArns[0]' --output text)
-  aws ecs describe-tasks --cluster relay-hub --tasks "$TASK_ARN" \
-    --region us-east-1 \
-    --query "tasks[0].containers[?name=='relay-hub'].image | [0]" --output text
-  ```
-  Query by container **name**, not index — in accounts with AWS GuardDuty Runtime
-  Monitoring enabled, ECS can inject an agent sidecar that appears as
-  `containers[0]`, shadowing the real `relay-hub` container and causing an
-  index-based query to silently return `None`.
-  If it doesn't match, force a fresh roll of the latest task definition and wait again:
-  ```bash
-  LATEST=$(aws ecs list-task-definitions \
-    --family-prefix relay-hub --region us-east-1 --status ACTIVE \
-    --query 'taskDefinitionArns[-1]' --output text)
-  aws ecs update-service --cluster relay-hub --service relay-hub \
-    --task-definition "$LATEST" --force-new-deployment --region us-east-1
-  aws ecs wait services-stable --cluster relay-hub --services relay-hub --region us-east-1
-  ```
-  This only bites on a **re-deploy** onto a service with a running healthy task — a
-  first-time stack *create* has no prior task to keep serving, so there's nothing to
-  confirm. STANDARD mode isn't affected either — it waits for the full service roll.
+- **Script waits and self-corrects.** After the CloudFormation call returns,
+  `relay-deploy-direct.sh` automatically:
+  1. Runs `aws ecs wait services-stable` to gate on the ECS service.
+  2. Checks that the running task is on the expected image (by container **name**,
+     not index — GuardDuty Runtime Monitoring injects a sidecar that would shadow
+     an index-based query).
+  3. If the running image still matches the prior deployment (the service stabilized
+     on the old task), forces a fresh ECS deployment with the latest ACTIVE task
+     definition and waits again.
+
+  This covers the case that bites re-deploys onto a running service: ECS keeps the
+  old healthy task serving while the replacement starts, so `wait services-stable`
+  can return before the new image is live. STANDARD mode isn't affected — it waits
+  for the full service roll. The self-correction step only fires if
+  `RELAY_HUB_IMAGE_URI` is set (which it is on the documented deploy path above).
 - **Same-tag rebuilds still don't roll** (see the note above) — that's a task-def
   identity thing, independent of the deploy mode.
 - Rollback stays enabled (`DisableRollback:false`), so a failed EXPRESS update rolls
