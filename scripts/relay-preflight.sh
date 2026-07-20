@@ -315,6 +315,29 @@ else
   _progress "  python3: NOT FOUND"
 fi
 
+# ---- .venv Python version (if .venv already exists) ----
+# An existing .venv created with the system python3 (e.g. Python 3.9 on AL2023)
+# activates without error but silently uses the wrong interpreter — the failure
+# only surfaces at CDK synth time. Catch it here with a clear message.
+_venv_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.venv"
+if [ -f "${_venv_dir}/bin/python" ]; then
+  _venv_py_raw="$("${_venv_dir}/bin/python" --version 2>/dev/null)" || _venv_py_raw=""
+  _venv_py_ver="${_venv_py_raw#Python }"
+  if [ -z "${_venv_py_ver}" ]; then
+    _record WARN "venv-python-version" ".venv/bin/python found but --version failed" \
+      "Recreate the venv: rm -rf .venv && ${_py_found_bin:-python3.12} -m venv .venv && source .venv/bin/activate && pip install -e '.[infra]'"
+    _progress "  .venv: could not read Python version — WARN"
+  elif _ver_ge "${_venv_py_ver}" 3 12; then
+    _record PASS "venv-python-version" ".venv uses Python ${_venv_py_ver}"
+    _progress "  .venv: Python ${_venv_py_ver}"
+  else
+    _record WARN "venv-python-version" \
+      ".venv uses Python ${_venv_py_ver} (< 3.12) — recreate with ${_py_found_bin:-python3.12}" \
+      "Delete and recreate: rm -rf .venv && ${_py_found_bin:-python3.12} -m venv .venv && source .venv/bin/activate && pip install -e '.[infra]'"
+    _progress "  .venv: Python ${_venv_py_ver} — too old, WARN"
+  fi
+fi
+
 # ===========================================================================
 # CHECK 2 — AWS identity
 # ===========================================================================

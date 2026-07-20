@@ -367,8 +367,9 @@ RELAY_HUB_IMAGE_URI=$RELAY_HUB_IMAGE_URI \
   index-based query to silently return `None`.
   If it doesn't match, force a fresh roll of the latest task definition and wait again:
   ```bash
-  LATEST=$(aws ecs describe-services --cluster relay-hub --services relay-hub \
-    --region us-east-1 --query 'services[0].deployments[0].taskDefinition' --output text)
+  LATEST=$(aws ecs list-task-definitions \
+    --family-prefix relay-hub --region us-east-1 --status ACTIVE \
+    --query 'taskDefinitionArns[-1]' --output text)
   aws ecs update-service --cluster relay-hub --service relay-hub \
     --task-definition "$LATEST" --force-new-deployment --region us-east-1
   aws ecs wait services-stable --cluster relay-hub --services relay-hub --region us-east-1
