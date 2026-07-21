@@ -107,11 +107,39 @@ export function ignoreRuleFormHtml(rule) {
 
 // Wire up a rendered ignoreRuleFormHtml form inside container el.
 // submitFn: async (body) => Response
-// onSuccess: () => void
+// onSuccess: (data) => void — called with the parsed response body on success
 export function wireIgnoreRuleForm(el, existingRule, submitFn, onSuccess) {
   let formPreset = existingRule
     ? (existingRule.alarm_name_prefix ? 'prefix' : (existingRule.alarm_name ? 'exact' : 'app'))
     : 'exact';
+  let lastAutoNote = '';
+
+  function generateNote() {
+    const appVal   = (el.querySelector('.ir-app')  || {}).value || '';
+    const alarmV   = (el.querySelector('.ir-alarm') || {}).value || '';
+    const envVal   = (el.querySelector('.ir-env')  || {}).value || '';
+    const envClause = envVal.trim() ? ' in ' + envVal.trim() : '';
+    if (formPreset === 'exact' && alarmV.trim()) {
+      return 'Ignore alarm ' + alarmV.trim() + envClause;
+    }
+    if (formPreset === 'prefix' && alarmV.trim()) {
+      return "Ignore alarms matching prefix '" + alarmV.trim() + "'" + envClause;
+    }
+    if (formPreset === 'app' && appVal.trim()) {
+      return 'Ignore all alarms from ' + appVal.trim() + envClause;
+    }
+    return 'New ignore rule';
+  }
+
+  function refreshAutoNote() {
+    const noteEl = el.querySelector('.ir-note');
+    if (!noteEl) return;
+    const current = noteEl.value;
+    if (current === '' || current === lastAutoNote) {
+      lastAutoNote = generateNote();
+      noteEl.value = lastAutoNote;
+    }
+  }
 
   function updatePresetUi() {
     el.querySelectorAll('[data-irpreset]').forEach(btn => {
@@ -127,11 +155,29 @@ export function wireIgnoreRuleForm(el, existingRule, submitFn, onSuccess) {
     if (alarmLabel) {
       alarmLabel.textContent = formPreset === 'prefix' ? 'Alarm name prefix' : 'Alarm name';
     }
+    refreshAutoNote();
   }
 
   el.querySelectorAll('[data-irpreset]').forEach(btn => {
     btn.addEventListener('click', () => { formPreset = btn.dataset.irpreset; updatePresetUi(); });
   });
+
+  ['.ir-app', '.ir-alarm', '.ir-env'].forEach(sel => {
+    const input = el.querySelector(sel);
+    if (input) input.addEventListener('input', refreshAutoNote);
+  });
+
+  // Seed the note on first wire if the field is blank (new rule only).
+  const noteEl = el.querySelector('.ir-note');
+  if (noteEl) {
+    noteEl.placeholder = 'e.g. Ignore alarm CpuHigh in prod';
+    if (!existingRule && noteEl.value === '') {
+      lastAutoNote = generateNote();
+      noteEl.value = lastAutoNote;
+    } else {
+      lastAutoNote = noteEl.value;
+    }
+  }
 
   const cancelBtn = el.querySelector('.ir-cancel');
   if (cancelBtn) cancelBtn.addEventListener('click', onSuccess);
@@ -158,16 +204,24 @@ export function wireIgnoreRuleForm(el, existingRule, submitFn, onSuccess) {
       try {
         const r = await submitFn(body);
         if (r.ok) {
-          onSuccess();
+          const data = await r.json().catch(() => ({}));
+          const n = data.matched_incident_count || 0;
+          if (n > 0 && errEl) {
+            errEl.style.color = 'var(--green)';
+            errEl.textContent = 'Rule created — resolved ' + n + ' existing incident' + (n === 1 ? '' : 's');
+            setTimeout(() => onSuccess(data), 2000);
+          } else {
+            onSuccess(data);
+          }
         } else {
           const rb = await r.json().catch(() => ({}));
           const msgs = { 403: 'Not authorised.', 404: 'Rule not found.', 422: rb.detail || 'Invalid rule — include at least one matcher field.' };
-          if (errEl) errEl.textContent = msgs[r.status] || ('Error ' + r.status);
+          if (errEl) { errEl.style.color = ''; errEl.textContent = msgs[r.status] || ('Error ' + r.status); }
           submitBtn.disabled = false;
           submitBtn.textContent = existingRule ? 'Save changes' : 'Create rule';
         }
       } catch (_) {
-        if (errEl) errEl.textContent = 'Network error — please retry.';
+        if (errEl) { errEl.style.color = ''; errEl.textContent = 'Network error — please retry.'; }
         submitBtn.disabled = false;
         submitBtn.textContent = existingRule ? 'Save changes' : 'Create rule';
       }
