@@ -3388,7 +3388,58 @@ class HubApp:
             logger.info(
                 "Ignore rule %s created by %s via UI", rule_id, ident.subject
             )
-            return {"ok": True, "rule_id": rule_id}
+
+            # Backfill: resolve any open incidents that match the new rule.
+            matched_count = 0
+            if incident_store is not None:
+                try:
+                    open_incidents = incident_store.list_open_incidents()
+                except Exception:
+                    logger.warning(
+                        "list_open_incidents failed during ignore-rule backfill",
+                        exc_info=True,
+                    )
+                    open_incidents = []
+                processor = getattr(self, "_processor", None)
+                for inc in open_incidents:
+                    if not rule.matches(inc):
+                        continue
+                    inc.state = IncidentState.RESOLVED
+                    inc.updated_at = now
+                    inc.timeline.append(
+                        TimelineEvent(
+                            event_id=f"ign-{int(now.timestamp())}-{matched_count}",
+                            incident_id=inc.correlation_id,
+                            stream=Stream.CENTRAL,
+                            occurred_at=now,
+                            actor=ident.subject,
+                            event_type="ignored",
+                            detail={"via": "hub-ui", "ignore_rule_id": rule_id},
+                        )
+                    )
+                    incident_store.put_incident(inc)
+                    if processor is not None:
+                        try:
+                            processor.dispatch_event(
+                                IncidentLifecycleEvent.RESOLVED, inc
+                            )
+                        except Exception:
+                            logger.warning(
+                                "RESOLVED dispatch failed for backfill incident %s",
+                                _scrub(inc.correlation_id),
+                                exc_info=True,
+                            )
+                    ignore_rule_store.record_trigger(rule_id)
+                    _recompute_incident_tile(inc)
+                    matched_count += 1
+                if matched_count:
+                    logger.info(
+                        "Ignore rule %s backfilled %d open incident(s)",
+                        _scrub(rule_id),
+                        matched_count,
+                    )
+
+            return {"ok": True, "rule_id": rule_id, "matched_incident_count": matched_count}
 
         @app.put("/ignore-rules/{rule_id}")
         def update_rule(

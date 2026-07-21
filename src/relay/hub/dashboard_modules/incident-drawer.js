@@ -319,11 +319,25 @@ export function renderIncident(inc, flow = null) {
       return aMatch && eMatch && alarmMatch;
     }
 
+    function ignNoteGenerate(preset) {
+      const appVal  = (document.getElementById('ign-app')   || {}).value || inc.app_name  || '';
+      const alarmV  = (document.getElementById('ign-alarm') || {}).value || inc.alarm_name || '';
+      const envVal  = (document.getElementById('ign-env')   || {}).value || inc.environment || '';
+      const envClause = envVal.trim() ? ' in ' + envVal.trim() : '';
+      if (preset === 'exact' && alarmV.trim()) return 'Ignore alarm ' + alarmV.trim() + envClause;
+      if (preset === 'prefix' && alarmV.trim()) return "Ignore alarms matching prefix '" + alarmV.trim() + "'" + envClause;
+      if (preset === 'app' && appVal.trim()) return 'Ignore all alarms from ' + appVal.trim() + envClause;
+      return 'New ignore rule';
+    }
+    let lastIgnAutoNote = '';
+
     function renderIgnoreForm() {
       const alarmLabel = ignPreset === 'prefix' ? 'Alarm name prefix' : 'Alarm name';
       const alarmPlaceholder = ignPreset === 'prefix' ? (inc.alarm_name || '') : (inc.alarm_name || '');
       const alarmValue = ignPreset === 'app' ? '' : (inc.alarm_name || '');
       const alarmDisabled = ignPreset === 'app';
+      const autoNote = ignNoteGenerate(ignPreset);
+      lastIgnAutoNote = autoNote;
 
       panel.innerHTML = `
         ${actionToggleHtml()}
@@ -355,8 +369,8 @@ export function renderIncident(inc, flow = null) {
         </div>
         <label style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.06em;display:flex;flex-direction:column;gap:4px;margin-bottom:10px;">
           Reason / note (required)
-          <textarea id="ign-note" rows="2" placeholder="e.g. known flapping alarm — suppressed permanently"
-            style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius);color:var(--text);padding:6px 10px;font-size:12px;font-family:var(--mono);resize:vertical;"></textarea>
+          <textarea id="ign-note" rows="2" placeholder="e.g. Ignore alarm CpuHigh in prod"
+            style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius);color:var(--text);padding:6px 10px;font-size:12px;font-family:var(--mono);resize:vertical;">${esc(autoNote)}</textarea>
         </label>
         <div id="ign-preview" style="font-size:11px;margin-bottom:10px;font-family:var(--mono);"></div>
         <div class="settings-row">
@@ -367,10 +381,24 @@ export function renderIncident(inc, flow = null) {
 
       wireActionToggle();
 
-      // Preset buttons
+      // Preset buttons — re-render on scope change.
       ['exact','prefix','app'].forEach(p => {
         const el = document.getElementById('ign-preset-' + p);
         if (el) el.addEventListener('click', () => { ignPreset = p; renderIgnoreForm(); });
+      });
+
+      // Auto-note: regenerate when fields change, only if user hasn't edited it.
+      function refreshIgnAutoNote() {
+        const noteEl = document.getElementById('ign-note');
+        if (!noteEl) return;
+        if (noteEl.value === '' || noteEl.value === lastIgnAutoNote) {
+          lastIgnAutoNote = ignNoteGenerate(ignPreset);
+          noteEl.value = lastIgnAutoNote;
+        }
+      }
+      ['ign-app','ign-alarm','ign-env'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', refreshIgnAutoNote);
       });
 
       // Live preview
