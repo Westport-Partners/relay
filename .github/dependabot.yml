@@ -14,3 +14,10 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    groups:
+      # codeql-action requires init/autobuild/analyze to be pinned to the same
+      # version. Bumping them in separate PRs makes each one fail CodeQL with
+      # "Loaded a configuration file for version X, but running version Y".
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
