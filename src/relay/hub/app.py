@@ -49,7 +49,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import boto3
 import yaml
@@ -86,7 +86,17 @@ from relay.hub.health import (
     worst_of,
 )
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from relay.config.schema import IgnoreRule
+
 logger = logging.getLogger(__name__)
+
+# An incident is "open" until it reaches one of these states. Single definition
+# so the history view, the ignore-rule sweep, and the match preview can never
+# disagree about what counts as still-live.
+_TERMINAL_INCIDENT_STATES: frozenset[IncidentState] = frozenset(
+    {IncidentState.RESOLVED, IncidentState.CLOSED}
+)
 
 
 def _scrub(value: object) -> str:
@@ -2257,8 +2267,9 @@ class HubApp:
             except Exception:
                 logger.warning("list_incidents failed", exc_info=True)
                 return []
-            terminal = {IncidentState.RESOLVED, IncidentState.CLOSED}
-            incidents = [i for i in incidents if i.state in terminal]
+            incidents = [
+                i for i in incidents if i.state in _TERMINAL_INCIDENT_STATES
+            ]
             incidents.sort(key=lambda i: i.created_at, reverse=True)
             # Same four additive fields as /incidents so the client KPI recompute
             # sees a uniform shape across open + terminal incidents.
@@ -3231,6 +3242,75 @@ class HubApp:
         # Ignore rules — CRUD + ignore action + deviation + download
         # Canonical paths: /ignore-rules  (old /rules paths are deprecated aliases)
         # ----------------------------------------------------------------
+        def _backfill_ignore_rule(
+            rule: IgnoreRule,
+            rule_id: str,
+            *,
+            actor: str,
+            now: datetime,
+            skip_correlation_id: str | None = None,
+        ) -> int:
+            """Resolve every open incident that *rule* matches; return the count.
+
+            Shared by ``POST /ignore-rules`` and ``POST /incidents/{id}/ignore``
+            so a rule created from the incident drawer sweeps its siblings
+            exactly like a rule created from the Rules screen. Pass
+            *skip_correlation_id* for an incident the caller already resolved so
+            it isn't processed (or timeline-stamped) twice.
+            """
+            if incident_store is None or ignore_rule_store is None:
+                return 0
+            try:
+                open_incidents = incident_store.list_open_incidents()
+            except Exception:
+                logger.warning(
+                    "list_open_incidents failed during ignore-rule backfill",
+                    exc_info=True,
+                )
+                open_incidents = []
+            processor = getattr(self, "_processor", None)
+            matched = 0
+            for inc in open_incidents:
+                if skip_correlation_id is not None and (
+                    inc.correlation_id == skip_correlation_id
+                ):
+                    continue
+                if not rule.matches(inc):
+                    continue
+                inc.state = IncidentState.RESOLVED
+                inc.updated_at = now
+                inc.timeline.append(
+                    TimelineEvent(
+                        event_id=f"ign-{int(now.timestamp())}-{matched}",
+                        incident_id=inc.correlation_id,
+                        stream=Stream.CENTRAL,
+                        occurred_at=now,
+                        actor=actor,
+                        event_type="ignored",
+                        detail={"via": "hub-ui", "ignore_rule_id": rule_id},
+                    )
+                )
+                incident_store.put_incident(inc)
+                if processor is not None:
+                    try:
+                        processor.dispatch_event(IncidentLifecycleEvent.RESOLVED, inc)
+                    except Exception:
+                        logger.warning(
+                            "RESOLVED dispatch failed for backfill incident %s",
+                            _scrub(inc.correlation_id),
+                            exc_info=True,
+                        )
+                ignore_rule_store.record_trigger(rule_id)
+                _recompute_incident_tile(inc)
+                matched += 1
+            if matched:
+                logger.info(
+                    "Ignore rule %s backfilled %d open incident(s)",
+                    _scrub(rule_id),
+                    matched,
+                )
+            return matched
+
         @app.get("/ignore-rules")
         def list_rules() -> dict[str, Any]:
             if ignore_rule_store is None:
@@ -3390,56 +3470,108 @@ class HubApp:
             )
 
             # Backfill: resolve any open incidents that match the new rule.
-            matched_count = 0
-            if incident_store is not None:
-                try:
-                    open_incidents = incident_store.list_open_incidents()
-                except Exception:
-                    logger.warning(
-                        "list_open_incidents failed during ignore-rule backfill",
-                        exc_info=True,
-                    )
-                    open_incidents = []
-                processor = getattr(self, "_processor", None)
-                for inc in open_incidents:
-                    if not rule.matches(inc):
-                        continue
-                    inc.state = IncidentState.RESOLVED
-                    inc.updated_at = now
-                    inc.timeline.append(
-                        TimelineEvent(
-                            event_id=f"ign-{int(now.timestamp())}-{matched_count}",
-                            incident_id=inc.correlation_id,
-                            stream=Stream.CENTRAL,
-                            occurred_at=now,
-                            actor=ident.subject,
-                            event_type="ignored",
-                            detail={"via": "hub-ui", "ignore_rule_id": rule_id},
-                        )
-                    )
-                    incident_store.put_incident(inc)
-                    if processor is not None:
-                        try:
-                            processor.dispatch_event(
-                                IncidentLifecycleEvent.RESOLVED, inc
-                            )
-                        except Exception:
-                            logger.warning(
-                                "RESOLVED dispatch failed for backfill incident %s",
-                                _scrub(inc.correlation_id),
-                                exc_info=True,
-                            )
-                    ignore_rule_store.record_trigger(rule_id)
-                    _recompute_incident_tile(inc)
-                    matched_count += 1
-                if matched_count:
-                    logger.info(
-                        "Ignore rule %s backfilled %d open incident(s)",
-                        _scrub(rule_id),
-                        matched_count,
-                    )
+            matched_count = _backfill_ignore_rule(
+                rule, rule_id, actor=ident.subject, now=now
+            )
 
             return {"ok": True, "rule_id": rule_id, "matched_incident_count": matched_count}
+
+        @app.post("/ignore-rules/preview")
+        def preview_rule(payload: dict[str, Any]) -> dict[str, Any]:
+            """Count the incidents a candidate ignore rule would match.
+
+            Read-only and reader-level (no writer auth): it creates nothing and
+            writes nothing, so the drawer can live-update "would ignore N" as
+            the operator types. Counting goes through the real
+            :class:`IgnoreRule.matches`, so the preview and the enforcement path
+            can never drift.
+            """
+            from fastapi import HTTPException
+            from pydantic import ValidationError
+
+            from relay.config.schema import IgnoreRule
+            from relay.core.matching import suggest_alarm_prefix
+
+            _matcher_fields = (
+                "account_id", "app_name", "alarm_name",
+                "alarm_name_prefix", "environment", "tags",
+            )
+            matchers: dict[str, Any] = {
+                f: payload.get(f)
+                for f in _matcher_fields
+                if payload.get(f) not in (None, "", {}, [])
+            }
+            empty: dict[str, Any] = {
+                "open_count": 0,
+                "past_count": 0,
+                "total_count": 0,
+                "suggested_alarm_name_prefix": None,
+                "samples": [],
+                "no_matcher": False,
+            }
+            # No matcher is the *initial* state of the form, not an error — the
+            # UI shows a neutral "add a matcher" hint rather than a red banner.
+            if not matchers:
+                return {**empty, "no_matcher": True}
+            try:
+                rule = IgnoreRule(**matchers)
+            except ValidationError as exc:
+                raise HTTPException(status_code=422, detail=str(exc))
+
+            if incident_store is None:
+                return empty
+            try:
+                # ALL incidents (open + terminal): the operator wants "how many
+                # now" *and* "how many would this have swallowed historically".
+                incidents = incident_store.list_incidents()
+            except Exception:
+                logger.warning(
+                    "list_incidents failed in /ignore-rules/preview", exc_info=True
+                )
+                return empty
+
+            matched = [i for i in incidents if rule.matches(i)]
+            open_matches = [
+                i for i in matched if i.state not in _TERMINAL_INCIDENT_STATES
+            ]
+            past_matches = [i for i in matched if i.state in _TERMINAL_INCIDENT_STATES]
+
+            # Open first, then most recent — the operator cares most about what
+            # is live right now.
+            def _sample_key(inc: Incident) -> tuple[int, float]:
+                is_open = inc.state not in _TERMINAL_INCIDENT_STATES
+                created = inc.created_at.timestamp() if inc.created_at else 0.0
+                return (0 if is_open else 1, -created)
+
+            samples = [
+                {
+                    "correlation_id": i.correlation_id,
+                    "alarm_name": i.alarm_name,
+                    "app_name": i.app_name,
+                    "environment": i.environment,
+                    "state": i.state,
+                    "created_at": i.created_at.isoformat() if i.created_at else None,
+                }
+                for i in sorted(matched, key=_sample_key)[:10]
+            ]
+
+            target = payload.get("target_alarm_name") or rule.alarm_name
+            suggested = (
+                suggest_alarm_prefix(
+                    str(target), {i.alarm_name for i in incidents if i.alarm_name}
+                )
+                if target
+                else None
+            )
+
+            return {
+                "open_count": len(open_matches),
+                "past_count": len(past_matches),
+                "total_count": len(matched),
+                "suggested_alarm_name_prefix": suggested,
+                "samples": samples,
+                "no_matcher": False,
+            }
 
         @app.put("/ignore-rules/{rule_id}")
         def update_rule(
@@ -3629,7 +3761,25 @@ class HubApp:
                 _scrub(rule_id),
             )
             _recompute_incident_tile(incident)
-            return {"ok": True, "rule_id": rule_id, "state": incident.state}
+
+            # Sweep the siblings. Broadening to a prefix from the drawer means
+            # "ignore this class of alarm", so every other open incident the new
+            # rule matches must resolve too — otherwise the operator has to
+            # dismiss them one at a time. The originating incident is already
+            # resolved above, so skip it and count it separately.
+            swept = _backfill_ignore_rule(
+                rule,
+                rule_id,
+                actor=ident.subject,
+                now=now,
+                skip_correlation_id=correlation_id,
+            )
+            return {
+                "ok": True,
+                "rule_id": rule_id,
+                "state": incident.state,
+                "matched_incident_count": 1 + swept,
+            }
 
         # ----------------------------------------------------------------
         # Routing rules — CRUD + route action + deviation + download

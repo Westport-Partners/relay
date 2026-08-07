@@ -21,7 +21,8 @@ import { CAN_WRITE, escalationPolicies } from './state.js';
 //      — incident-context pre-fill (inc.alarm_name, inc.app_name, inc.environment)
 //      — re-renders panel.innerHTML on every preset-button click (reactive UX)
 //      — "All from app in ENV" preset button text shows live env value
-//      — has live match-preview section (ign-preview)
+//      — has live match-preview section (ign-preview): server match counts via
+//        the shared helpers below, plus a local "matches this incident?" check
 //      — note is required (submit blocked if empty)
 //      — no account_id field
 //      — posts to /incidents/{id}/ignore (not caller-provided submitFn)
@@ -39,6 +40,11 @@ import { CAN_WRITE, escalationPolicies } from './state.js';
 //     from the live incident and shows match preview) — that logic does not
 //     belong in a generic rule builder.
 //
+// Safe shared extraction (done): the live match-count preview — fetchIgnorePreview
+// / ignorePreviewHtml / debounce below. Pure request + string building with no DOM
+// assumptions, so both forms call it without either giving up its own selectors,
+// re-render strategy, or submit target.
+//
 // Safe shared extraction (done in Phase 1):
 //   The field-row CSS pattern (label / input with var(--bg) / var(--mono) etc.)
 //   is identical in markup but is an inline style string, not a helper call.
@@ -49,11 +55,79 @@ import { CAN_WRITE, escalationPolicies } from './state.js';
 // TODO (Phase 2): extract the shared field-row HTML builder and align the
 // two forms on class-based selectors so both can share wireIgnoreRuleForm.
 //
+// --- shared live-preview plumbing (used by BOTH ignore forms) --------------
+//
+// The preview endpoint is the one piece both forms genuinely share: identical
+// request shape, identical rendering, no DOM assumptions. Extracting it here
+// does not re-open the merge argument above — the renderers and wirers stay
+// separate, only the count line is common.
+
+// Trailing-edge debounce. Local to this module because helpers.js (which we do
+// not own) has no debounce and the only callers are the two ignore forms.
+export function debounce(fn, ms = 250) {
+  let timer = null;
+  return function (...args) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => { timer = null; fn.apply(this, args); }, ms);
+  };
+}
+
+// POST /ignore-rules/preview — read-only "what would this rule catch?" probe.
+// Resolves null on ANY failure (non-200, bad JSON, network) so a missing or
+// older Hub simply degrades to "unavailable" instead of breaking the form.
+export async function fetchIgnorePreview(body) {
+  try {
+    const r = await fetch('/ignore-rules/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (_) {
+    return null;
+  }
+}
+
+// Render the live match-count line for an ignore-rule preview.
+//   data === undefined → request in flight
+//   data === null      → preview unavailable (never shown as an error)
+//   data.no_matcher    → rule has no matcher fields yet
+// Open incidents are called out in amber: creating the rule resolves them.
+export function ignorePreviewHtml(data) {
+  const dim = (t) => `<span style="color:var(--text-dim);">${esc(t)}</span>`;
+  if (data === undefined) return dim('Checking…');
+  if (data === null)      return dim('Live match count unavailable.');
+  if (data.no_matcher)    return dim('Add a matcher field to see how many incidents this would affect.');
+  const open  = Number(data.open_count)  || 0;
+  const past  = Number(data.past_count)  || 0;
+  const total = Number(data.total_count) || (open + past);
+  const colour = open > 0 ? 'var(--amber)' : 'var(--text-dim)';
+  const counts = `<span style="color:${colour};">Matches ${esc(String(open))} open`
+    + ` &middot; ${esc(String(past))} past (${esc(String(total))} total)</span>`;
+  const consequence = open > 0
+    ? `<div style="color:var(--amber);margin-top:2px;">Creating this rule will resolve `
+      + `${esc(String(open))} open incident${open === 1 ? '' : 's'}.</div>`
+    : '';
+  const samples = Array.isArray(data.samples) ? data.samples.slice(0, 5) : [];
+  const sampleHtml = samples.length
+    ? `<div style="margin-top:4px;color:var(--text-dim);font-family:var(--mono);font-size:10px;">`
+      + samples.map(s => esc(s.alarm_name || s.correlation_id || '—')).join('<br>')
+      + `</div>`
+    : '';
+  return counts + consequence + sampleHtml;
+}
+
 // Shared form renderer for both New Rule and Edit Rule panels.
 // rule = null → blank form; rule = object → prefill from existing rule.
+// A NEW rule defaults to the 'prefix' scope (the recommended choice — one rule
+// covers a family of alarms); an EXISTING rule still derives its scope from
+// whichever matcher field it was saved with.
 export function ignoreRuleFormHtml(rule) {
   const r = rule || {};
-  const preset = r.alarm_name_prefix ? 'prefix' : (r.alarm_name ? 'exact' : 'app');
+  const preset = rule
+    ? (r.alarm_name_prefix ? 'prefix' : (r.alarm_name ? 'exact' : 'app'))
+    : 'prefix';
   const alarmVal = r.alarm_name_prefix || r.alarm_name || '';
   const alarmLabel = preset === 'prefix' ? 'Alarm name prefix' : 'Alarm name';
   const alarmDisabled = preset === 'app' ? 'disabled style="opacity:0.4;"' : '';
@@ -64,8 +138,8 @@ export function ignoreRuleFormHtml(rule) {
       <div style="margin-bottom:10px;">
         <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Match scope</div>
         <div class="maint-toggle-group">
+          <button class="maint-toggle-btn${preset==='prefix'?' active':''}" data-irpreset="prefix" type="button">Alarm name prefix (recommended)</button>
           <button class="maint-toggle-btn${preset==='exact'?' active':''}" data-irpreset="exact" type="button">This exact alarm</button>
-          <button class="maint-toggle-btn${preset==='prefix'?' active':''}" data-irpreset="prefix" type="button">Alarm name prefix</button>
           <button class="maint-toggle-btn${preset==='app'?' active':''}" data-irpreset="app" type="button">All from app</button>
         </div>
       </div>
@@ -97,6 +171,7 @@ export function ignoreRuleFormHtml(rule) {
         <textarea class="ir-note" rows="2" placeholder="e.g. known flapping alarm — suppressed permanently"
           style="background:var(--bg);border:1px solid var(--border-strong);border-radius:var(--radius);color:var(--text);padding:6px 10px;font-size:12px;font-family:var(--mono);resize:vertical;">${esc(r.note||'')}</textarea>
       </label>
+      <div class="ir-preview" style="font-size:11px;margin-bottom:10px;font-family:var(--mono);"></div>
       <div class="settings-row">
         <button class="btn-primary ir-submit">${esc(rule ? 'Save changes' : 'Create rule')}</button>
         <button class="btn-sm ir-cancel">Cancel</button>
@@ -111,8 +186,11 @@ export function ignoreRuleFormHtml(rule) {
 export function wireIgnoreRuleForm(el, existingRule, submitFn, onSuccess) {
   let formPreset = existingRule
     ? (existingRule.alarm_name_prefix ? 'prefix' : (existingRule.alarm_name ? 'exact' : 'app'))
-    : 'exact';
+    : 'prefix';
   let lastAutoNote = '';
+  // Bumped on every preview request; a late response with a stale token is
+  // dropped so a slow round-trip can't overwrite a newer count.
+  let previewToken = 0;
 
   function generateNote() {
     const appVal   = (el.querySelector('.ir-app')  || {}).value || '';
@@ -130,6 +208,34 @@ export function wireIgnoreRuleForm(el, existingRule, submitFn, onSuccess) {
     }
     return 'New ignore rule';
   }
+
+  // Single source of truth for the matcher fields, so the preview probe and the
+  // real submit can never disagree about what the rule would match.
+  function matcherBody() {
+    const appVal  = (el.querySelector('.ir-app')   || {}).value || '';
+    const alarmV  = (el.querySelector('.ir-alarm') || {}).value || '';
+    const envVal  = (el.querySelector('.ir-env')   || {}).value || '';
+    const acctVal = (el.querySelector('.ir-acct')  || {}).value || '';
+    const body = {};
+    if (appVal.trim())  body.app_name    = appVal.trim();
+    if (envVal.trim())  body.environment = envVal.trim();
+    if (acctVal.trim()) body.account_id  = acctVal.trim();
+    if (formPreset === 'exact'  && alarmV.trim()) body.alarm_name        = alarmV.trim();
+    if (formPreset === 'prefix' && alarmV.trim()) body.alarm_name_prefix = alarmV.trim();
+    return body;
+  }
+
+  // Live "how many incidents would this catch?" line under the note field.
+  async function refreshPreview() {
+    const prevEl = el.querySelector('.ir-preview');
+    if (!prevEl) return;
+    const token = ++previewToken;
+    prevEl.innerHTML = ignorePreviewHtml(undefined);
+    const data = await fetchIgnorePreview(matcherBody());
+    if (token !== previewToken) return;   // a newer edit already superseded this
+    prevEl.innerHTML = ignorePreviewHtml(data);
+  }
+  const refreshPreviewDebounced = debounce(refreshPreview, 250);
 
   function refreshAutoNote() {
     const noteEl = el.querySelector('.ir-note');
@@ -156,6 +262,7 @@ export function wireIgnoreRuleForm(el, existingRule, submitFn, onSuccess) {
       alarmLabel.textContent = formPreset === 'prefix' ? 'Alarm name prefix' : 'Alarm name';
     }
     refreshAutoNote();
+    refreshPreviewDebounced();
   }
 
   el.querySelectorAll('[data-irpreset]').forEach(btn => {
@@ -165,6 +272,13 @@ export function wireIgnoreRuleForm(el, existingRule, submitFn, onSuccess) {
   ['.ir-app', '.ir-alarm', '.ir-env'].forEach(sel => {
     const input = el.querySelector(sel);
     if (input) input.addEventListener('input', refreshAutoNote);
+  });
+
+  // Every matcher field feeds the live count (account_id included — it narrows
+  // the match just as much as the others).
+  ['.ir-app', '.ir-alarm', '.ir-env', '.ir-acct'].forEach(sel => {
+    const input = el.querySelector(sel);
+    if (input) input.addEventListener('input', refreshPreviewDebounced);
   });
 
   // Seed the note on first wire if the field is blank (new rule only).
@@ -179,6 +293,10 @@ export function wireIgnoreRuleForm(el, existingRule, submitFn, onSuccess) {
     }
   }
 
+  // First count on wire — an edit form already has matchers, a new one usually
+  // does not (and gets the "add a matcher field" hint back).
+  refreshPreview();
+
   const cancelBtn = el.querySelector('.ir-cancel');
   if (cancelBtn) cancelBtn.addEventListener('click', onSuccess);
 
@@ -186,19 +304,10 @@ export function wireIgnoreRuleForm(el, existingRule, submitFn, onSuccess) {
   const errEl = el.querySelector('.ir-err');
   if (submitBtn && CAN_WRITE) {
     submitBtn.addEventListener('click', async () => {
-      const appVal  = (el.querySelector('.ir-app')  || {}).value || '';
-      const alarmV  = (el.querySelector('.ir-alarm') || {}).value || '';
-      const envVal  = (el.querySelector('.ir-env')  || {}).value || '';
-      const acctVal = (el.querySelector('.ir-acct') || {}).value || '';
       const noteVal = (el.querySelector('.ir-note') || {}).value || '';
       if (errEl) errEl.textContent = '';
-      const body = {};
-      if (appVal.trim())  body.app_name    = appVal.trim();
-      if (envVal.trim())  body.environment = envVal.trim();
-      if (acctVal.trim()) body.account_id  = acctVal.trim();
-      if (noteVal.trim()) body.note        = noteVal.trim();
-      if (formPreset === 'exact'  && alarmV.trim()) body.alarm_name        = alarmV.trim();
-      if (formPreset === 'prefix' && alarmV.trim()) body.alarm_name_prefix = alarmV.trim();
+      const body = matcherBody();
+      if (noteVal.trim()) body.note = noteVal.trim();
       submitBtn.disabled = true;
       submitBtn.textContent = 'Saving…';
       try {

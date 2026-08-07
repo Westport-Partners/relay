@@ -170,8 +170,17 @@ const JOURNEYS = [
       // "Add rule…" opens one panel with an Ignore/Route toggle.
       await page.locator('#btn-rule-inc').click();
       await page.waitForSelector('#inc-rule-panel', { state: 'visible', timeout: 10_000 });
+      // Default is ignore, scoped to the suggested alarm-name prefix. Both the
+      // prefix suggestion and the live match count are async round-trips to
+      // /ignore-rules/preview, so wait for the count line to actually render —
+      // otherwise the shot catches a half-filled form.
+      await page.waitForFunction(
+        () => /Matches|match count unavailable|Add a matcher/.test(
+          document.getElementById('ign-preview')?.innerText || ''
+        ),
+        { timeout: 10_000 },
+      ).catch(() => {});
       await settle(page);
-      // Default is ignore.
       await shot(page, 'operate', 'S-INCIDENT-IGNORE-FORM');
       await beat(page);
 
