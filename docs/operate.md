@@ -119,13 +119,13 @@ TRIGGERED → ACKNOWLEDGED → (ESCALATED) → RESOLVED → CLOSED
 
 **Ignore** an incident from the detail view (the **Ignore…** button, or `POST /incidents/{correlation_id}/ignore`). Ignoring:
 
-- Creates a persistent ignore rule pre-filled from the incident (precise match by default; you can broaden it to `alarm_name_prefix` or whole-app/env before saving)
-- Auto-resolves the triggering incident with an "ignored" timeline event
+- Creates a persistent ignore rule pre-filled from the incident. The scope defaults to **alarm name prefix**, pre-filled with the server-suggested maximal prefix — the longest separator-aligned prefix of the triggering alarm that still groups it with at least one other alarm Relay has already seen. A live count (`Matches N open · M past`) shows how many incidents the current criteria would affect before you save. You can adjust the scope to an exact alarm name or to whole-app/env before saving.
+- Resolves **every** open incident that matches the new rule — not just the one you were looking at. Each swept incident receives an "ignored" timeline event and dispatches RESOLVED (closing any linked external ticket). The response includes `matched_incident_count` so you can see how many were swept.
 - Causes all future alarms that match the rule to be **dropped at the Node** before they become incidents — no incident row, no page, no ticket, no federation, and no contribution to metrics
 
 <figure class="screenshot" markdown="span">
   ![The Add rule panel on an incident, showing the Ignore form pre-filled from the triggering alarm.](assets/screenshots/operate/S-INCIDENT-IGNORE-FORM.png)
-  <figcaption>The <strong>Ignore</strong> form opens pre-filled from the triggering alarm — a precise match by default, which you can broaden to a prefix or the whole app/environment before saving.</figcaption>
+  <figcaption>The <strong>Ignore</strong> form opens pre-filled from the triggering alarm. The scope defaults to the server-suggested alarm name prefix — the longest separator-aligned prefix that groups the alarm with its siblings — and a live count shows how many open and past incidents match before you save.</figcaption>
 </figure>
 
 **Route** an incident from the detail view (the **Routing…** button, or `POST /incidents/{id}/route`). This opens a form pre-filled from the triggering alarm to create a routing rule on the fly. Unlike Ignore, creating a routing rule **does not** auto-resolve the incident — the current incident continues normally. The new rule only affects **future** alarms that match. You can adjust the priority, match criteria, severity, escalation policy, and streams before saving.
@@ -171,6 +171,8 @@ Rendered in the collapsed-by-default accordion at the top; the header shows the 
 - **Outcome** — `drop`, plus the reason/note stored with the rule
 - **Trigger count** — how many times the rule has dropped a matching alarm since it was created
 - Enabled state, edit, and delete controls for each rule
+
+When creating a new rule from this screen the form shows the same live match count (`Matches N open · M past (N+M total)`) as the incident-drawer Ignore form, backed by the same `POST /ignore-rules/preview` endpoint. Saving the rule resolves every currently open matching incident, exactly as the incident-drawer path does.
 
 <figure class="screenshot" markdown="span">
   ![The Rules screen with the Ignore rules accordion expanded, showing each ignore rule's match criteria, drop outcome with note, and trigger count.](assets/screenshots/operate/S-RULES-IGNORE.png)
@@ -273,6 +275,7 @@ All endpoints are served by the container. The base URL is the same as the dashb
 |--------|------|---------|--------|
 | GET | `/ignore-rules` | List all live ignore rules (with trigger counts) | |
 | POST | `/ignore-rules` | Create an ignore rule | Yes |
+| POST | `/ignore-rules/preview` | Count matching incidents read-only; returns `open_count`, `past_count`, `total_count`, suggested prefix, and up to 10 sample incidents | No |
 | PUT | `/ignore-rules/{rule_id}` | Update an ignore rule | Yes |
 | DELETE | `/ignore-rules/{rule_id}` | Delete an ignore rule | Yes |
 | GET | `/ignore-rules/deviation` | Check whether live rules differ from routing.yaml baseline | |

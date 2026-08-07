@@ -9,6 +9,8 @@ Covers:
 - Seeding: empty store → seeds from config; non-empty → DB wins
 - Writer gating (POST/PUT/DELETE → 403 without auth)
 - Deprecated /rules aliases still work and emit a WARNING log
+- POST /incidents/{id}/ignore sweeps *sibling* incidents the new rule matches
+- POST /ignore-rules/preview counts matches read-only, at reader level
 """
 
 from __future__ import annotations
@@ -46,7 +48,15 @@ class _FakeIncidentStore:
     def __init__(self, incidents: list[Incident]) -> None:
         self._incidents = list(incidents)
 
+    _TERMINAL = {IncidentState.RESOLVED, IncidentState.CLOSED}
+
     def list_open_incidents(self, account_id: str | None = None) -> list[Incident]:
+        open_incs = [i for i in self._incidents if i.state not in self._TERMINAL]
+        if account_id is None:
+            return list(open_incs)
+        return [i for i in open_incs if i.account_id == account_id]
+
+    def list_incidents(self, account_id: str | None = None) -> list[Incident]:
         if account_id is None:
             return list(self._incidents)
         return [i for i in self._incidents if i.account_id == account_id]
@@ -109,17 +119,20 @@ class _FakeIgnoreRuleStore:
 def _incident(
     cid: str = "c-123",
     state: IncidentState = IncidentState.TRIGGERED,
+    alarm_name: str = "prod-checkout-5xx",
+    app_name: str = "checkout-api",
+    created_at: datetime | None = None,
 ) -> Incident:
-    now = datetime.now(UTC)
+    now = created_at or datetime.now(UTC)
     return Incident(
         correlation_id=cid,
         account_id="123456789012",
         region="us-east-1",
-        app_name="checkout-api",
+        app_name=app_name,
         severity=Severity.SEV2,
         signal_source=SignalSource.CLOUDWATCH_ALARM,
         state=state,
-        alarm_name="prod-checkout-5xx",
+        alarm_name=alarm_name,
         environment="prod",
         deployment_id="dep-1",
         created_at=now,
@@ -608,3 +621,229 @@ def test_deprecated_delete_alias_works(monkeypatch, caplog):
     ]
     assert depr_records
     assert c.get("/ignore-rules").json()["rules"] == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: POST /incidents/{id}/ignore sweeps siblings (the reported bug)
+# ---------------------------------------------------------------------------
+
+
+def _prefix_family() -> _FakeIncidentStore:
+    """Three open incidents sharing the MyApp-prod-Cpu- prefix + one unrelated."""
+    return _FakeIncidentStore(
+        [
+            _incident("c-1", alarm_name="MyApp-prod-Cpu-i-aaa"),
+            _incident("c-2", alarm_name="MyApp-prod-Cpu-i-bbb"),
+            _incident("c-3", alarm_name="MyApp-prod-Cpu-i-ccc"),
+            _incident("c-other", alarm_name="OtherApp-prod-Mem-i-zzz"),
+        ]
+    )
+
+
+def test_ignore_incident_with_prefix_sweeps_all_siblings(monkeypatch):
+    """Broadening to a prefix from the drawer must resolve every matching incident."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    monkeypatch.setenv("RELAY_DEV_USER", "ops-user")
+    inc_store = _prefix_family()
+    rule_store = _FakeIgnoreRuleStore()
+    c = _client(incident_store=inc_store, ignore_rule_store=rule_store)
+
+    r = c.post(
+        "/incidents/c-1/ignore", json={"alarm_name_prefix": "MyApp-prod-Cpu-"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["state"] == "RESOLVED"
+    # Originating incident + 2 swept siblings
+    assert body["matched_incident_count"] == 3
+    rule_id = body["rule_id"]
+
+    for cid in ("c-1", "c-2", "c-3"):
+        inc = inc_store.get_incident(cid)
+        assert inc is not None, cid
+        assert inc.state == IncidentState.RESOLVED, cid
+        ignored = [e for e in inc.timeline if e.event_type == "ignored"]
+        assert len(ignored) == 1, f"{cid} should have exactly one 'ignored' event"
+        assert ignored[0].detail["via"] == "hub-ui"
+        assert ignored[0].detail["ignore_rule_id"] == rule_id
+
+
+def test_ignore_incident_sweep_leaves_non_matching_untouched(monkeypatch):
+    """A non-matching open incident must survive the sweep (no over-broad match)."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    inc_store = _prefix_family()
+    c = _client(incident_store=inc_store, ignore_rule_store=_FakeIgnoreRuleStore())
+
+    c.post("/incidents/c-1/ignore", json={"alarm_name_prefix": "MyApp-prod-Cpu-"})
+
+    other = inc_store.get_incident("c-other")
+    assert other is not None
+    assert other.state == IncidentState.TRIGGERED
+    assert [e for e in other.timeline if e.event_type == "ignored"] == []
+
+
+def test_ignore_incident_originating_resolved_exactly_once(monkeypatch):
+    """skip_correlation_id keeps the originating incident from double-stamping."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    inc_store = _FakeIncidentStore([_incident("c-solo")])
+    c = _client(incident_store=inc_store, ignore_rule_store=_FakeIgnoreRuleStore())
+
+    # No prefix → the rule matches the originating incident exactly, so without
+    # the skip it would be processed twice.
+    body = c.post("/incidents/c-solo/ignore", json={}).json()
+    assert body["matched_incident_count"] == 1
+
+    inc = inc_store.get_incident("c-solo")
+    assert inc is not None
+    assert len([e for e in inc.timeline if e.event_type == "ignored"]) == 1
+
+
+def test_create_rule_backfill_resolves_matching_open_incidents(monkeypatch):
+    """POST /ignore-rules backfill still sweeps every match (unchanged behaviour)."""
+    monkeypatch.setenv("RELAY_AUTH_MODE", "dev")
+    inc_store = _prefix_family()
+    c = _client(incident_store=inc_store, ignore_rule_store=_FakeIgnoreRuleStore())
+
+    body = c.post(
+        "/ignore-rules", json={"alarm_name_prefix": "MyApp-prod-Cpu-"}
+    ).json()
+    assert body["ok"] is True
+    assert body["matched_incident_count"] == 3
+    for cid in ("c-1", "c-2", "c-3"):
+        inc = inc_store.get_incident(cid)
+        assert inc is not None and inc.state == IncidentState.RESOLVED
+    other = inc_store.get_incident("c-other")
+    assert other is not None and other.state == IncidentState.TRIGGERED
+
+
+# ---------------------------------------------------------------------------
+# Tests: POST /ignore-rules/preview
+# ---------------------------------------------------------------------------
+
+
+def test_preview_counts_open_and_past():
+    """Counts split open vs terminal, and total is their sum."""
+    inc_store = _FakeIncidentStore(
+        [
+            _incident("o-1", alarm_name="MyApp-prod-Cpu-1"),
+            _incident("o-2", alarm_name="MyApp-prod-Cpu-2"),
+            _incident(
+                "p-1",
+                state=IncidentState.RESOLVED,
+                alarm_name="MyApp-prod-Cpu-3",
+            ),
+            _incident(
+                "p-2",
+                state=IncidentState.CLOSED,
+                alarm_name="MyApp-prod-Cpu-4",
+            ),
+            _incident("x-1", alarm_name="OtherApp-prod-Mem-9"),
+        ]
+    )
+    c = _client(incident_store=inc_store, ignore_rule_store=_FakeIgnoreRuleStore())
+
+    r = c.post(
+        "/ignore-rules/preview", json={"alarm_name_prefix": "MyApp-prod-Cpu-"}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["open_count"] == 2
+    assert body["past_count"] == 2
+    assert body["total_count"] == 4
+    assert body["no_matcher"] is False
+    # Open incidents sort ahead of terminal ones.
+    assert {s["correlation_id"] for s in body["samples"][:2]} == {"o-1", "o-2"}
+    # Sample shape: ISO-8601 created_at, state as a plain string.
+    assert isinstance(body["samples"][0]["created_at"], str)
+    assert body["samples"][0]["state"] == "TRIGGERED"
+    assert body["samples"][0]["app_name"] == "checkout-api"
+    assert body["samples"][0]["environment"] == "prod"
+    assert body["samples"][0]["alarm_name"].startswith("MyApp-prod-Cpu-")
+
+
+def test_preview_suggests_alarm_prefix():
+    """A target alarm with siblings yields the separator-aligned group prefix."""
+    inc_store = _FakeIncidentStore(
+        [
+            _incident("c-1", alarm_name="ABCDE-ABCDE-123131231"),
+            _incident("c-2", alarm_name="ABCDE-ABCDE-982340234e"),
+        ]
+    )
+    c = _client(incident_store=inc_store, ignore_rule_store=_FakeIgnoreRuleStore())
+
+    body = c.post(
+        "/ignore-rules/preview",
+        json={
+            "alarm_name": "ABCDE-ABCDE-123131231",
+            "target_alarm_name": "ABCDE-ABCDE-123131231",
+        },
+    ).json()
+    assert body["suggested_alarm_name_prefix"] == "ABCDE-ABCDE-"
+    # Exact alarm_name matcher → only the one incident matches.
+    assert body["total_count"] == 1
+    assert body["open_count"] == 1
+
+
+def test_preview_no_matcher_returns_zeros():
+    """Empty body is the form's initial state: 200 + zeros + no_matcher flag."""
+    c = _client(ignore_rule_store=_FakeIgnoreRuleStore())
+    r = c.post("/ignore-rules/preview", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["no_matcher"] is True
+    assert body["open_count"] == 0
+    assert body["past_count"] == 0
+    assert body["total_count"] == 0
+    assert body["samples"] == []
+    assert body["suggested_alarm_name_prefix"] is None
+
+
+def test_preview_writes_nothing():
+    """Preview must not create a rule nor mutate any incident."""
+    inc_store = _prefix_family()
+    rule_store = _FakeIgnoreRuleStore()
+    c = _client(incident_store=inc_store, ignore_rule_store=rule_store)
+
+    body = c.post(
+        "/ignore-rules/preview", json={"alarm_name_prefix": "MyApp-prod-Cpu-"}
+    ).json()
+    assert body["open_count"] == 3
+
+    assert rule_store.list_rules() == []
+    assert c.get("/ignore-rules").json()["rules"] == []
+    for inc in inc_store.list_incidents():
+        assert inc.state == IncidentState.TRIGGERED
+        assert inc.timeline == []
+
+
+def test_preview_does_not_require_writer_auth():
+    """The same unauthenticated client that gets 403 on create can preview."""
+    c = _client(ignore_rule_store=_FakeIgnoreRuleStore())
+    assert c.post("/ignore-rules", json={"app_name": "checkout-api"}).status_code == 403
+    r = c.post("/ignore-rules/preview", json={"app_name": "checkout-api"})
+    assert r.status_code == 200
+    assert r.json()["total_count"] == 1
+
+
+def test_preview_samples_capped_at_ten():
+    """15 matches → counts are exact but samples are capped at 10."""
+    base = datetime(2026, 8, 7, tzinfo=UTC)
+    inc_store = _FakeIncidentStore(
+        [
+            _incident(
+                f"c-{n}",
+                alarm_name=f"MyApp-prod-Cpu-{n}",
+                created_at=base,
+            )
+            for n in range(15)
+        ]
+    )
+    c = _client(incident_store=inc_store, ignore_rule_store=_FakeIgnoreRuleStore())
+
+    body = c.post(
+        "/ignore-rules/preview", json={"alarm_name_prefix": "MyApp-prod-Cpu-"}
+    ).json()
+    assert body["total_count"] == 15
+    assert body["open_count"] == 15
+    assert len(body["samples"]) == 10

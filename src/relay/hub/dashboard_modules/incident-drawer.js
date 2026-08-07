@@ -8,7 +8,7 @@ import { CAN_WRITE, activeView, escalationPolicies, setEscalationPolicies } from
 import { renderAll } from './fleet.js';
 import { loadIncidents } from './incidents.js';
 import { loadRules } from './rules.js';
-import { routingRuleFormHtml, wireRoutingRuleForm } from './rule-forms.js';
+import { routingRuleFormHtml, wireRoutingRuleForm, fetchIgnorePreview, ignorePreviewHtml, debounce } from './rule-forms.js';
 
 export const drawer = document.getElementById('drawer');
 export const drawerOverlay = document.getElementById('drawer-overlay');
@@ -275,8 +275,17 @@ export function renderIncident(inc, flow = null) {
     const panel = document.getElementById('inc-rule-panel');
     // Action state: 'ignore' | 'route'
     let ruleAction = 'ignore';
-    // Ignore preset state: 'exact' | 'prefix' | 'app'
-    let ignPreset = 'exact';
+    // Ignore preset state: 'prefix' | 'exact' | 'app'. Prefix is the default:
+    // one rule usually needs to cover a family of alarms, not just this one.
+    let ignPreset = 'prefix';
+    // Server-suggested maximal prefix for this incident's alarm, fetched once
+    // per panel open; null until it arrives (or if the Hub can't suggest one).
+    let ignSuggestedPrefix = null;
+    let ignSuggestionAsked = false;
+    // Bumped by every renderIgnoreForm() AND every preview probe. renderIgnoreForm
+    // replaces panel.innerHTML wholesale, so an in-flight response from a previous
+    // render (or an older keystroke) must not write into a node it no longer owns.
+    let ignPreviewSeq = 0;
 
     function actionToggleHtml() {
       return `
@@ -304,6 +313,9 @@ export function renderIncident(inc, flow = null) {
       }
     }
 
+    // Whether the rule the user is building still catches the incident they are
+    // looking at. Not a count — a correctness signal ("you're about to author a
+    // rule that misses the thing you clicked on").
     function matchPreview(preset, appName, alarmVal, env) {
       // Client-side AND-match replicating server ignore logic:
       // account_id exact + app_name exact + alarm/prefix/none + env exact.
@@ -319,9 +331,12 @@ export function renderIncident(inc, flow = null) {
       return aMatch && eMatch && alarmMatch;
     }
 
-    function ignNoteGenerate(preset) {
+    // alarmOverride lets a re-render generate the note for the value it is ABOUT
+    // to put in the box (the live #ign-alarm still holds the previous render's).
+    function ignNoteGenerate(preset, alarmOverride) {
       const appVal  = (document.getElementById('ign-app')   || {}).value || inc.app_name  || '';
-      const alarmV  = (document.getElementById('ign-alarm') || {}).value || inc.alarm_name || '';
+      const alarmV  = alarmOverride != null ? alarmOverride
+        : ((document.getElementById('ign-alarm') || {}).value || inc.alarm_name || '');
       const envVal  = (document.getElementById('ign-env')   || {}).value || inc.environment || '';
       const envClause = envVal.trim() ? ' in ' + envVal.trim() : '';
       if (preset === 'exact' && alarmV.trim()) return 'Ignore alarm ' + alarmV.trim() + envClause;
@@ -330,13 +345,37 @@ export function renderIncident(inc, flow = null) {
       return 'New ignore rule';
     }
     let lastIgnAutoNote = '';
+    // The alarm value this render put in the box. Lets the async prefix
+    // suggestion tell "still the default" from "the user typed something".
+    let ignAlarmRendered = '';
+
+    // Matcher fields as the API sees them — shared by the preview probe and the
+    // submit handler so the two can never disagree.
+    function ignMatcherBody() {
+      const appVal  = (document.getElementById('ign-app')   || {}).value || '';
+      const alarmV  = (document.getElementById('ign-alarm') || {}).value || '';
+      const envVal  = (document.getElementById('ign-env')   || {}).value || '';
+      const body = {};
+      if (appVal.trim()) body.app_name   = appVal.trim();
+      if (envVal.trim()) body.environment = envVal.trim();
+      if (ignPreset === 'exact'  && alarmV.trim()) body.alarm_name        = alarmV.trim();
+      if (ignPreset === 'prefix' && alarmV.trim()) body.alarm_name_prefix = alarmV.trim();
+      return body;
+    }
 
     function renderIgnoreForm() {
+      // Invalidate any preview response still in flight from the previous render.
+      ignPreviewSeq++;
       const alarmLabel = ignPreset === 'prefix' ? 'Alarm name prefix' : 'Alarm name';
-      const alarmPlaceholder = ignPreset === 'prefix' ? (inc.alarm_name || '') : (inc.alarm_name || '');
-      const alarmValue = ignPreset === 'app' ? '' : (inc.alarm_name || '');
+      const alarmPlaceholder = inc.alarm_name || '';
+      // In prefix mode prefer the Hub's suggested maximal prefix (broadest
+      // prefix that still only catches this alarm family); fall back to the
+      // full alarm name until/unless a suggestion arrives.
+      const alarmValue = ignPreset === 'app' ? ''
+        : (ignPreset === 'prefix' ? (ignSuggestedPrefix || inc.alarm_name || '') : (inc.alarm_name || ''));
+      ignAlarmRendered = alarmValue;
       const alarmDisabled = ignPreset === 'app';
-      const autoNote = ignNoteGenerate(ignPreset);
+      const autoNote = ignNoteGenerate(ignPreset, alarmValue);
       lastIgnAutoNote = autoNote;
 
       panel.innerHTML = `
@@ -344,8 +383,8 @@ export function renderIncident(inc, flow = null) {
         <div style="margin-bottom:10px;">
           <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Match scope</div>
           <div class="maint-toggle-group">
+            <button class="maint-toggle-btn${ignPreset==='prefix'?' active':''}" id="ign-preset-prefix" type="button">Alarm name prefix (recommended)</button>
             <button class="maint-toggle-btn${ignPreset==='exact'?' active':''}" id="ign-preset-exact" type="button">This exact alarm</button>
-            <button class="maint-toggle-btn${ignPreset==='prefix'?' active':''}" id="ign-preset-prefix" type="button">Alarm name prefix</button>
             <button class="maint-toggle-btn${ignPreset==='app'?' active':''}" id="ign-preset-app" type="button">All from app in ${esc(inc.environment||'env')}</button>
           </div>
         </div>
@@ -381,8 +420,8 @@ export function renderIncident(inc, flow = null) {
 
       wireActionToggle();
 
-      // Preset buttons — re-render on scope change.
-      ['exact','prefix','app'].forEach(p => {
+      // Preset buttons — re-render on scope change (which re-runs the preview).
+      ['prefix','exact','app'].forEach(p => {
         const el = document.getElementById('ign-preset-' + p);
         if (el) el.addEventListener('click', () => { ignPreset = p; renderIgnoreForm(); });
       });
@@ -401,25 +440,65 @@ export function renderIncident(inc, flow = null) {
         if (el) el.addEventListener('input', refreshIgnAutoNote);
       });
 
-      // Live preview
-      function updatePreview() {
-        const appVal   = (document.getElementById('ign-app')   || {}).value || '';
-        const alarmV   = (document.getElementById('ign-alarm') || {}).value || '';
-        const envVal   = (document.getElementById('ign-env')   || {}).value || '';
-        const prevEl   = document.getElementById('ign-preview');
-        if (!prevEl) return;
-        const matches = matchPreview(ignPreset, appVal, ignPreset==='app'?'':alarmV, envVal);
-        if (matches) {
-          prevEl.innerHTML = '<span style="color:var(--green);">&#10003; Will match this incident</span>';
-        } else {
-          prevEl.innerHTML = '<span style="color:var(--amber);">&#9888; Does not match this incident &mdash; check your fields</span>';
-        }
+      // "Doesn't match the incident you're looking at" — kept from the old
+      // boolean preview because it catches a real authoring mistake the server
+      // counts alone don't surface.
+      function mismatchHtml() {
+        const appVal = (document.getElementById('ign-app')   || {}).value || '';
+        const alarmV = (document.getElementById('ign-alarm') || {}).value || '';
+        const envVal = (document.getElementById('ign-env')   || {}).value || '';
+        if (matchPreview(ignPreset, appVal, ignPreset === 'app' ? '' : alarmV, envVal)) return '';
+        return '<div style="color:var(--amber);margin-top:2px;">&#9888; Does not match this incident'
+          + ' &mdash; check your fields</div>';
       }
+
+      // Live match counts from the server, plus the local mismatch warning.
+      async function updatePreview() {
+        const prevEl = document.getElementById('ign-preview');
+        if (!prevEl) return;
+        const seq = ++ignPreviewSeq;
+        prevEl.innerHTML = ignorePreviewHtml(undefined) + mismatchHtml();
+        const data = await fetchIgnorePreview(ignMatcherBody());
+        // Stale: either a newer keystroke fired, or the panel was re-rendered
+        // and this element is detached.
+        if (seq !== ignPreviewSeq) return;
+        const liveEl = document.getElementById('ign-preview');
+        if (!liveEl || liveEl !== prevEl) return;
+        liveEl.innerHTML = ignorePreviewHtml(data) + mismatchHtml();
+      }
+      const updatePreviewDebounced = debounce(updatePreview, 250);
       ['ign-app','ign-alarm','ign-env'].forEach(id => {
         const el = document.getElementById(id);
-        if (el) el.addEventListener('input', updatePreview);
+        if (el) el.addEventListener('input', updatePreviewDebounced);
       });
       updatePreview();
+
+      // Ask the Hub for the maximal prefix once per panel open. When it lands,
+      // pre-fill the prefix box with it instead of the full alarm name — but
+      // never over a value the user has already touched.
+      if (ignSuggestedPrefix === null && !ignSuggestionAsked) {
+        ignSuggestionAsked = true;
+        // Incident context only — no alarm matcher, so the suggestion is derived
+        // from the target alarm rather than from whatever is in the box now.
+        const body = { target_alarm_name: inc.alarm_name || '' };
+        if (inc.app_name)    body.app_name    = inc.app_name;
+        if (inc.environment) body.environment = inc.environment;
+        // Needs at least one matcher or the endpoint short-circuits on
+        // no_matcher and never gets as far as computing a suggestion.
+        if (!body.app_name && !body.environment && inc.alarm_name) body.alarm_name = inc.alarm_name;
+        fetchIgnorePreview(body).then(data => {
+          const suggestion = data && data.suggested_alarm_name_prefix;
+          if (!suggestion) return;
+          ignSuggestedPrefix = suggestion;
+          if (ignPreset !== 'prefix') return;
+          const alarmEl = document.getElementById('ign-alarm');
+          if (!alarmEl || alarmEl.value !== ignAlarmRendered) return;   // user typed — leave it
+          alarmEl.value = suggestion;
+          ignAlarmRendered = suggestion;
+          refreshIgnAutoNote();
+          updatePreview();
+        });
+      }
 
       // Cancel
       const cancelBtn = document.getElementById('btn-ign-cancel');
@@ -429,9 +508,6 @@ export function renderIncident(inc, flow = null) {
       const submitBtn = document.getElementById('btn-ign-submit');
       if (submitBtn && CAN_WRITE) {
         submitBtn.addEventListener('click', async () => {
-          const appVal  = (document.getElementById('ign-app')   || {}).value || '';
-          const alarmV  = (document.getElementById('ign-alarm') || {}).value || '';
-          const envVal  = (document.getElementById('ign-env')   || {}).value || '';
           const noteVal = (document.getElementById('ign-note')  || {}).value || '';
           const errEl   = document.getElementById('ign-err');
           if (!noteVal.trim()) {
@@ -440,12 +516,8 @@ export function renderIncident(inc, flow = null) {
           }
           submitBtn.disabled = true;
           submitBtn.textContent = 'Creating…';
-          const body = {};
+          const body = ignMatcherBody();
           if (noteVal.trim()) body.note = noteVal.trim();
-          if (appVal.trim())  body.app_name = appVal.trim();
-          if (envVal.trim())  body.environment = envVal.trim();
-          if (ignPreset === 'exact'  && alarmV.trim()) body.alarm_name = alarmV.trim();
-          if (ignPreset === 'prefix' && alarmV.trim()) body.alarm_name_prefix = alarmV.trim();
           try {
             const r = await fetch('/incidents/' + encodeURIComponent(inc.correlation_id) + '/ignore', {
               method: 'POST',
@@ -453,9 +525,23 @@ export function renderIncident(inc, flow = null) {
               body: JSON.stringify(body),
             });
             if (r.ok) {
-              closeDrawer();
-              if (activeView === 'incidents') loadIncidents();
-              renderAll();
+              const data = await r.json().catch(() => ({}));
+              const n = data.matched_incident_count || 0;
+              const finish = () => {
+                closeDrawer();
+                if (activeView === 'incidents') loadIncidents();
+                renderAll();
+              };
+              // Same confirmation Form A shows: how many incidents this closed.
+              // Brief, then close, so the number isn't lost with the drawer.
+              if (n > 0 && errEl) {
+                errEl.innerHTML = '<div style="color:var(--green);font-size:12px;padding:4px 0;">&#10003; Rule created'
+                  + ' &mdash; resolved ' + esc(String(n)) + ' existing incident' + (n === 1 ? '' : 's') + '.</div>';
+                submitBtn.textContent = 'Created';
+                setTimeout(finish, 2000);
+              } else {
+                finish();
+              }
             } else {
               const rb = await r.json().catch(() => ({}));
               const msgs = { 403: 'Not authorised to create ignore rules.', 404: 'Incident not found.', 422: rb.detail || 'Invalid rule — include at least one matcher field.' };
@@ -520,7 +606,10 @@ export function renderIncident(inc, flow = null) {
       } else {
         panel.style.display = 'block';
         ruleAction = 'ignore';
-        ignPreset = 'exact';
+        ignPreset = 'prefix';
+        // Re-ask for the suggested prefix each time the panel is opened fresh.
+        ignSuggestedPrefix = null;
+        ignSuggestionAsked = false;
         await renderPanel();
       }
     });
